@@ -1,11 +1,11 @@
 ---
 name: source-ingestor
-description: Ingest a video or post from a trusted source (YouTube channel, Instagram) and turn it into a structured, Tier-3 lead artifact — a transcript plus extracted claims with timestamps, the explanatory throughline, and any sources the post itself cites. Use this whenever a new item arrives from a watched source feed, when backfilling a channel's back catalog, or when the user wants to "ingest", "pull in", or "process" a video/post into the pipeline. It is the first stage of the news engine and produces a lead, never a verified finding.
+description: Ingest a video or post from a trusted source (YouTube channel, Instagram) and turn it into a structured, Tier-3 lead artifact — a transcript plus extracted claims with timestamps, the explanatory throughline, and any sources the post itself cites. Use this whenever a new item arrives from a watched source feed, when backfilling a channel's back catalog, or when the user wants to "ingest", "pull in", or "process" a video/post into the pipeline. It is the engine's entry point for a watched feed (the ingestion step of the curated-channels lead source) and produces a lead, never a verified finding.
 ---
 
 # Source Ingestor
 
-This is **stage one** of the news engine. It converts a source post into a structured lead for the rest of the pipeline. It does not verify, judge, or write — it only extracts, faithfully, and tags the result as what it is: one source's claims.
+This is the **ingestion step** for the curated-channels lead source — the engine's entry point for a watched feed. It converts a source post into a structured lead for the rest of the pipeline. It does not verify, judge, or write — it only extracts, faithfully, and tags the result as what it is: one source's claims.
 
 This skill enforces the project's editorial charter (`../../CHARTER.md`). Read it if present; the charter governs in any conflict.
 

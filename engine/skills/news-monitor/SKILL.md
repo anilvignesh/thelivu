@@ -5,13 +5,13 @@ description: Continuously scan a defined set of beats and sources for high-impac
 
 # News Monitor
 
-This skill runs the **first stage** of the news engine: it finds candidate stories worth investigating. It does not verify and does not write publishable copy. Its only job is to surface what's important and under-covered, and hand a ranked queue to the investigator.
+This skill is the **first of the engine's lead sources** (the curated-channels tip line): it finds candidate stories worth investigating. It does not verify and does not write publishable copy. Its only job is to surface what's important and under-covered, and hand a ranked queue to the investigator.
 
 This skill enforces the project's editorial charter (`../../CHARTER.md`). Read it if present; the charter governs in any conflict.
 
 ## The one rule that matters most here
 
-**Under-coverage is a signal of what's worth a look. It is never a signal of what's true.** A story being ignored by the mainstream is a reason to investigate it, never a reason to believe it. Some things are under-covered because they're important and inconvenient; others because they didn't check out. This stage cannot tell the difference — that's the verifier's job later. So pass leads forward as *leads*, never as findings.
+**Under-coverage is a signal of what's worth a look. It is never a signal of what's true.** A story being ignored by the mainstream is a reason to investigate it, never a reason to believe it. Some things are under-covered because they're important and inconvenient; others because they didn't check out. This skill cannot tell the difference — that's the verifier's job later. So pass leads forward as *leads*, never as findings.
 
 ## What to do each cycle
 

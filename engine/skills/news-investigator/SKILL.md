@@ -5,7 +5,7 @@ description: Deep-dive a single news lead into an evidence dossier — gather ev
 
 # News Investigator
 
-This skill runs the **second stage**: take one lead from the monitor and build the full factual picture. The output is an *evidence dossier* — the raw material a post could later be built from — not a finished article and not a verified one. Verification is a separate, adversarial stage that follows.
+This skill runs the **investigation stage**, the first step of the verification spine: take one lead — from any of the engine's lead sources — and build the full factual picture. The output is an *evidence dossier* — the raw material a post could later be built from — not a finished article and not a verified one. Verification is a separate, adversarial stage that follows.
 
 This skill enforces the project's editorial charter (`../../CHARTER.md`). Read it if present; the charter governs in any conflict.
 

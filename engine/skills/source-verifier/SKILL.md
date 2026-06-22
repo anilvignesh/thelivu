@@ -5,7 +5,7 @@ description: Independently verify the claims in an evidence dossier or draft aga
 
 # Source Verifier
 
-This skill runs the **third stage**: the independent, adversarial re-check. It assumes the investigator may have been sloppy, credulous, or motivated, and it re-verifies every claim from scratch. Its job is to be the hardest reader in the room — the one looking for the reason *not* to publish.
+This skill runs the **verification stage**, the independent, adversarial re-check that follows investigation. It assumes the investigator may have been sloppy, credulous, or motivated, and it re-verifies every claim from scratch. Its job is to be the hardest reader in the room — the one looking for the reason *not* to publish.
 
 This skill enforces the project's editorial charter (`../../CHARTER.md`). Read it if present; the charter governs in any conflict.
 

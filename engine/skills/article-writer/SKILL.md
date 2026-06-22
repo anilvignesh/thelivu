@@ -5,7 +5,7 @@ description: Write a publishable draft article in Thelivu's transparent-perspect
 
 # Article Writer (transparent perspective)
 
-This is **stage five**. It turns a `READY-FOR-HUMAN` story into a draft for the human gate. It is the only stage where Thelivu's *voice and stance* apply. It writes; it never publishes, and it never adds a fact.
+This is the **writing stage** — it follows verification (and the optional pattern-check) and precedes editorial review. It turns a `READY-FOR-HUMAN` story into a draft for the human gate. It is the only stage where Thelivu's *voice and stance* apply. It writes; it never publishes, and it never adds a fact.
 
 This skill enforces the project's editorial charter (`../../CHARTER.md`). Read it if present; the charter governs in any conflict.
 

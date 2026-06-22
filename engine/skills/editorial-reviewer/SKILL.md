@@ -5,7 +5,7 @@ description: Apply the editorial charter to a near-final news draft — check ne
 
 # Editorial Reviewer
 
-This skill runs the **fourth and final automated stage**, just before the human. The verifier already confirmed the facts hold; this stage checks whether the *piece as written* is fair, clean, legally safe, and charter-compliant. It catches the failure mode where every fact is true but the framing quietly editorialises.
+This skill runs the **review stage — the final automated stage**, just before the human. The verifier already confirmed the facts hold; this stage checks whether the *piece as written* is fair, clean, legally safe, and charter-compliant. It catches the failure mode where every fact is true but the framing quietly editorialises.
 
 This skill enforces the project's editorial charter (`../../CHARTER.md`). Read it if present; the charter governs in any conflict.
 
