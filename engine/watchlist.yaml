@@ -1,0 +1,59 @@
+# Thelivu — Watchlist (the investigative agenda)
+#
+# The standing list of themes, sectors and powerful actors worth DIGGING into.
+# The story-scout works these one at a time, from primary records, hypothesis-first.
+#
+# The one rule: a theme earns its place by public importance x under-coverage —
+# NEVER by who it lets you target. Guard this list from becoming a list of grudges.
+#
+# status: scoping | records-pending | verifying | ready-to-write | parked | killed
+
+themes:
+
+  - id: infrastructure-concentration
+    question: "Who controls India's ports, airports and grain storage now — and how did they get them?"
+    why_under_told: "Reported piecemeal; the cumulative scale, and the privatisation processes behind it, are under-examined."
+    kerala_anchor: "Vizhinjam International Seaport (Adani), Thiruvananthapuram"
+    primary_records: [APSEZ / Adani Ports filings, AAI airport-privatisation bid documents, FCI grain-storage / silo contracts, relevant CAG and court references]
+    rtis: []
+    status: scoping
+    discipline_note: "Frame as DOCUMENTED concentration + CONTESTED processes — not asserted corruption. Named-entity defamation care applies."
+
+  - id: environmental-degradation
+    question: "Which of India's protected or critical landscapes are being lost, who profits, and who was supposed to stop it?"
+    why_under_told: "Slow-burn conditions, not events; the courts usually act only after the fact."
+    examples: [Aravalli hills illegal mining and the Thar-barrier consequence, Western Ghats, Kerala wetlands / coast / quarrying]
+    kerala_anchor: "Western Ghats, Kerala coastal erosion, wetland loss (e.g. Kottooli), Varkala cliff"
+    primary_records: [Supreme Court / NGT orders, environmental-clearance records, GSI and forest-department data, RTI on mining leases]
+    rtis: []
+    status: scoping
+
+  - id: climate-and-monsoon
+    question: "What does the coming season's ENSO / monsoon forecast actually mean for Kerala's farms, water and fishers?"
+    why_under_told: "Forecasts get reported as national headlines, never translated into local consequence."
+    kerala_anchor: "Kerala monsoon, agriculture, reservoirs, coastal fishing"
+    primary_records: [IMD and NOAA advisories, state agriculture and water-resources data]
+    rtis: []
+    status: verify-first
+    discipline_note: "Forecasts are time-sensitive — verify the CURRENT advisory before writing anything."
+
+  - id: public-money-flows
+    question: "Where does Kerala's borrowed and off-budget money actually go, and who decides?"
+    why_under_told: "KIIFB has been examined; the wider pattern of off-budget vehicles, PSU debt and contracts has not."
+    kerala_anchor: "native"
+    primary_records: [CAG reports, budget and supplementary-demand documents, PSU / KIIFB filings, RTI]
+    rtis: []
+    status: scoping
+
+  - id: regulatory-enforcement
+    question: "Are the bodies meant to police the powerful — pollution boards, building and coastal-zone authorities, clinical-establishment regulators — actually doing it?"
+    why_under_told: "The absence of enforcement is invisible by nature; nothing happening is not a headline."
+    kerala_anchor: "KSPCB, local self-government enforcement, coastal-zone violations"
+    primary_records: [RTI on inspections and penalties, court strictures, audit findings]
+    rtis: []
+    status: scoping
+
+# Declined (kept on record so the reasoning is visible):
+#   - id: musk-circular-financing
+#     reason: "International, saturated by the financial press, no India/Kerala hook. Out of scope.
+#              (The 'SpaceX IPO prospectus' premise also did not verify.)"

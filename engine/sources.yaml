@@ -1,0 +1,103 @@
+# Thelivu — Source Registry
+#
+# The editable control surface for what the engine ingests. Humans edit this by
+# hand; the source-scout skill proposes additions as `status: candidate`; the
+# orchestrator reads `status: active` entries to know what to watch.
+#
+# Two things to keep honest:
+# 1. ROLE. A "lead" source surfaces things to look into (Tier 3 — a creator's
+#    say-so). A "verification" source is what you check leads AGAINST (Tier 1-2:
+#    primary records, established news). Right now EVERY source below is a lead
+#    source. The engine has NO dedicated verification sources yet — that's the
+#    biggest gap, and the scout's first job is to fill it. You cannot verify a
+#    lead using other leads that share its politics; that's an echo chamber, not
+#    verification.
+# 2. INGESTION differs by platform. YouTube has RSS (clean). Instagram does not
+#    and blocks scraping — it needs the Graph API or manual URL submission.
+
+defaults:
+  tier: 3
+  role: lead
+  status: active
+  track_record: { ingested: 0, claims_verified: 0, claims_failed: 0, reliability: unrated }
+
+sources:
+
+  - id: coldfusion
+    name: ColdFusion
+    platform: youtube
+    handle: "@coldfusion"
+    feed: "https://www.youtube.com/feeds/videos.xml?channel_id=UC4QZ_LsYcvcq7qOsOhpAX4A"
+    role: lead
+    tier: 3
+    lean: "neutral explainer (tech / business / science)"
+    status: active
+    added: 2026-06-21
+    notes: "Calm, well-sourced documentary explainers. The most down-the-middle of the set."
+
+  - id: coffeezilla
+    name: Coffeezilla
+    platform: youtube
+    handle: "@coffeezilla"
+    feed: "https://www.youtube.com/feeds/videos.xml?channel_id=UCFQMnBA3CS502aghlcr0_aw"
+    role: lead
+    tier: 3
+    lean: "investigative / accountability (anti-fraud, roughly nonpartisan)"
+    status: active
+    added: 2026-06-21
+    notes: "Rigorous, receipts-driven. Good model for the accountability mode."
+
+  - id: johnnyharris
+    name: Johnny Harris
+    platform: youtube
+    handle: "@johnnyharris"
+    feed: "https://www.youtube.com/feeds/videos.xml?channel_id=UCRMqltDYBpKM-6_HnCwL8Vg"
+    role: lead
+    tier: 3
+    lean: "explainer journalism (geopolitics); mild establishment-progressive tint"
+    status: active
+    added: 2026-06-21
+    notes: "Cinematic and persuasive — watch for the oversimplification risk; verify hard."
+
+  - id: more-perfect-union
+    name: More Perfect Union
+    platform: youtube
+    handle: "@perfectunion"
+    feed: "https://www.youtube.com/feeds/videos.xml?channel_id=UC1RvHvHWzwGScmpyQ0YNl4g"
+    role: lead
+    tier: 3
+    lean: "progressive labor advocacy — OPENLY not neutral (rated Left / Mostly-Factual)"
+    status: active
+    added: 2026-06-21
+    notes: "Use as a LEAD only, never as a verification source — its lean disqualifies it as corroboration."
+
+  - id: fyi-creatorhouse
+    name: FYI by Creator House
+    platform: youtube
+    handle: "@fyi-bycreatorhouse"
+    feed: "https://www.youtube.com/feeds/videos.xml?channel_id=UCPDF2ztiEnkUx2Lv7ud6Khw"
+    role: lead
+    tier: 3
+    lean: "Malayalam explainer, Kerala-focused; agency production (Creator House Media)"
+    status: active
+    added: 2026-06-21
+    notes: "Closest to Thelivu's own beat. Primary local-language lead source."
+
+  - id: the-india-index
+    name: The India Index
+    platform: instagram
+    handle: "@the.india.index"
+    feed: null            # Instagram has no public RSS; needs Graph API or manual URL submission
+    role: lead
+    tier: 3
+    lean: "UNVERIFIED — likely India data/explainer, but ownership, lean and quality not confirmed"
+    status: candidate     # do not ingest until a human vets it
+    added: 2026-06-21
+    notes: "Added on request but not yet verified. Vet before activating: who runs it, original vs aggregated, accuracy record, lean. IG ingestion path TBD."
+
+# Sources the engine still NEEDS (the scout should prioritize these):
+#   - Verification-grade (Tier 1-2): primary-record and established-news sources
+#     for Kerala/India — court & ECI filings, RBI/government data portals, CAG
+#     reports, established dailies across the spectrum.
+#   - Adversarial/cross-spectrum leads: credible sources that would DISAGREE with
+#     the lineup above, so verification isn't consensus inside a bubble.

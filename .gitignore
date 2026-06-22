@@ -1,0 +1,14 @@
+# Build artifacts
+*.zip
+
+# Runtime / secrets — never commit
+.env
+published_log.jsonl
+
+# Python
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+Thumbs.db
