@@ -186,11 +186,31 @@ def ingest_source(source):
 _TG_LIMIT = 4096
 
 
+def _split_chunks(text):
+    """Split text into ≤4096-char chunks at paragraph boundaries."""
+    chunks, current = [], ""
+    for para in text.split("\n\n"):
+        candidate = (current + "\n\n" + para).strip() if current else para
+        if len(candidate) <= _TG_LIMIT:
+            current = candidate
+        else:
+            if current:
+                chunks.append(current)
+            # Para itself may exceed limit — split by line
+            while len(para) > _TG_LIMIT:
+                chunks.append(para[:_TG_LIMIT])
+                para = para[_TG_LIMIT:]
+            current = para
+    if current:
+        chunks.append(current)
+    return chunks or ["(empty)"]
+
+
 def _tg_post(chat_id, text, reply_markup=None):
-    payload = {"chat_id": str(chat_id), "text": text[:_TG_LIMIT]}
+    """Send a single message — caller must ensure len(text) ≤ 4096."""
+    payload = {"chat_id": str(chat_id), "text": text}
     if reply_markup:
         payload["reply_markup"] = json.dumps(reply_markup)
-        payload["parse_mode"] = "Markdown"
     try:
         r = requests.post(
             f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
@@ -204,9 +224,20 @@ def _tg_post(chat_id, text, reply_markup=None):
         return None
 
 
+def _tg_send_long(chat_id, text):
+    """Send arbitrarily long text as multiple messages. Returns first msg_id."""
+    first_id = None
+    for chunk in _split_chunks(text):
+        msg_id = _tg_post(chat_id, chunk)
+        if first_id is None:
+            first_id = msg_id
+        time.sleep(0.3)
+    return first_id
+
+
 def _notify(text):
     """Send a short status notification to Anil's draft chat."""
-    _tg_post(TELEGRAM_DRAFT_CHAT_ID, text)
+    _tg_send_long(TELEGRAM_DRAFT_CHAT_ID, text)
 
 
 def send_for_approval(run_id, draft_text, verification_report, review_text):
@@ -220,10 +251,10 @@ def send_for_approval(run_id, draft_text, verification_report, review_text):
 def _send_via_telegram(run_id, draft_text, verification_report, review_text):
     title = draft_text.lstrip("# ").splitlines()[0][:80]
     summary = (
-        f"📰 *Draft ready — run #{run_id}*\n\n"
-        f"*{title}*\n\n"
+        f"Draft ready — run #{run_id}\n\n"
+        f"{title}\n\n"
         f"Trust gate: READY-FOR-HUMAN\n\n"
-        f"Review highlights:\n{review_text[:400]}"
+        f"Review notes:\n{review_text[:600]}"
     )
     keyboard = {
         "inline_keyboard": [[
@@ -232,22 +263,12 @@ def _send_via_telegram(run_id, draft_text, verification_report, review_text):
             {"text": "⏸ Hold",   "callback_data": f"hold_{run_id}"},
         ]]
     }
-    msg_id = _tg_post(TELEGRAM_DRAFT_CHAT_ID, summary, reply_markup=keyboard)
+    # Summary + buttons first (always short enough for one message)
+    msg_id = _tg_post(TELEGRAM_DRAFT_CHAT_ID, summary[:_TG_LIMIT], reply_markup=keyboard)
     update_run(run_id, tg_msg_id=msg_id)
 
-    chunks, current = [], ""
-    for para in draft_text.split("\n\n"):
-        candidate = (current + "\n\n" + para).strip() if current else para
-        if len(candidate) <= _TG_LIMIT:
-            current = candidate
-        else:
-            if current:
-                chunks.append(current)
-            current = para
-    if current:
-        chunks.append(current)
-    for chunk in chunks:
-        _tg_post(TELEGRAM_DRAFT_CHAT_ID, chunk)
+    # Full draft in follow-up messages (properly chunked, no truncation)
+    _tg_send_long(TELEGRAM_DRAFT_CHAT_ID, draft_text)
 
 
 def _save_to_file(run_id, draft_text, verification_report, review_text):
