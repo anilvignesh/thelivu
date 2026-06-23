@@ -93,15 +93,25 @@ Each skill is a `SKILL.md` file — the file IS the system prompt. No code in th
 
 ## Model routing
 
-| Tier | Provider | Cost/story |
-|------|----------|------------|
-| Research | Gemini 2.5 Flash + Google Search | ~₹72 (~$0.035/search × 24 calls) |
-| Editorial | Claude Sonnet 4.6 | ~₹35 |
-| Reasoning | DeepSeek R1 | ~₹4 |
-| Utility | Groq / Llama 3.3 70B | ₹0 (free tier) |
-| **Total** | | **~₹111/story** |
+Each skill is assigned to the cheapest model that can do the job well. The routing lives in `engine/agents/skill_runner.py`.
 
-Every tier falls back to Claude if unconfigured or if the provider fails.
+| Tier | Provider | Model | Skills | Cost/story |
+|------|----------|-------|--------|------------|
+| 1 — Research | Gemini 2.5 Flash | `gemini-2.5-flash` | beat-monitor, news-investigator, source-verifier, source-scout, story-scout, story-tracker | ~₹72 |
+| 2 — Reasoning | DeepSeek R1 | `deepseek-reasoner` | pattern-synthesizer, meta-synthesizer | ~₹4 |
+| 3 — Utility | Groq / Llama 3.3 70B | `llama-3.3-70b-versatile` | news-monitor, publisher, source-ingestor, finance-manager | ₹0 (free) |
+| 4 — Editorial | Claude Sonnet 4.6 | `claude-sonnet-4-6` | topic-intake, article-writer, editorial-reviewer | ~₹35 |
+| **Total** | | | | **~₹111/story** |
+
+**Fallback chain:** Every tier falls back to Claude if the provider is unconfigured, hits a quota, or returns an error. The pipeline never stops mid-story due to a provider failure.
+
+**Why this split:**
+- Gemini gets research skills because Google Search grounding is built in — the model can search the web natively, no separate tool call needed
+- DeepSeek R1 gets reasoning skills because it's a chain-of-thought model trained for deep analysis, at 1/6th Claude's price
+- Groq gets utility skills (formatting, extraction, classification) because Llama 3.3 70B handles structured prompts reliably and the free tier covers Thelivu's current volume
+- Claude keeps editorial judgment because nuance, tone, and complex instruction-following is where it still leads
+
+**Quota alerts:** When any provider hits its limit or needs action, you get a Telegram message immediately — 🟡 for temporary limits with active fallback, 🔴 for billing issues that need money. One notification per issue per day, no spam.
 
 ---
 
