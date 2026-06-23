@@ -178,6 +178,35 @@ def ingest_source(source):
 
 
 # ---------------------------------------------------------------------------
+# Lead pre-filter — drop entertainment/gossip before they reach the model
+# ---------------------------------------------------------------------------
+
+_EXCLUDE_KEYWORDS = [
+    # Cinema / entertainment
+    "film", "movie", "cinema", "actor", "actress", "director", "ott", "streaming",
+    "box office", "trailer", "release", "collection", "award", "oscar", "filmfare",
+    "iifa", "bollywood", "kollywood", "mollywood", "tollywood", "web series",
+    "series review", "movie review", "film review",
+    # Named directors / actors (expand as needed)
+    "priyadarshan", "mohanlal", "mammootty", "fahadh", "dulquer",
+    "vijay", "rajinikanth", "aamir khan", "shah rukh", "deepika", "priyanka",
+    # Celebrity / gossip
+    "celebrity", "gossip", "dating", "breakup", "wedding", "divorce", "baby",
+    "pregnancy", "baby shower", "couple", "love life", "affair",
+    # Sports scores / match news
+    "match report", "scorecard", "wickets", "innings", "fixtures", "standings",
+    "transfer window", "ipl", "fifa", "champions league", "premier league",
+    # Lifestyle / PR
+    "recipe", "fashion week", "skincare", "makeup", "horoscope", "astrology",
+    "zodiac", "product launch", "brand ambassador", "collaboration",
+]
+
+def _is_entertainment(title: str) -> bool:
+    t = title.lower()
+    return any(kw in t for kw in _EXCLUDE_KEYWORDS)
+
+
+# ---------------------------------------------------------------------------
 # Telegram helpers
 # ---------------------------------------------------------------------------
 
@@ -540,6 +569,13 @@ def run_daily_cycle():
         log.info("Beat monitor added %d lead(s) to the pool.", sum(1 for l in all_leads if l.get("source") == "beat-monitor"))
     except Exception as e:
         log.warning("Beat monitor failed: %s", e)
+
+    # Pre-filter: drop entertainment / celebrity / gossip before touching the model
+    before = len(all_leads)
+    all_leads = [l for l in all_leads if not _is_entertainment(l.get("title", "") + " " + l.get("throughline", ""))]
+    dropped = before - len(all_leads)
+    if dropped:
+        log.info("Pre-filter dropped %d entertainment/gossip lead(s).", dropped)
 
     if not all_leads:
         _notify("Thelivu daily cycle: no new leads today. Nothing to investigate.")

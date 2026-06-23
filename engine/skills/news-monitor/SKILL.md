@@ -22,7 +22,15 @@ This skill enforces the project's editorial charter (`../../CHARTER.md`). Read i
 3. **Score each lead on impact × under-coverage** (impact first):
    - *Impact:* does it materially affect people's money, rights, health, safety, or governance? How many people?
    - *Under-coverage:* who is covering it, who isn't, how prominently?
-4. **Discard at this stage** anything whose only hook is "it's suppressed", anything unfalsifiable, and anything that needs a conspiracy assumed to make ordinary facts cohere.
+4. **Discard immediately — hard exclusions (do not score, do not pass forward):**
+   - Cinema, films, OTT, streaming, entertainment industry (actors, directors, awards, box office, casting controversies — any of it)
+   - Celebrity news or personal gossip about public figures
+   - Sports results, transfers, match news
+   - Lifestyle, fashion, travel, food
+   - PR announcements, product launches, corporate events with no accountability angle
+   - Obituaries without a clear public-record accountability question
+   If a lead touches any of these, drop it before scoring. Volume means nothing — one real accountability lead is worth more than 50 cinema stories.
+5. **Discard at this stage** anything whose only hook is "it's suppressed", anything unfalsifiable, and anything that needs a conspiracy assumed to make ordinary facts cohere.
 5. **Hand off** the ranked queue. Do not investigate or verify here.
 
 ## Output format
