@@ -45,6 +45,7 @@ from shared.db import (
     get_cost_report_data,
     pop_next_topic,
     finish_topic,
+    kv_set,
 )
 from engine.agents.skill_runner import run_skill
 
@@ -362,6 +363,7 @@ def _run_topic_intake(pending):
 def run_daily_cycle():
     log.info("=== Thelivu daily cycle starting ===")
     init_db()
+    kv_set("last_cycle_at", datetime.now(timezone.utc).isoformat())
 
     # 1. Check for owner-submitted topics first (these jump the RSS queue)
     pending = pop_next_topic()

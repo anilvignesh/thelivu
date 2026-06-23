@@ -28,7 +28,7 @@ from shared.config import (
     TELEGRAM_CHANNEL_ID,
     TELEGRAM_DRAFT_CHAT_ID,
 )
-from shared.db import get_run, get_pending_runs, get_cost_report_data, init_db, save_publication, update_run, queue_topic
+from shared.db import get_run, get_pending_runs, get_cost_report_data, get_queue_state, kv_get, init_db, save_publication, update_run, queue_topic
 
 logging.basicConfig(
     level=logging.INFO,
@@ -145,6 +145,109 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"  Held: {held}\n"
         f"  Killed: {killed}"
     )
+
+
+async def cmd_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from shared.config import CHECK_INTERVAL_HOURS
+    from datetime import datetime, timezone, timedelta
+
+    state = get_queue_state()
+    last_cycle = kv_get("last_cycle_at")
+    lines = []
+
+    # Owner topics
+    topics = state["topics"]
+    if topics:
+        lines.append(f"Owner topics ({len(topics)}):")
+        for t in topics:
+            status = "🔄 running now" if t["status"] == "running" else "⏳ queued"
+            lines.append(f"  #{t['id']} — {t['topic'][:80]} [{status}]")
+    else:
+        lines.append("Owner topics: none queued")
+
+    lines.append("")
+
+    # Recent pipeline runs
+    runs = state["recent_runs"]
+    if runs:
+        lines.append("Recent runs:")
+        for r in runs:
+            date = str(r.get("created_at", ""))[:10]
+            gate = r.get("trust_gate") or ""
+            status = r.get("status", "")
+            lines.append(f"  #{r['id']} [{date}] {r['throughline'][:70]}")
+            lines.append(f"    → {gate} | {status} | src: {r['source']}")
+    else:
+        lines.append("No pipeline runs yet.")
+
+    lines.append("")
+
+    # Cycle timing
+    if last_cycle:
+        try:
+            last_dt = datetime.fromisoformat(last_cycle)
+            next_dt = last_dt + timedelta(hours=CHECK_INTERVAL_HOURS)
+            now = datetime.now(timezone.utc)
+            diff = next_dt - now
+            mins = int(diff.total_seconds() / 60)
+            if mins > 0:
+                lines.append(f"Last cycle: {last_cycle[:16]} UTC")
+                lines.append(f"Next cycle: in ~{mins // 60}h {mins % 60}m")
+            else:
+                lines.append("Next cycle: starting soon")
+        except Exception:
+            lines.append(f"Last cycle: {last_cycle[:16]} UTC")
+    else:
+        lines.append("No cycle has run yet. Use /runnow to trigger one.")
+
+    await update.message.reply_text("\n".join(lines))
+
+
+async def cmd_feeds(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    import yaml
+    from shared.config import SOURCES_YAML
+    try:
+        data = yaml.safe_load(SOURCES_YAML.read_text())
+        sources = data.get("sources", [])
+    except Exception as e:
+        await update.message.reply_text(f"Could not read sources.yaml: {e}")
+        return
+
+    active = [s for s in sources if s.get("status") == "active"]
+    candidates = [s for s in sources if s.get("status") == "candidate"]
+
+    lines = [f"RSS feeds ({len(active)} active):\n"]
+    for s in active:
+        platform = s.get("platform", "")
+        lean = s.get("lean", "")[:50]
+        lines.append(f"  ✓ {s['name']} ({platform})")
+        lines.append(f"    {lean}")
+
+    if candidates:
+        lines.append(f"\nCandidates (not yet active):")
+        for s in candidates:
+            lines.append(f"  ? {s['name']} — {s.get('notes','')[:60]}")
+
+    lines.append("\nTo add a new source, use /addfeed [YouTube channel URL]")
+    await update.message.reply_text("\n".join(lines))
+
+
+async def cmd_addfeed(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Queue a new YouTube channel for the source-scout to evaluate."""
+    url = " ".join(context.args).strip() if context.args else ""
+    if not url:
+        await update.message.reply_text(
+            "Usage: /addfeed [YouTube channel URL]\n\n"
+            "Example: /addfeed https://www.youtube.com/@FactCheckIndia"
+        )
+        return
+    queue_topic(f"EVALUATE SOURCE: {url}", source="owner-addfeed")
+    await update.message.reply_text(
+        f"Queued for source evaluation: {url}\n\n"
+        f"The source-scout will check its reliability, lean, and beat coverage. "
+        f"I'll report back when done."
+    )
+    log.info("Source evaluation queued: %s", url)
 
 
 async def cmd_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -309,6 +412,9 @@ def main():
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("status", cmd_status))
+    app.add_handler(CommandHandler("queue", cmd_queue))
+    app.add_handler(CommandHandler("feeds", cmd_feeds))
+    app.add_handler(CommandHandler("addfeed", cmd_addfeed))
     app.add_handler(CommandHandler("drafts", cmd_drafts))
     app.add_handler(CommandHandler("cost", cmd_cost))
     app.add_handler(CommandHandler("topic", cmd_topic))

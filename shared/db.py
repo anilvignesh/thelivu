@@ -5,6 +5,12 @@ from datetime import datetime, timezone
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS kv_store (
+    key   TEXT PRIMARY KEY,
+    value TEXT,
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS token_usage (
     id              SERIAL PRIMARY KEY,
     run_id          INTEGER,
@@ -55,6 +61,12 @@ CREATE TABLE IF NOT EXISTS publications (
 
 # SQLite fallback schema (same structure, SQLite syntax)
 _SCHEMA_SQLITE = """
+CREATE TABLE IF NOT EXISTS kv_store (
+    key   TEXT PRIMARY KEY,
+    value TEXT,
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS token_usage (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id          INTEGER,
@@ -309,6 +321,59 @@ def finish_topic(topic_id):
             f"UPDATE pending_topics SET status = 'done' WHERE id = {ph}", (topic_id,)
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def kv_set(key, value):
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        if _is_postgres():
+            cur.execute(
+                "INSERT INTO kv_store (key, value, updated_at) VALUES (%s, %s, NOW()) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()",
+                (key, value),
+            )
+        else:
+            cur.execute(
+                "INSERT OR REPLACE INTO kv_store (key, value) VALUES (?, ?)", (key, value)
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def kv_get(key, default=None):
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(f"SELECT value FROM kv_store WHERE key = {ph}", (key,))
+        row = cur.fetchone()
+        return row[0] if row else default
+    finally:
+        conn.close()
+
+
+def get_queue_state():
+    """Return pending topics + last pipeline run for /queue display."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        # Pending/running owner topics
+        cur.execute(
+            "SELECT id, topic, source, status, submitted_at FROM pending_topics "
+            "WHERE status IN ('queued', 'running') ORDER BY id"
+        )
+        topics = _fetchall(cur)
+        # Last 3 pipeline runs
+        cur.execute(
+            "SELECT id, throughline, source, status, trust_gate, created_at "
+            "FROM pipeline_runs ORDER BY id DESC LIMIT 3"
+        )
+        recent_runs = _fetchall(cur)
+        return {"topics": topics, "recent_runs": recent_runs}
     finally:
         conn.close()
 
