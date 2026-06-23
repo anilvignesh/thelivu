@@ -9,6 +9,20 @@ This skill runs the **verification stage**, the independent, adversarial re-chec
 
 This skill enforces the project's editorial charter (`../../CHARTER.md`). Read it if present; the charter governs in any conflict.
 
+## Tool-failure protocol
+
+If your web search tool returns only irrelevant results, thesaurus pages, Wikipedia country pages, or blanks across **all** queries, the tool has failed — this is a infrastructure problem, not a story problem.
+
+In this case:
+1. Document the tool failure explicitly in your output.
+2. Output **HOLD** (not KILL) — tool failure cannot prove a story is unverifiable.
+3. Write the verification report anyway based on what was in the dossier itself (internal consistency, source quality, logical coherence) — this is partial but honest.
+4. Include a `BLOCKING-REASON: Tool failure — web search returned no usable results. Re-run once search is restored.` line.
+
+A KILL requires positive evidence that claims are false or unsupported — absence of search results is not that.
+
+---
+
 ## Do not trust the dossier
 
 Re-check each claim against the original sources yourself. Do not accept the investigator's bucket tags — re-derive them. If a source link doesn't say what the dossier claims it says, that's a finding. Citations that don't support their claim are the single most common failure, and catching them is the whole point of this stage.
