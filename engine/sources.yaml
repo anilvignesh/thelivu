@@ -83,6 +83,80 @@ sources:
     added: 2026-06-21
     notes: "Closest to Thelivu's own beat. Primary local-language lead source."
 
+  # ── Text journalism (verification-grade and investigative) ──────────────────
+
+  - id: the-hindu-kerala
+    name: The Hindu — Kerala
+    platform: web
+    handle: "@thehindu"
+    feed: "https://www.thehindu.com/news/national/kerala/feeder/default.rss"
+    role: verification
+    tier: 2
+    lean: "centrist; establishment-leaning but strong editorial standards"
+    status: active
+    added: 2026-06-23
+    notes: "Tier 2 verification source for Kerala stories. Cross-check claims here."
+
+  - id: the-hindu-national
+    name: The Hindu — National
+    platform: web
+    handle: "@thehindu"
+    feed: "https://www.thehindu.com/news/national/feeder/default.rss"
+    role: verification
+    tier: 2
+    lean: "centrist; newspaper of record for India"
+    status: active
+    added: 2026-06-23
+    notes: "Tier 2 verification source for national stories. Use to corroborate leads."
+
+  - id: indiaspend
+    name: IndiaSpend
+    platform: web
+    handle: "@indiaspend"
+    feed: "https://www.indiaspend.com/rss/"
+    role: verification
+    tier: 2
+    lean: "data journalism; non-partisan"
+    status: active
+    added: 2026-06-23
+    notes: "Data-driven verification source. Strong on health, education, economy numbers."
+
+  - id: medianama
+    name: Medianama
+    platform: web
+    handle: "@medianama"
+    feed: "https://www.medianama.com/feed/"
+    role: lead
+    tier: 2
+    lean: "neutral; India's best tech/digital policy coverage"
+    status: active
+    added: 2026-06-23
+    notes: "Breaks stories on telecom, fintech, AI regulation, surveillance. Under-read."
+
+  - id: the-ken
+    name: The Ken
+    platform: web
+    handle: "@TheKenWeb"
+    feed: "https://the-ken.com/feed/"
+    role: lead
+    tier: 2
+    lean: "neutral business journalism; paywalled but headlines/summaries in feed"
+    status: active
+    added: 2026-06-23
+    notes: "India's best business investigations. Feed gives headline + summary — enough to surface leads."
+
+  - id: newsclick
+    name: Newsclick
+    platform: web
+    handle: "@newsclickin"
+    feed: "https://www.newsclick.in/rss.xml"
+    role: lead
+    tier: 3
+    lean: "left-leaning; use as lead only — not as verification source"
+    status: active
+    added: 2026-06-23
+    notes: "Breaks real stories on labour, farmers, minorities. Verify independently before publishing."
+
   - id: the-india-index
     name: The India Index
     platform: instagram

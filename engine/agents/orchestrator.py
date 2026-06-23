@@ -128,25 +128,42 @@ def ingest_source(source):
     if not feed_url:
         return []
 
+    platform = source.get("platform", "web")
     feed = feedparser.parse(feed_url)
     items = []
+
     for entry in feed.entries:
-        vid = _video_id(entry.link)
-        if is_seen(vid):
+        # Use URL as the unique ID for web articles, video_id for YouTube
+        if platform == "youtube":
+            item_id = _video_id(entry.link)
+            transcript = _get_transcript(item_id)
+        else:
+            item_id = entry.link
+            transcript = None  # web articles: use title + summary as context
+
+        if is_seen(item_id):
             continue
 
-        transcript = _get_transcript(vid)
-        try:
-            extracted = _extract_claims_via_skill(entry.link, transcript)
-            method = "transcript" if transcript else "skill_only"
-        except Exception as e:
-            log.warning("source-ingestor failed for %s (%s) — title only", vid, e)
-            extracted = {"throughline": entry.title, "claims": []}
-            method = "title_only"
+        if platform == "youtube":
+            try:
+                extracted = _extract_claims_via_skill(entry.link, transcript)
+                method = "transcript" if transcript else "skill_only"
+            except Exception as e:
+                log.warning("source-ingestor failed for %s (%s) — title only", item_id, e)
+                extracted = {"throughline": entry.title, "claims": []}
+                method = "title_only"
+        else:
+            # Web article: use title + summary as the throughline; skip full skill call
+            summary = getattr(entry, "summary", "") or ""
+            extracted = {
+                "throughline": entry.title,
+                "claims": [{"text": summary[:300], "provisional_bucket": "allegation", "timestamp": None, "video_cited_source": None}] if summary else [],
+            }
+            method = "rss_summary"
 
-        mark_seen(vid, source["id"])
+        mark_seen(item_id, source["id"])
         items.append({
-            "video_id": vid,
+            "video_id": item_id,
             "video_url": entry.link,
             "title": entry.title,
             "source": source["name"],
@@ -476,7 +493,7 @@ def run_daily_cycle():
     sources_data = yaml.safe_load(SOURCES_YAML.read_text())
     yaml_sources = [
         s for s in sources_data.get("sources", [])
-        if s.get("status") == "active" and s.get("platform") == "youtube" and s.get("feed")
+        if s.get("status") == "active" and s.get("feed")
     ]
     db_sources = [
         s for s in get_approved_sources()
