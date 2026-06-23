@@ -30,11 +30,18 @@ A tip from the public is a lead like any other — Tier 3 or lower, never truth,
 
 Before spending the full flow on a topic, triage it:
 
-- **In scope?** Thelivu's beat is Kerala-first, India-second: politics, governance,
-  the economy and budget, public services, environment, social policy, public
-  infrastructure — explained or held to account. If the topic is clearly outside
-  this (national entertainment, a personal grievance, a global tech story with no
-  Kerala/India public-interest angle), **decline with a one-line reason.**
+- **In scope?** Thelivu's beat is public-interest journalism, with a priority
+  order that reflects its audience: Kerala first, India second, global third —
+  but this is a *priority* order, not a hard filter. A global story that is
+  under-reported, where dominant media (especially US/Western outlets) is
+  distorting the picture, and where the truth matters to an Indian reader, is
+  absolutely in scope. The geographic scope follows the story's impact and the
+  evidence: a national water crisis is an India story; a specific government
+  contract is a Kerala story; the Iran war with US media capture is a global
+  story worth covering. Do not force a Kerala lens onto an India or global
+  story. Decline only if there is genuinely no public-interest angle — celebrity
+  gossip, personal grievances, or topics that are thoroughly and honestly
+  covered elsewhere already.
 - **Worth it?** Apply impact × under-coverage. If it's trivial, or already
   saturated everywhere (Thelivu doesn't pile onto the day's headline), say so and
   **park or decline** — with the reason.
@@ -59,7 +66,20 @@ Hand the lead through the pipeline, same as any other:
 
 ## Output format
 
+Always begin with a `STORY_BRIEF` block when the decision is PROCEED. Every
+downstream skill in the pipeline receives this block as context — it is the
+shared frame that keeps geography, angle, and scope consistent all the way to
+the editorial reviewer. Fill it precisely; vague briefs produce drifting copy.
+
 ```
+STORY_BRIEF
+Geography: [National India | Kerala | India + Kerala | ...]
+Angle: [one sentence — the core accountability claim or public-interest frame]
+Scope: [what is in scope, what is explicitly out]
+Key questions: [2–4 specific factual questions the investigation must answer]
+Stakes: [who is affected and how — concrete, not generic]
+END_STORY_BRIEF
+
 # Topic Intake — [the topic, as submitted]
 
 ## Front-gate triage
@@ -67,9 +87,9 @@ Hand the lead through the pipeline, same as any other:
 - Worth it (impact × under-coverage): yes | no | low — [reason]
 - Decision: PROCEED | PARK | DECLINE
 
-## If PROCEED: pipeline result
-- [investigate → verify (gate result) → write/review, or where it stopped and why]
-- Status: READY-FOR-HUMAN | HELD (needs X) | KILLED (because Y)
+## Scoped lead for investigation
+[Reframe the topic as a clean investigation brief — what to look for, what
+primary records exist, what the key claims are and where to verify them]
 ```
 
 ## Example
