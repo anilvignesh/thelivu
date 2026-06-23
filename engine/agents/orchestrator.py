@@ -451,7 +451,7 @@ def _run_topic_intake(pending):
     if gate in ("KILL", "HOLD"):
         update_run(live_run_id, trust_gate=gate, verification_report=verification, status=gate.lower())
         finish_topic(topic_id)
-        _notify(f"Your topic was {gate}ed (run #{live_run_id}).\n\n{verification[:800]}")
+        _notify(f"Your topic was {gate}ed (run #{live_run_id}).\n\n{verification}")
         return
 
     update_run(live_run_id, trust_gate=gate, status="writing")
@@ -613,7 +613,7 @@ def run_daily_cycle():
         )
         _notify(
             f"Thelivu: today's story {gate}ed (run #{run_id}).\n\n"
-            f"Reason:\n{verification[:800]}"
+            f"Reason:\n{verification}"
         )
         log.info("Story %s. Run #%d saved.", gate, run_id)
         return

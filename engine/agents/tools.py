@@ -111,7 +111,7 @@ def _ddg_search(query):
             f"**{r['title']}**\n{r['href']}\n{r['body']}" for r in results
         )
     except Exception as e:
-        return f"Search unavailable: {e}. Try again or rephrase the query."
+        return f"Search unavailable: {e}. The web search tool is not working. Document this failure and output HOLD (not KILL) — absence of search results is not evidence against the story."
 
 
 def create_skill(name, content):
