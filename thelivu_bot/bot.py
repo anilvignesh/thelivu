@@ -98,7 +98,6 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_topic(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    import subprocess
     topic = " ".join(context.args).strip() if context.args else ""
     if not topic:
         await update.message.reply_text(
@@ -108,18 +107,17 @@ async def cmd_topic(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     queue_topic(topic, source="owner-telegram")
     await update.message.reply_text(
-        f"On it. Investigating now — I'll send the draft when it's ready.\n\nTopic: {topic}"
+        f"Queued. The agent picks this up within 2 minutes — I'll send the draft when ready.\n\nTopic: {topic}"
     )
-    subprocess.Popen(["python", "-m", "engine.agents.orchestrator", "--once"])
-    log.info("Topic queued and pipeline triggered: %s", topic[:80])
+    log.info("Topic queued: %s", topic[:80])
 
 
 async def cmd_runnow(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Trigger the orchestrator immediately for any queued topic or RSS cycle."""
-    await update.message.reply_text("Triggering pipeline now... I'll send the draft when it's ready.")
-    import subprocess
-    subprocess.Popen(["python", "-m", "engine.agents.orchestrator", "--once"])
-    log.info("Manual pipeline trigger via /runnow")
+    """Signal the agent to run an RSS cycle on its next 2-minute tick."""
+    from shared.db import kv_set
+    kv_set("force_rss_run", "1")
+    await update.message.reply_text("Signalled the agent to run an RSS cycle now. Check /track in a minute.")
+    log.info("Force RSS run signalled via /runnow")
 
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):

@@ -22,10 +22,17 @@ if service == "thelivu-agent":
 
     _cost_report_sent_date = None
 
+    from shared.db import pop_next_topic, finish_topic
+
+    _last_rss_run = None
+    _cost_report_sent_date = None
+    TOPIC_POLL_SECONDS = 120  # check for owner topics every 2 minutes
+
     while True:
         now_utc = datetime.now(timezone.utc)
         today = now_utc.date()
 
+        # Daily cost report at 8pm IST (14:30 UTC)
         if now_utc.hour == 14 and now_utc.minute >= 30 and _cost_report_sent_date != today:
             try:
                 send_cost_report()
@@ -33,24 +40,42 @@ if service == "thelivu-agent":
             except Exception as e:
                 log.error("Cost report failed: %s", e)
 
+        # Weekly source scout
         try:
             last_scout = kv_get("last_scout_at")
             if not last_scout:
                 kv_set("last_scout_at", now_utc.isoformat())
-                log.info("Source scout: first boot, scheduled for 7 days from now.")
+                log.info("Source scout scheduled for 7 days from now.")
             elif (now_utc - datetime.fromisoformat(last_scout)).days >= 7:
                 run_source_scout()
         except Exception as e:
             log.error("Source scout failed: %s", e)
 
+        # Owner topics — check every 2 minutes, run immediately if queued
         try:
-            run_daily_cycle()
-            retry_held()
+            pending = pop_next_topic()
+            if pending:
+                log.info("Owner topic found: %s", pending["topic"][:80])
+                from engine.agents.orchestrator import _run_topic_intake
+                _run_topic_intake(pending)
+            else:
+                # RSS cycle — on schedule or when /runnow signals it
+                force = kv_get("force_rss_run")
+                due = _last_rss_run is None or (now_utc - _last_rss_run).total_seconds() >= CHECK_INTERVAL_HOURS * 3600
+                if due or force:
+                    if force:
+                        kv_set("force_rss_run", "")
+                    try:
+                        run_daily_cycle()
+                        retry_held()
+                        _last_rss_run = now_utc
+                    except Exception as e:
+                        log.error("RSS cycle failed: %s", e, exc_info=True)
         except Exception as e:
-            log.error("Cycle failed: %s", e, exc_info=True)
+            log.error("Topic check failed: %s", e, exc_info=True)
 
-        log.info("Sleeping %dh until next cycle...", CHECK_INTERVAL_HOURS)
-        time.sleep(CHECK_INTERVAL_HOURS * 3600)
+        log.info("Sleeping %ds...", TOPIC_POLL_SECONDS)
+        time.sleep(TOPIC_POLL_SECONDS)
 
 else:
     from thelivu_bot.bot import main
