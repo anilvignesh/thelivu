@@ -310,6 +310,72 @@ def _save_to_file(run_id, draft_text, verification_report, review_text):
 
 
 # ---------------------------------------------------------------------------
+# Revision loop helpers
+# ---------------------------------------------------------------------------
+
+_MAX_REVISIONS = 2
+
+
+def _parse_revision(review_text):
+    """Return (needs_revision, investigator_tasks, writer_tasks)."""
+    if "REVISION_NEEDED" not in review_text:
+        return False, "", ""
+    m_inv = re.search(r"Investigator tasks:(.*?)(?:Writer tasks:|END_REVISION)", review_text, re.DOTALL)
+    m_wri = re.search(r"Writer tasks:(.*?)END_REVISION", review_text, re.DOTALL)
+    inv = m_inv.group(1).strip() if m_inv else ""
+    wri = m_wri.group(1).strip() if m_wri else ""
+    return True, inv, wri
+
+
+def _revision_loop(brief, dossier, verification, pattern, draft, run_id, topic_label, revision_num=0):
+    """Run reviewer; if REVISION_NEEDED send back to investigator/writer; repeat up to _MAX_REVISIONS."""
+    review = run_skill("editorial-reviewer",
+        _with_brief(brief, f"DRAFT:\n\n{draft}\n\nVERIFICATION REPORT:\n\n{verification}"),
+        run_id=run_id, topic=topic_label)
+
+    needs_revision, inv_tasks, wri_tasks = _parse_revision(review)
+
+    if not needs_revision or revision_num >= _MAX_REVISIONS:
+        if revision_num >= _MAX_REVISIONS and needs_revision:
+            log.warning("Max revisions (%d) reached — sending to human anyway.", _MAX_REVISIONS)
+            review += f"\n\n[Note: sent after {_MAX_REVISIONS} revision cycles — reviewer still had notes.]"
+        return draft, review
+
+    log.info("Reviewer requested revision (cycle %d/%d).", revision_num + 1, _MAX_REVISIONS)
+
+    if inv_tasks:
+        log.info("Re-running investigator with revision tasks...")
+        revision_prompt = (
+            f"REVISION REQUEST FROM EDITORIAL REVIEWER:\n\n{inv_tasks}\n\n"
+            f"ORIGINAL DOSSIER:\n\n{dossier}"
+        )
+        dossier = run_skill("news-investigator",
+            _with_brief(brief, revision_prompt), run_id=run_id, topic=topic_label)
+
+    if wri_tasks:
+        log.info("Re-running writer with revision tasks...")
+        revision_prompt = (
+            f"REVISION REQUEST FROM EDITORIAL REVIEWER:\n\n{wri_tasks}\n\n"
+            f"ORIGINAL DRAFT:\n\n{draft}"
+        )
+        draft = run_skill("article-writer",
+            _with_brief(brief,
+                f"{revision_prompt}\n\nDOSSIER:\n\n{dossier}\n\n"
+                f"VERIFICATION REPORT:\n\n{verification}\n\nPATTERN:\n\n{pattern}"),
+            run_id=run_id, topic=topic_label)
+    elif inv_tasks:
+        # Investigator produced new material — re-run writer too
+        draft = run_skill("article-writer",
+            _with_brief(brief,
+                f"UPDATED DOSSIER (revised by investigator):\n\n{dossier}\n\n"
+                f"VERIFICATION REPORT:\n\n{verification}\n\nPATTERN:\n\n{pattern}"),
+            run_id=run_id, topic=topic_label)
+
+    return _revision_loop(brief, dossier, verification, pattern, draft,
+                          run_id, topic_label, revision_num + 1)
+
+
+# ---------------------------------------------------------------------------
 # Trust gate parser
 # ---------------------------------------------------------------------------
 
@@ -397,9 +463,8 @@ def _run_topic_intake(pending):
     draft = run_skill("article-writer",
         _with_brief(brief, f"DOSSIER:\n\n{dossier}\n\nVERIFICATION:\n\n{verification}\n\nPATTERN:\n\n{pattern}"),
         run_id=live_run_id, topic=topic_label)
-    review = run_skill("editorial-reviewer",
-        _with_brief(brief, f"DRAFT:\n\n{draft}\n\nVERIFICATION REPORT:\n\n{verification}"),
-        run_id=live_run_id, topic=topic_label)
+    draft, review = _revision_loop(brief, dossier, verification, pattern, draft,
+                                   live_run_id, topic_label)
 
     update_run(live_run_id,
         throughline=topic_text[:200],
@@ -548,11 +613,10 @@ def run_daily_cycle():
             f"PATTERN ANALYSIS:\n\n{pattern}"),
         topic=topic_label)
 
-    # 8. editorial-reviewer — gets brief + draft + verification so it can check framing
-    log.info("Running editorial-reviewer...")
-    review = run_skill("editorial-reviewer",
-        _with_brief(rss_brief, f"DRAFT:\n\n{draft}\n\nVERIFICATION REPORT:\n\n{verification}"),
-        topic=topic_label)
+    # 8. editorial-reviewer with revision loop
+    log.info("Running editorial-reviewer (with revision loop)...")
+    draft, review = _revision_loop(rss_brief, dossier, verification, pattern, draft,
+                                   None, topic_label)
 
     # 9. Save and send for approval
     run_id = save_run(
