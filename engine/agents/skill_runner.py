@@ -37,11 +37,11 @@ _GEMINI_SKILLS = {
     "beat-monitor",
     "source-scout",
     "story-scout",
+    "story-tracker",
+    "meta-synthesizer",
 }
 
 # Which Claude tools each skill gets (only for Claude-routed skills)
-# Gemini skills also get web search via Google Search grounding — these are
-# the Claude-side tools used when Gemini is unavailable or for Claude-routed skills.
 _CLAUDE_SKILL_TOOLS = {
     "news-monitor":        [],
     "pattern-synthesizer": [],
@@ -50,12 +50,15 @@ _CLAUDE_SKILL_TOOLS = {
     "topic-intake":        [WEB_SEARCH_TOOL],
     "publisher":           [],
     "source-ingestor":     [],
+    "finance-manager":     [],
     # Research skills get web_search as Claude fallback (normally Gemini+Google Search)
     "news-investigator":   [WEB_SEARCH_TOOL],
     "source-verifier":     [WEB_SEARCH_TOOL],
     "beat-monitor":        [WEB_SEARCH_TOOL],
     "source-scout":        [WEB_SEARCH_TOOL],
     "story-scout":         [WEB_SEARCH_TOOL],
+    "story-tracker":       [WEB_SEARCH_TOOL],
+    "meta-synthesizer":    [],
 }
 
 

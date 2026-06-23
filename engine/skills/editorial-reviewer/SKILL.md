@@ -96,8 +96,18 @@ APPROVED
 ## Confidence label: Confirmed | Developing | Contested
 ## Verdict: Ready | Fix-then-publish | Hold | Kill
 ## Required edits (for human to decide on): [numbered list, or "none"]
-## Flag for human legal review: Yes | No — [why]
+
+LEGAL-FLAG: YES | NO
+LEGAL-REASON: [if YES — exactly what triggered it: which named person, which unverified damaging claim, what the specific legal exposure is. If NO — "No named individuals tied to unverified damaging claims."]
 ```
+
+**When to set LEGAL-FLAG: YES** — any of:
+- A living person is named AND tied to a claim that is Allegation-only or Unverified (not fully corroborated per the verification gate)
+- A company is named with a claim of fraud, corruption, or criminal conduct that has not been confirmed by a primary record (court order, regulatory finding, official document)
+- The story includes a claim that, if false, would expose the channel to a defamation action
+- The draft uses language that asserts guilt or motive beyond what the evidence establishes ("corrupt", "fraudulent", "criminal" without a court finding)
+
+When LEGAL-FLAG is YES, the human editor must get a legal read before approving. This is not optional.
 
 Note: `APPROVED` means the story clears the quality and editorial gates and is ready for the human. The human remains the final guard — this stage never publishes directly.
 

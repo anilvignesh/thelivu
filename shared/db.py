@@ -75,6 +75,8 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
     verification_report TEXT,
     status              TEXT DEFAULT 'investigating',
     tg_msg_id           INTEGER,
+    legal_flag          BOOLEAN DEFAULT FALSE,
+    legal_reason        TEXT,
     created_at          TIMESTAMP DEFAULT NOW(),
     updated_at          TIMESTAMP DEFAULT NOW()
 );
@@ -169,6 +171,8 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
     verification_report TEXT,
     status              TEXT DEFAULT 'investigating',
     tg_msg_id           INTEGER,
+    legal_flag          INTEGER DEFAULT 0,
+    legal_reason        TEXT,
     created_at          TEXT DEFAULT (datetime('now')),
     updated_at          TEXT DEFAULT (datetime('now'))
 );
@@ -239,8 +243,19 @@ def init_db():
                 s = statement.strip()
                 if s:
                     cur.execute(s)
+            # Migrations for existing tables
+            for col, defn in [("legal_flag", "BOOLEAN DEFAULT FALSE"), ("legal_reason", "TEXT")]:
+                try:
+                    cur.execute(f"ALTER TABLE pipeline_runs ADD COLUMN {col} {defn}")
+                except Exception:
+                    pass  # column already exists
         else:
             cur.executescript(_SCHEMA_SQLITE)
+            for col, defn in [("legal_flag", "INTEGER DEFAULT 0"), ("legal_reason", "TEXT")]:
+                try:
+                    cur.execute(f"ALTER TABLE pipeline_runs ADD COLUMN {col} {defn}")
+                except Exception:
+                    pass
         conn.commit()
     finally:
         conn.close()
@@ -642,6 +657,119 @@ def clear_stale_agents():
             cur.execute("DELETE FROM active_agents WHERE started_at < NOW() - INTERVAL '30 minutes'")
         else:
             cur.execute("DELETE FROM active_agents WHERE started_at < datetime('now', '-30 minutes')")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_source_reliability():
+    """Return per-source trust gate outcomes computed from pipeline_runs."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        if _is_postgres():
+            cur.execute("""
+                SELECT source,
+                       COUNT(*) as total,
+                       COUNT(*) FILTER (WHERE trust_gate IN ('READY-FOR-HUMAN','FRAMING-FIX')) as verified,
+                       COUNT(*) FILTER (WHERE trust_gate = 'KILL') as killed,
+                       COUNT(*) FILTER (WHERE trust_gate = 'HOLD') as held
+                FROM pipeline_runs
+                WHERE source IS NOT NULL
+                GROUP BY source
+                HAVING COUNT(*) >= 2
+                ORDER BY verified DESC
+            """)
+        else:
+            cur.execute("""
+                SELECT source,
+                       COUNT(*) as total,
+                       SUM(CASE WHEN trust_gate IN ('READY-FOR-HUMAN','FRAMING-FIX') THEN 1 ELSE 0 END) as verified,
+                       SUM(CASE WHEN trust_gate = 'KILL' THEN 1 ELSE 0 END) as killed,
+                       SUM(CASE WHEN trust_gate = 'HOLD' THEN 1 ELSE 0 END) as held
+                FROM pipeline_runs
+                WHERE source IS NOT NULL
+                GROUP BY source
+                HAVING COUNT(*) >= 2
+                ORDER BY verified DESC
+            """)
+        return _fetchall(cur)
+    finally:
+        conn.close()
+
+
+def get_published_stories(days=90):
+    """Return published stories for follow-up tracking."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        if _is_postgres():
+            cur.execute("""
+                SELECT r.id, r.throughline, r.source, r.created_at,
+                       LEFT(r.draft_text, 800) as draft_summary,
+                       r.trust_gate
+                FROM pipeline_runs r
+                JOIN publications p ON p.run_id = r.id
+                WHERE r.created_at > NOW() - INTERVAL '%s days'
+                ORDER BY r.created_at DESC
+                LIMIT 20
+            """, (days,))
+        else:
+            cur.execute("""
+                SELECT r.id, r.throughline, r.source, r.created_at,
+                       SUBSTR(r.draft_text, 1, 800) as draft_summary,
+                       r.trust_gate
+                FROM pipeline_runs r
+                JOIN publications p ON p.run_id = r.id
+                WHERE r.created_at > datetime('now', ?)
+                ORDER BY r.created_at DESC
+                LIMIT 20
+            """, (f"-{days} days",))
+        return _fetchall(cur)
+    finally:
+        conn.close()
+
+
+def get_all_runs_summary(limit=60):
+    """Return summary of all runs for meta-synthesis."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        if _is_postgres():
+            cur.execute("""
+                SELECT r.id, r.throughline, r.source, r.trust_gate, r.status,
+                       r.created_at::date as date,
+                       LEFT(r.review_text, 400) as review_summary,
+                       EXISTS(SELECT 1 FROM publications p WHERE p.run_id = r.id) as published
+                FROM pipeline_runs r
+                ORDER BY r.created_at DESC
+                LIMIT %s
+            """, (limit,))
+        else:
+            cur.execute("""
+                SELECT r.id, r.throughline, r.source, r.trust_gate, r.status,
+                       date(r.created_at) as date,
+                       SUBSTR(r.review_text, 1, 400) as review_summary,
+                       EXISTS(SELECT 1 FROM publications p WHERE p.run_id = r.id) as published
+                FROM pipeline_runs r
+                ORDER BY r.created_at DESC
+                LIMIT ?
+            """, (limit,))
+        return _fetchall(cur)
+    finally:
+        conn.close()
+
+
+def update_run_legal_flag(run_id, legal_flag, legal_reason=""):
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(
+            f"UPDATE pipeline_runs SET legal_flag={ph}, legal_reason={ph}, updated_at={ph} WHERE id={ph}",
+            (legal_flag, legal_reason, datetime.now(timezone.utc).isoformat(), run_id),
+        )
         conn.commit()
     finally:
         conn.close()

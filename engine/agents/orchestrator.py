@@ -41,9 +41,13 @@ from shared.db import (
     mark_seen,
     save_run,
     update_run,
+    update_run_legal_flag,
     get_held_runs,
     get_cost_report_data,
     get_approved_sources,
+    get_source_reliability,
+    get_published_stories,
+    get_all_runs_summary,
     save_proposal,
     set_proposal_msg_id,
     pop_next_topic,
@@ -275,13 +279,41 @@ def send_for_approval(run_id, draft_text, verification_report, review_text):
         _save_to_file(run_id, draft_text, verification_report, review_text)
 
 
+def _parse_legal_flag(review_text):
+    """Extract LEGAL-FLAG and LEGAL-REASON from editorial reviewer output."""
+    flag = False
+    reason = ""
+    for line in (review_text or "").splitlines():
+        if line.startswith("LEGAL-FLAG:"):
+            flag = "YES" in line.upper()
+        if line.startswith("LEGAL-REASON:"):
+            reason = line.split(":", 1)[-1].strip()
+    return flag, reason
+
+
 def _send_via_telegram(run_id, draft_text, verification_report, review_text):
+    legal_flag, legal_reason = _parse_legal_flag(review_text)
+
+    # Persist legal flag to DB
+    if legal_flag:
+        update_run_legal_flag(run_id, True, legal_reason)
+
     title = draft_text.lstrip("# ").splitlines()[0][:80]
+
+    legal_warning = ""
+    if legal_flag:
+        legal_warning = (
+            f"\n\n⚠️ LEGAL REVIEW REQUIRED before approving.\n"
+            f"Reason: {legal_reason}\n"
+            f"Do NOT approve until a legal read has been done."
+        )
+
     summary = (
         f"Draft ready — run #{run_id}\n\n"
         f"{title}\n\n"
-        f"Trust gate: READY-FOR-HUMAN\n\n"
-        f"Review notes:\n{review_text[:600]}"
+        f"Trust gate: READY-FOR-HUMAN"
+        f"{legal_warning}\n\n"
+        f"Review notes:\n{review_text[:500]}"
     )
     keyboard = {
         "inline_keyboard": [[
@@ -290,11 +322,8 @@ def _send_via_telegram(run_id, draft_text, verification_report, review_text):
             {"text": "⏸ Hold",   "callback_data": f"hold_{run_id}"},
         ]]
     }
-    # Summary + buttons first (always short enough for one message)
     msg_id = _tg_post(TELEGRAM_DRAFT_CHAT_ID, summary[:_TG_LIMIT], reply_markup=keyboard)
     update_run(run_id, tg_msg_id=msg_id)
-
-    # Full draft in follow-up messages (properly chunked, no truncation)
     _tg_send_long(TELEGRAM_DRAFT_CHAT_ID, draft_text)
 
 
@@ -584,7 +613,18 @@ def run_daily_cycle():
 
     # 4. news-monitor: pick the top lead by impact × under-coverage
     log.info("Running news-monitor on %d lead(s)...", len(all_leads))
-    leads_text = "LEADS TO EVALUATE:\n\n" + "\n\n---\n\n".join(
+
+    # Prepend source reliability context so the monitor can weight sources
+    reliability = get_source_reliability()
+    reliability_ctx = ""
+    if reliability:
+        lines = ["SOURCE RELIABILITY (from past pipeline runs):"]
+        for r in reliability:
+            pct = int(r["verified"] / r["total"] * 100) if r["total"] else 0
+            lines.append(f"  {r['source']}: {r['total']} stories, {pct}% verified, {r['killed']} killed")
+        reliability_ctx = "\n".join(lines) + "\n\nUse this to weight leads — prefer sources with higher verified rates.\n\n"
+
+    leads_text = reliability_ctx + "LEADS TO EVALUATE:\n\n" + "\n\n---\n\n".join(
         f"**Lead {i+1}** (source: {item['source']})\n"
         f"Throughline: {item['throughline']}\n"
         f"URL: {item['video_url']}\n"
@@ -796,6 +836,99 @@ def run_source_scout():
 
     kv_set("last_scout_at", datetime.now(timezone.utc).isoformat())
     log.info("Source scout complete. %d proposal(s) sent.", len(proposals))
+
+
+# ---------------------------------------------------------------------------
+# Story tracker (runs weekly — follow up on published stories)
+# ---------------------------------------------------------------------------
+
+def run_story_tracker():
+    """Weekly pass: check published stories for new developments, queue follow-ups."""
+    log.info("Running story-tracker on published stories...")
+    try:
+        stories = get_published_stories(days=90)
+        if not stories:
+            log.info("Story tracker: no published stories to check yet.")
+            return
+
+        stories_text = "PUBLISHED STORIES TO CHECK FOR DEVELOPMENTS:\n\n"
+        for s in stories:
+            stories_text += (
+                f"--- Story #{s['id']} ---\n"
+                f"Throughline: {s['throughline']}\n"
+                f"Published: {s['created_at']}\n"
+                f"Source: {s['source']}\n"
+                f"Summary: {(s.get('draft_summary') or '')[:400]}\n\n"
+            )
+
+        output = run_skill("story-tracker", stories_text)
+        log.info("Story tracker complete.")
+
+        # Queue any high/medium priority follow-ups as pending topics
+        follow_ups = 0
+        in_brief = False
+        current_brief = []
+        for line in output.splitlines():
+            if line.startswith("- Follow-up brief:") and ("High" in output[max(0, output.find(line)-200):output.find(line)] or
+                                                            "Medium" in output[max(0, output.find(line)-200):output.find(line)]):
+                in_brief = True
+                current_brief = [line.replace("- Follow-up brief:", "").strip()]
+            elif in_brief and line.startswith("-"):
+                in_brief = False
+                if current_brief:
+                    from shared.db import queue_topic
+                    queue_topic("[FOLLOW-UP] " + " ".join(current_brief), source="story-tracker")
+                    follow_ups += 1
+                    current_brief = []
+
+        if follow_ups:
+            _notify(f"Story tracker: {follow_ups} follow-up(s) queued from {len(stories)} published stories.")
+        else:
+            _notify(f"Story tracker: checked {len(stories)} stories — no significant new developments this week.")
+
+        kv_set("last_tracker_at", datetime.now(timezone.utc).isoformat())
+    except Exception as e:
+        log.error("Story tracker failed: %s", e, exc_info=True)
+
+
+# ---------------------------------------------------------------------------
+# Meta-synthesizer (runs monthly — find patterns across all stories)
+# ---------------------------------------------------------------------------
+
+def run_meta_synthesis():
+    """Monthly pass: find patterns across all published and killed stories."""
+    log.info("Running meta-synthesis across all pipeline runs...")
+    try:
+        all_runs = get_all_runs_summary(limit=60)
+        if len(all_runs) < 3:
+            log.info("Meta-synthesis: fewer than 3 runs — skipping, not enough data.")
+            return
+
+        published = [r for r in all_runs if r.get("published")]
+        killed = [r for r in all_runs if r.get("trust_gate") == "KILL"]
+        held = [r for r in all_runs if r.get("status") in ("held", "hold")]
+
+        runs_text = (
+            f"ALL PIPELINE RUNS ({len(all_runs)} total, "
+            f"{len(published)} published, {len(killed)} killed, {len(held)} held):\n\n"
+        )
+        for r in all_runs:
+            outcome = "PUBLISHED" if r.get("published") else r.get("trust_gate") or r.get("status")
+            runs_text += (
+                f"#{r['id']} [{r['date']}] {outcome} — {r['throughline']}\n"
+                f"  Source: {r['source']} | Gate: {r['trust_gate']}\n"
+            )
+            if r.get("review_summary"):
+                runs_text += f"  Review: {r['review_summary'][:200]}\n"
+            runs_text += "\n"
+
+        output = run_skill("meta-synthesizer", runs_text)
+        log.info("Meta-synthesis complete.")
+
+        _notify(f"Monthly meta-synthesis complete — {len(all_runs)} stories reviewed.\n\n{output}")
+        kv_set("last_meta_at", datetime.now(timezone.utc).isoformat())
+    except Exception as e:
+        log.error("Meta-synthesis failed: %s", e, exc_info=True)
 
 
 # ---------------------------------------------------------------------------
