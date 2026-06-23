@@ -534,6 +534,13 @@ if __name__ == "__main__":
         log.error("APPROVAL_MODE=telegram but TELEGRAM_BOT_TOKEN or TELEGRAM_DRAFT_CHAT_ID not set.")
         sys.exit(1)
 
+    # --once: run a single cycle and exit (used by /topic and /runnow triggers)
+    if "--once" in sys.argv:
+        log.info("Single-cycle mode (--once)")
+        run_daily_cycle()
+        retry_held()
+        sys.exit(0)
+
     log.info("Approval mode: %s | Polling every %dh", APPROVAL_MODE, CHECK_INTERVAL_HOURS)
 
     while True:

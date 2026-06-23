@@ -293,6 +293,19 @@ def finish_topic(topic_id):
         conn.close()
 
 
+def get_pending_runs():
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, throughline, trust_gate, created_at FROM pipeline_runs "
+            "WHERE status = 'pending_human' ORDER BY id DESC"
+        )
+        return _fetchall(cur)
+    finally:
+        conn.close()
+
+
 def save_publication(run_id, channel_msg_ids, confidence):
     conn = _conn()
     try:

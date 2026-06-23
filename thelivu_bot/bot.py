@@ -28,7 +28,7 @@ from shared.config import (
     TELEGRAM_CHANNEL_ID,
     TELEGRAM_DRAFT_CHAT_ID,
 )
-from shared.db import get_run, init_db, save_publication, update_run, queue_topic
+from shared.db import get_run, get_pending_runs, init_db, save_publication, update_run, queue_topic
 
 logging.basicConfig(
     level=logging.INFO,
@@ -98,6 +98,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_topic(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    import subprocess
     topic = " ".join(context.args).strip() if context.args else ""
     if not topic:
         await update.message.reply_text(
@@ -107,35 +108,36 @@ async def cmd_topic(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     queue_topic(topic, source="owner-telegram")
     await update.message.reply_text(
-        f"Topic queued. It will run at the next cycle (or trigger one now with /runnow).\n\n"
-        f"Topic: {topic}"
+        f"On it. Investigating now — I'll send the draft when it's ready.\n\nTopic: {topic}"
     )
-    log.info("Topic queued via Telegram: %s", topic[:80])
+    subprocess.Popen(["python", "-m", "engine.agents.orchestrator", "--once"])
+    log.info("Topic queued and pipeline triggered: %s", topic[:80])
 
 
 async def cmd_runnow(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Trigger the orchestrator immediately for any queued topic or RSS cycle."""
     await update.message.reply_text("Triggering pipeline now... I'll send the draft when it's ready.")
     import subprocess
-    subprocess.Popen(["python", "-m", "engine.agents.orchestrator"])
+    subprocess.Popen(["python", "-m", "engine.agents.orchestrator", "--once"])
     log.info("Manual pipeline trigger via /runnow")
 
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    from shared.db import _conn
-    with _conn() as c:
-        pending = c.execute(
-            "SELECT COUNT(*) FROM pipeline_runs WHERE status = 'pending_human'"
-        ).fetchone()[0]
-        published = c.execute(
-            "SELECT COUNT(*) FROM publications"
-        ).fetchone()[0]
-        killed = c.execute(
-            "SELECT COUNT(*) FROM pipeline_runs WHERE status = 'killed'"
-        ).fetchone()[0]
-        held = c.execute(
-            "SELECT COUNT(*) FROM pipeline_runs WHERE status = 'held'"
-        ).fetchone()[0]
+    from shared.db import _conn, _is_postgres
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        def count(status):
+            cur.execute(f"SELECT COUNT(*) FROM pipeline_runs WHERE status = {ph}", (status,))
+            return cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM publications")
+        published = cur.fetchone()[0]
+        pending = count("pending_human")
+        held = count("held")
+        killed = count("killed")
+    finally:
+        conn.close()
     await update.message.reply_text(
         f"Thelivu status:\n"
         f"  Pending your review: {pending}\n"
@@ -143,6 +145,29 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"  Held: {held}\n"
         f"  Killed: {killed}"
     )
+
+
+async def cmd_drafts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    runs = get_pending_runs()
+    if not runs:
+        await update.message.reply_text("No drafts pending review right now.")
+        return
+
+    await update.message.reply_text(f"{len(runs)} draft(s) pending your review:")
+
+    for run in runs:
+        run_id = run["id"]
+        throughline = (run.get("throughline") or "Untitled")[:120]
+        date = str(run.get("created_at", ""))[:10]
+        gate = run.get("trust_gate", "")
+
+        text = f"#{run_id} — {throughline}\n{gate} | {date}"
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✓ Approve", callback_data=f"approve_{run_id}"),
+            InlineKeyboardButton("✗ Kill",    callback_data=f"kill_{run_id}"),
+            InlineKeyboardButton("⏸ Hold",   callback_data=f"hold_{run_id}"),
+        ]])
+        await update.message.reply_text(text, reply_markup=keyboard)
 
 
 # ---------------------------------------------------------------------------
@@ -251,6 +276,7 @@ def main():
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("status", cmd_status))
+    app.add_handler(CommandHandler("drafts", cmd_drafts))
     app.add_handler(CommandHandler("topic", cmd_topic))
     app.add_handler(CommandHandler("runnow", cmd_runnow))
     app.add_handler(CallbackQueryHandler(button_callback))
