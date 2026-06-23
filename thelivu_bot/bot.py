@@ -506,7 +506,27 @@ async def _handle_hold(query, run_id):
 # Entry point
 # ---------------------------------------------------------------------------
 
-async def main():
+async def _post_init(app):
+    from telegram import BotCommand
+    try:
+        await app.bot.set_my_commands([
+            BotCommand("topic",    "Submit a story to investigate now"),
+            BotCommand("track",    "Check status of current or recent story"),
+            BotCommand("drafts",   "List all drafts pending your review"),
+            BotCommand("queue",    "What's running, queued, and when next cycle fires"),
+            BotCommand("runnow",   "Trigger an RSS cycle immediately"),
+            BotCommand("feeds",    "List active RSS sources"),
+            BotCommand("addfeed",  "Add a YouTube channel for evaluation"),
+            BotCommand("scoutnow", "Run source scout to find new sources"),
+            BotCommand("status",   "Story counts: pending / published / held / killed"),
+            BotCommand("cost",     "API spend today / month / all-time in ₹"),
+        ])
+        log.info("Bot command menu registered.")
+    except Exception as e:
+        log.warning("Could not set bot commands (rate limit?): %s", e)
+
+
+def main():
     if not TELEGRAM_BOT_TOKEN:
         log.error("TELEGRAM_BOT_TOKEN not set.")
         sys.exit(1)
@@ -514,7 +534,7 @@ async def main():
     init_db()
     log.info("Thelivu bot starting...")
 
-    app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    app = Application.builder().token(TELEGRAM_BOT_TOKEN).post_init(_post_init).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("queue", cmd_queue))
@@ -528,25 +548,9 @@ async def main():
     app.add_handler(CommandHandler("runnow", cmd_runnow))
     app.add_handler(CallbackQueryHandler(button_callback))
 
-    # Register command list so they appear when user taps "/" in Telegram
-    from telegram import BotCommand
-    await app.bot.set_my_commands([
-        BotCommand("topic",    "Submit a story to investigate now"),
-        BotCommand("track",    "Check status of current or recent story"),
-        BotCommand("drafts",   "List all drafts pending your review"),
-        BotCommand("queue",    "What's running, queued, and when next cycle fires"),
-        BotCommand("runnow",   "Trigger an RSS cycle immediately"),
-        BotCommand("feeds",    "List active RSS sources"),
-        BotCommand("addfeed",  "Add a YouTube channel for evaluation"),
-        BotCommand("scoutnow", "Run source scout to find new sources"),
-        BotCommand("status",   "Story counts: pending / published / held / killed"),
-        BotCommand("cost",     "API spend today / month / all-time in ₹"),
-    ])
-
     log.info("Polling for updates. Human gate active.")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+    main()
