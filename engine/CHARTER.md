@@ -33,6 +33,17 @@ A candidate earns a slot on **impact × under-coverage**, in that order of prior
 
 **Auto-reject at selection:** anything whose only basis is "it's suppressed," anything unfalsifiable, anything that requires assuming a conspiracy to make sense of ordinary facts.
 
+**Hard topic exclusions — these are never in scope, regardless of impact or under-coverage:**
+- Cinema, films, OTT, streaming — any entertainment industry story (directors, actors, producers, awards, box office, casting, controversies within the industry)
+- Celebrity news, gossip, personal life of public figures unrelated to their public duties
+- Sports results, player transfers, team news, match previews/reviews
+- Lifestyle, food, travel, fashion
+- Astrology, religion as entertainment (festivals-as-events, temple construction etc.)
+- Obituaries, unless the person's public record raises a genuine accountability question
+- PR-driven "news" — product launches, brand partnerships, corporate announcements with no public-interest angle
+
+If a lead touches one of these categories, discard it immediately without scoring. These exclusions apply even if the topic is under-reported or locally prominent.
+
 ---
 
 ## 4. The verification gate (the core)
