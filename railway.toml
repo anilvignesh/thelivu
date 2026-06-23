@@ -2,6 +2,5 @@
 builder = "nixpacks"
 
 [deploy]
-# Default service: the always-on Telegram bot
-startCommand = "python -m thelivu_bot.bot"
+# Start command is set per-service via NIXPACKS_START_CMD env var in Railway
 restartPolicyType = "always"
