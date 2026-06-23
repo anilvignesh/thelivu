@@ -2,5 +2,5 @@
 builder = "nixpacks"
 
 [deploy]
-# Start command is set per-service via NIXPACKS_START_CMD env var in Railway
+startCommand = "python run.py"
 restartPolicyType = "always"
