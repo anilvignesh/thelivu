@@ -3,7 +3,10 @@ from pathlib import Path
 
 # --- Model API keys ---
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_API_KEY    = os.environ.get("GEMINI_API_KEY", "")
+GROQ_API_KEY      = os.environ.get("GROQ_API_KEY", "")
+DEEPSEEK_API_KEY  = os.environ.get("DEEPSEEK_API_KEY", "")
+MISTRAL_API_KEY   = os.environ.get("MISTRAL_API_KEY", "")
 
 # --- Telegram ---
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
@@ -28,8 +31,11 @@ APPROVAL_MODE = os.environ.get("APPROVAL_MODE", "file")
 CHECK_INTERVAL_HOURS = int(os.environ.get("CHECK_INTERVAL_HOURS", "6"))
 
 # --- Models ---
-CLAUDE_MODEL = "claude-sonnet-4-6"
-GEMINI_MODEL = "gemini-2.5-flash"
+CLAUDE_MODEL    = "claude-sonnet-4-6"
+GEMINI_MODEL    = "gemini-2.5-flash"
+GROQ_MODEL      = "llama-3.3-70b-versatile"
+DEEPSEEK_MODEL  = "deepseek-reasoner"   # R1 — reasoning tier
+MISTRAL_MODEL   = "mistral-small-latest"
 
 # --- Paths ---
 REPO_ROOT = Path(__file__).parent.parent

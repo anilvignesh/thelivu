@@ -17,9 +17,14 @@ CHANNEL_ID     = os.environ.get("TELEGRAM_CHANNEL_ID", "@thelivu")
 DRAFT_CHAT_ID  = os.environ.get("TELEGRAM_DRAFT_CHAT_ID", "7307159646")
 TG_API        = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
-_CLAUDE_IN = 3.00; _CLAUDE_OUT = 15.00
-_GEMINI_IN = 0.30; _GEMINI_OUT = 1.00
 _INR = 84
+_MODEL_COSTS = {
+    "claude":   {"in": 3.00,  "out": 15.00},
+    "gemini":   {"in": 0.30,  "out": 1.00},
+    "deepseek": {"in": 0.55,  "out": 2.19},
+    "groq":     {"in": 0.00,  "out": 0.00},
+    "mistral":  {"in": 0.20,  "out": 0.60},
+}
 
 st.set_page_config(page_title="Thelivu", page_icon="📰", layout="wide")
 
@@ -48,9 +53,14 @@ def scalar(sql, params=None):
     return list(rows[0].values())[0] if rows else 0
 
 def cost(model, i, o):
-    if model and "gemini" in model.lower():
-        return (i/1e6*_GEMINI_IN) + (o/1e6*_GEMINI_OUT)
-    return (i/1e6*_CLAUDE_IN) + (o/1e6*_CLAUDE_OUT)
+    m = (model or "").lower()
+    if "gemini" in m:   tier = "gemini"
+    elif "deepseek" in m: tier = "deepseek"
+    elif "llama" in m or "groq" in m: tier = "groq"
+    elif "mistral" in m: tier = "mistral"
+    else: tier = "claude"
+    c = _MODEL_COSTS[tier]
+    return (i/1e6 * c["in"]) + (o/1e6 * c["out"])
 
 # ── Telegram helpers ───────────────────────────────────────────────────────────
 TG_LIMIT = 4096
