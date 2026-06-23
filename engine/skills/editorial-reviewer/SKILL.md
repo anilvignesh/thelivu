@@ -9,9 +9,26 @@ This skill runs the **review stage — the final automated stage**, just before 
 
 This skill enforces the project's editorial charter (`../../CHARTER.md`). Read it if present; the charter governs in any conflict.
 
+## Two gates in one pass
+
+You run **two checks in sequence**. The quality gate comes first — it decides whether the story is substantive enough to be worth reviewing at all. Only if the story passes the quality gate do you run the editorial checks.
+
+### Quality gate — is this story substantial enough?
+
+Before checking framing or language, check whether the story has enough substance to publish:
+
+- **Research depth.** Are the key questions in the STORY_BRIEF actually answered? Are claims supported by named primary records (government data, filings, court documents) or established news? Or is the dossier thin — padded with inference, lacking specifics, or missing the central data point the angle requires?
+- **Elaboration.** Are claims developed with enough detail that a reader understands them? Or are they asserted in a sentence and moved on from?
+- **Missing voice.** Is the subject's response present, or is there a note that it was sought? If neither, that is a gap.
+- **Concrete evidence.** Does the story have at least one piece of hard evidence (a number, a document, a named source on record)? Stories built entirely on secondary inference fail this gate.
+
+If the story **fails the quality gate**, do not run the editorial checks. Output `REVISION_NEEDED` with specific instructions for the investigator and/or writer. Be precise — "dig more" is useless; "find the CGWB 2023 groundwater report and pull the specific depletion figures for the states where these facilities operate" is useful.
+
+If the story **passes the quality gate**, run the editorial checks below.
+
 ## What to check
 
-Run the draft against five checks. For each, return PASS or the specific fix needed.
+Run the draft against these checks. For each, return PASS or the specific fix needed.
 
 1. **Neutrality and symmetry.**
    - Does the language lead the reader to a verdict the facts don't compel? Strip adjectives doing argumentative work.
@@ -41,25 +58,48 @@ Run the draft against five checks. For each, return PASS or the specific fix nee
 
 ## Output format
 
-```
-# Editorial Review — [story]
+### If the story fails the quality gate:
 
-## Checks
+```
+REVISION_NEEDED
+
+Investigator tasks:
+- [specific research task with named sources/records to find]
+- [another specific gap]
+
+Writer tasks:
+- [specific section to elaborate — quote the thin passage, say what's needed]
+- [another specific gap]
+
+END_REVISION
+```
+
+Only include a section if that agent has actual work to do. Investigator tasks are about missing evidence; writer tasks are about thin or unclear exposition of evidence that already exists.
+
+### If the story passes the quality gate:
+
+```
+APPROVED
+
+# Editorial Review — [story title]
+
+## Quality gate: PASS
+
+## Editorial checks
 1. Neutrality & symmetry: PASS | FIX — [what]
 2. Framing & language: PASS | FIX — [what]
 3. Labeling integrity: PASS | FIX — [what]
 4. Named-person / defamation: PASS | FIX — [what]
 5. Transparency: PASS | FIX — [what]
-6. Self-similarity / monotony: PASS | FIX — [what recent piece it echoes, and the fresh angle to take]
+6. Self-similarity / monotony: PASS | FIX — [what recent piece it echoes, fresh angle to take]
 
-## Suggested confidence label: Confirmed | Developing | Contested
-
+## Confidence label: Confirmed | Developing | Contested
 ## Verdict: Ready | Fix-then-publish | Hold | Kill
-## Required edits before it reaches the human: [numbered list, or "none"]
+## Required edits (for human to decide on): [numbered list, or "none"]
 ## Flag for human legal review: Yes | No — [why]
 ```
 
-Note the verdict is a recommendation **to the human**, who remains the final guard. This stage never publishes.
+Note: `APPROVED` means the story clears the quality and editorial gates and is ready for the human. The human remains the final guard — this stage never publishes directly.
 
 ## Example
 
