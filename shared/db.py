@@ -11,6 +11,35 @@ CREATE TABLE IF NOT EXISTS kv_store (
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS source_proposals (
+    id          SERIAL PRIMARY KEY,
+    name        TEXT,
+    platform    TEXT,
+    handle      TEXT,
+    feed_url    TEXT,
+    lean        TEXT,
+    role        TEXT,
+    tier        INTEGER,
+    notes       TEXT,
+    tg_msg_id   INTEGER,
+    status      TEXT DEFAULT 'pending',
+    proposed_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS approved_sources (
+    id        SERIAL PRIMARY KEY,
+    name      TEXT,
+    platform  TEXT,
+    handle    TEXT,
+    feed_url  TEXT,
+    lean      TEXT,
+    role      TEXT DEFAULT 'lead',
+    tier      INTEGER DEFAULT 3,
+    notes     TEXT,
+    status    TEXT DEFAULT 'active',
+    added_at  TIMESTAMP DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS token_usage (
     id              SERIAL PRIMARY KEY,
     run_id          INTEGER,
@@ -65,6 +94,35 @@ CREATE TABLE IF NOT EXISTS kv_store (
     key   TEXT PRIMARY KEY,
     value TEXT,
     updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS source_proposals (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT,
+    platform    TEXT,
+    handle      TEXT,
+    feed_url    TEXT,
+    lean        TEXT,
+    role        TEXT,
+    tier        INTEGER,
+    notes       TEXT,
+    tg_msg_id   INTEGER,
+    status      TEXT DEFAULT 'pending',
+    proposed_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS approved_sources (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    name      TEXT,
+    platform  TEXT,
+    handle    TEXT,
+    feed_url  TEXT,
+    lean      TEXT,
+    role      TEXT DEFAULT 'lead',
+    tier      INTEGER DEFAULT 3,
+    notes     TEXT,
+    status    TEXT DEFAULT 'active',
+    added_at  TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS token_usage (
@@ -432,6 +490,81 @@ def get_cost_report_data():
             cur.execute("SELECT COUNT(*) FROM pipeline_runs WHERE date(created_at) = date('now')")
         runs_today = cur.fetchone()[0]
         return {"by_model": rows, "runs_today": runs_today}
+    finally:
+        conn.close()
+
+
+def save_proposal(name, platform, handle, feed_url, lean, role, tier, notes):
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(
+            f"INSERT INTO source_proposals (name, platform, handle, feed_url, lean, role, tier, notes) "
+            f"VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+            (name, platform, handle, feed_url, lean, role, tier, notes),
+        )
+        if _is_postgres():
+            cur.execute("SELECT lastval()")
+            pid = cur.fetchone()[0]
+        else:
+            pid = cur.lastrowid
+        conn.commit()
+        return pid
+    finally:
+        conn.close()
+
+
+def set_proposal_msg_id(proposal_id, tg_msg_id):
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(f"UPDATE source_proposals SET tg_msg_id={ph} WHERE id={ph}", (tg_msg_id, proposal_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def approve_proposal(proposal_id):
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(f"SELECT * FROM source_proposals WHERE id={ph}", (proposal_id,))
+        row = _fetchone(cur)
+        if not row:
+            return None
+        cur.execute(
+            f"INSERT INTO approved_sources (name, platform, handle, feed_url, lean, role, tier, notes) "
+            f"VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+            (row["name"], row["platform"], row["handle"], row["feed_url"],
+             row["lean"], row["role"], row["tier"], row["notes"]),
+        )
+        cur.execute(f"UPDATE source_proposals SET status='approved' WHERE id={ph}", (proposal_id,))
+        conn.commit()
+        return row
+    finally:
+        conn.close()
+
+
+def skip_proposal(proposal_id):
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(f"UPDATE source_proposals SET status='skipped' WHERE id={ph}", (proposal_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_approved_sources():
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM approved_sources WHERE status='active'")
+        return _fetchall(cur)
     finally:
         conn.close()
 

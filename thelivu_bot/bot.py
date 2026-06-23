@@ -28,7 +28,7 @@ from shared.config import (
     TELEGRAM_CHANNEL_ID,
     TELEGRAM_DRAFT_CHAT_ID,
 )
-from shared.db import get_run, get_pending_runs, get_cost_report_data, get_queue_state, kv_get, init_db, save_publication, update_run, queue_topic
+from shared.db import get_run, get_pending_runs, get_cost_report_data, get_queue_state, kv_get, init_db, save_publication, update_run, queue_topic, approve_proposal, skip_proposal
 
 logging.basicConfig(
     level=logging.INFO,
@@ -232,6 +232,81 @@ async def cmd_feeds(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines))
 
 
+async def cmd_scoutnow(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    import subprocess
+    await update.message.reply_text("Running source scout now... I'll send proposals when done.")
+    subprocess.Popen(["python", "-c",
+        "from engine.agents.orchestrator import run_source_scout; run_source_scout()"])
+    log.info("Manual source scout triggered")
+
+
+async def cmd_track(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show live status of the most recent pipeline run or a specific run ID."""
+    from shared.db import _conn, _is_postgres
+
+    run_id = None
+    if context.args:
+        try:
+            run_id = int(context.args[0])
+        except ValueError:
+            await update.message.reply_text("Usage: /track or /track [run_id]")
+            return
+
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        if run_id:
+            ph = "%s" if _is_postgres() else "?"
+            cur.execute(
+                f"SELECT id, throughline, source, status, trust_gate, created_at, updated_at "
+                f"FROM pipeline_runs WHERE id = {ph}", (run_id,)
+            )
+        else:
+            cur.execute(
+                "SELECT id, throughline, source, status, trust_gate, created_at, updated_at "
+                "FROM pipeline_runs ORDER BY id DESC LIMIT 1"
+            )
+        from shared.db import _fetchone
+        run = _fetchone(cur)
+    finally:
+        conn.close()
+
+    if not run:
+        await update.message.reply_text("No pipeline runs found yet.")
+        return
+
+    STATUS_LABELS = {
+        "investigating":  "🔍 Investigating",
+        "pending_human":  "📬 Ready for your review",
+        "published":      "✅ Published",
+        "killed":         "❌ Killed",
+        "held":           "⏸ On hold",
+        "kill":           "❌ Killed",
+        "hold":           "⏸ On hold",
+    }
+    label = STATUS_LABELS.get(run["status"], run["status"])
+    updated = str(run.get("updated_at", ""))[:16]
+
+    msg = (
+        f"Run #{run['id']}\n\n"
+        f"Story: {(run.get('throughline') or 'TBD')[:100]}\n"
+        f"Source: {run.get('source', 'N/A')}\n"
+        f"Status: {label}\n"
+        f"Trust gate: {run.get('trust_gate') or 'pending'}\n"
+        f"Last updated: {updated} UTC"
+    )
+
+    if run["status"] == "pending_human":
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✓ Approve", callback_data=f"approve_{run['id']}"),
+            InlineKeyboardButton("✗ Kill",    callback_data=f"kill_{run['id']}"),
+            InlineKeyboardButton("⏸ Hold",   callback_data=f"hold_{run['id']}"),
+        ]])
+        await update.message.reply_text(msg, reply_markup=keyboard)
+    else:
+        await update.message.reply_text(msg)
+
+
 async def cmd_addfeed(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Queue a new YouTube channel for the source-scout to evaluate."""
     url = " ".join(context.args).strip() if context.args else ""
@@ -338,8 +413,38 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _handle_kill(query, run_id)
     elif action == "hold":
         await _handle_hold(query, run_id)
+    elif action == "addsrc":
+        await _handle_addsrc(query, run_id)
+    elif action == "skipsrc":
+        await _handle_skipsrc(query, run_id)
     else:
         await query.message.reply_text(f"Unknown action: {action}")
+
+
+async def _handle_addsrc(query, proposal_id):
+    source = approve_proposal(proposal_id)
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    if source:
+        await query.message.reply_text(
+            f"Source added: {source['name']}\n"
+            f"It will be picked up on the next RSS cycle."
+        )
+        log.info("Source approved: %s (#%d)", source["name"], proposal_id)
+    else:
+        await query.message.reply_text(f"Proposal #{proposal_id} not found.")
+
+
+async def _handle_skipsrc(query, proposal_id):
+    skip_proposal(proposal_id)
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    await query.message.reply_text(f"Source proposal #{proposal_id} skipped.")
+    log.info("Source skipped: proposal #%d", proposal_id)
 
 
 async def _handle_approve(query, run_id, run):
@@ -401,7 +506,7 @@ async def _handle_hold(query, run_id):
 # Entry point
 # ---------------------------------------------------------------------------
 
-def main():
+async def main():
     if not TELEGRAM_BOT_TOKEN:
         log.error("TELEGRAM_BOT_TOKEN not set.")
         sys.exit(1)
@@ -413,17 +518,35 @@ def main():
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("queue", cmd_queue))
+    app.add_handler(CommandHandler("track", cmd_track))
     app.add_handler(CommandHandler("feeds", cmd_feeds))
     app.add_handler(CommandHandler("addfeed", cmd_addfeed))
+    app.add_handler(CommandHandler("scoutnow", cmd_scoutnow))
     app.add_handler(CommandHandler("drafts", cmd_drafts))
     app.add_handler(CommandHandler("cost", cmd_cost))
     app.add_handler(CommandHandler("topic", cmd_topic))
     app.add_handler(CommandHandler("runnow", cmd_runnow))
     app.add_handler(CallbackQueryHandler(button_callback))
 
+    # Register command list so they appear when user taps "/" in Telegram
+    from telegram import BotCommand
+    await app.bot.set_my_commands([
+        BotCommand("topic",    "Submit a story to investigate now"),
+        BotCommand("track",    "Check status of current or recent story"),
+        BotCommand("drafts",   "List all drafts pending your review"),
+        BotCommand("queue",    "What's running, queued, and when next cycle fires"),
+        BotCommand("runnow",   "Trigger an RSS cycle immediately"),
+        BotCommand("feeds",    "List active RSS sources"),
+        BotCommand("addfeed",  "Add a YouTube channel for evaluation"),
+        BotCommand("scoutnow", "Run source scout to find new sources"),
+        BotCommand("status",   "Story counts: pending / published / held / killed"),
+        BotCommand("cost",     "API spend today / month / all-time in ₹"),
+    ])
+
     log.info("Polling for updates. Human gate active.")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
 if __name__ == "__main__":
-    main()
+    import asyncio
+    asyncio.run(main())

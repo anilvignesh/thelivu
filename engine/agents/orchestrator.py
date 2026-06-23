@@ -43,9 +43,13 @@ from shared.db import (
     update_run,
     get_held_runs,
     get_cost_report_data,
+    get_approved_sources,
+    save_proposal,
+    set_proposal_msg_id,
     pop_next_topic,
     finish_topic,
     kv_set,
+    kv_get,
 )
 from engine.agents.skill_runner import run_skill
 
@@ -372,12 +376,21 @@ def run_daily_cycle():
         _run_topic_intake(pending)
         return
 
-    # 2. Load active YouTube sources
+    # 2. Load active YouTube sources (static yaml + DB-approved)
     sources_data = yaml.safe_load(SOURCES_YAML.read_text())
-    active_sources = [
+    yaml_sources = [
         s for s in sources_data.get("sources", [])
         if s.get("status") == "active" and s.get("platform") == "youtube" and s.get("feed")
     ]
+    db_sources = [
+        s for s in get_approved_sources()
+        if s.get("platform") == "youtube" and s.get("feed_url")
+    ]
+    # Normalise db sources to match yaml shape
+    for s in db_sources:
+        s["feed"] = s.pop("feed_url", None)
+        s["id"] = s.get("handle", str(s["id"]))
+    active_sources = yaml_sources + db_sources
     log.info("Active sources: %s", [s["id"] for s in active_sources])
 
     # 3. Ingest new items from all active sources
@@ -498,6 +511,68 @@ def run_daily_cycle():
 
 
 # ---------------------------------------------------------------------------
+# Source scout (runs weekly, proposes new sources via Telegram)
+# ---------------------------------------------------------------------------
+
+def run_source_scout():
+    log.info("Running source-scout...")
+    output = run_skill("source-scout", "Run the weekly source scout. Focus on verification-grade and cross-spectrum sources for the Kerala/India beat.")
+
+    # Parse PROPOSALS JSON block
+    import re as _re
+    match = _re.search(r"PROPOSALS\s*(\[.*?\])\s*END_PROPOSALS", output, _re.DOTALL)
+    if not match:
+        log.info("Source scout: no proposals block found.")
+        _notify(f"Source scout ran but found no new proposals this week.\n\n{output[:600]}")
+        return
+
+    try:
+        proposals = json.loads(match.group(1))
+    except json.JSONDecodeError as e:
+        log.error("Source scout: failed to parse proposals JSON: %s", e)
+        _notify(f"Source scout ran but proposals JSON was malformed.\n\n{output[:600]}")
+        return
+
+    if not proposals:
+        _notify("Source scout ran — no sources meet the bar this week.")
+        return
+
+    _notify(f"Source scout found {len(proposals)} candidate(s). Review below:")
+
+    for p in proposals:
+        proposal_id = save_proposal(
+            name=p.get("name", "Unknown"),
+            platform=p.get("platform", "web"),
+            handle=p.get("handle", ""),
+            feed_url=p.get("feed_url", ""),
+            lean=p.get("lean", ""),
+            role=p.get("role", "lead"),
+            tier=p.get("tier", 3),
+            notes=p.get("notes", ""),
+        )
+        text = (
+            f"New source proposal #{proposal_id}\n\n"
+            f"Name: {p.get('name')}\n"
+            f"Platform: {p.get('platform')} | Role: {p.get('role')} | Tier: {p.get('tier')}\n"
+            f"Handle: {p.get('handle')}\n"
+            f"Lean: {p.get('lean')}\n\n"
+            f"{p.get('notes', '')}"
+        )
+        keyboard = {
+            "inline_keyboard": [[
+                {"text": "✓ Add",  "callback_data": f"addsrc_{proposal_id}"},
+                {"text": "✗ Skip", "callback_data": f"skipsrc_{proposal_id}"},
+            ]]
+        }
+        msg_id = _tg_post(TELEGRAM_DRAFT_CHAT_ID, text, reply_markup=keyboard)
+        if msg_id:
+            set_proposal_msg_id(proposal_id, msg_id)
+
+    kv_set("last_scout_at", datetime.now(timezone.utc).isoformat())
+    log.info("Source scout complete. %d proposal(s) sent.", len(proposals))
+
+
+# ---------------------------------------------------------------------------
 # Daily cost report (sent at 8pm IST / 14:30 UTC)
 # ---------------------------------------------------------------------------
 
@@ -609,6 +684,19 @@ if __name__ == "__main__":
                 _cost_report_sent_date = today
             except Exception as e:
                 log.error("Cost report failed: %s", e)
+
+        # Run source scout weekly (every 7 days)
+        try:
+            last_scout = kv_get("last_scout_at")
+            if last_scout:
+                from datetime import timedelta
+                last_dt = datetime.fromisoformat(last_scout)
+                if (now_utc - last_dt).days >= 7:
+                    run_source_scout()
+            else:
+                run_source_scout()  # first run
+        except Exception as e:
+            log.error("Source scout failed: %s", e)
 
         try:
             run_daily_cycle()

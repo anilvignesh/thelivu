@@ -64,7 +64,30 @@ Write each candidate into `sources.yaml` as `status: candidate`, and surface thi
   or just more of the same? If the latter, say so plainly.
 ```
 
+## Structured output block (required)
+
+After your human-readable dossier, always end with a JSON block so the engine can parse proposals automatically. Include ONLY candidates you recommend (nominate or nominate with caution). Do NOT include "do not add" candidates in the JSON.
+
+```json
+PROPOSALS
+[
+  {
+    "name": "Kerala High Court Case Status",
+    "platform": "web",
+    "handle": "@keralaHighCourt",
+    "feed_url": "https://example.com/rss",
+    "lean": "neutral — primary legal record",
+    "role": "verification",
+    "tier": 1,
+    "notes": "Primary-record source for Kerala judicial proceedings."
+  }
+]
+END_PROPOSALS
+```
+
+If no sources meet the bar this week, output `PROPOSALS\n[]\nEND_PROPOSALS`.
+
 ## Example
 
 Input: "Run the weekly source scout for Kerala."
-Output: nominates the Kerala High Court and ECI data portals and one established Malayalam daily as *verification-grade* candidates (filling the engine's biggest gap), flags one suggested explainer as "more of the same — adds reach but not independence," and notes one active source whose last few leads all failed verification — proposed for review. All written to the registry as candidates; nothing activated.
+Output: nominates the Kerala High Court and ECI data portals and one established Malayalam daily as *verification-grade* candidates (filling the engine's biggest gap), flags one suggested explainer as "more of the same — adds reach but not independence," and notes one active source whose last few leads all failed verification — proposed for review. Ends with a PROPOSALS JSON block containing only the recommended candidates.
