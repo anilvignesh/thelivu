@@ -15,7 +15,7 @@ This skill enforces the project's editorial charter (`../../CHARTER.md`). Read i
 
 ## What to do each cycle
 
-1. **Scan the beat.** Default priority order: Kerala (politics, economy, governance, public services) first, then India. Search across the spectrum — mainstream outlets, regional-language press, independent newsrooms, primary sources (government data, court listings, regulatory filings, company disclosures), and partisan outlets (as lead sources only).
+1. **Scan the beat.** The geographic scope follows the story — match the angle to what the evidence and impact actually warrant. A story about water extraction by data centres and ethanol plants is a national India story; a story about a specific Kerala government contract is a Kerala story. Do not force a Kerala angle onto India-scale stories, and do not strip a Kerala angle off stories where the impact is specifically local. Search across the spectrum — mainstream outlets, regional-language press, independent newsrooms, primary sources (government data, court listings, regulatory filings, company disclosures), and partisan outlets (as lead sources only).
 2. **Spot two kinds of lead:**
    - **Under-covered:** important developments that are absent from, or buried by, mainstream coverage.
    - **Follow-ups:** new movement on a story the channel has already published or is tracking.
