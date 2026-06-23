@@ -1,9 +1,9 @@
 """
-Thelivu agent orchestrator — daily pipeline runner.
+Thelivu agent orchestrator — always-on pipeline loop.
 
 Entry point: python -m engine.agents.orchestrator
 
-Runs once per day (triggered by Railway cron at 8am IST / 02:30 UTC):
+Runs a pipeline cycle every CHECK_INTERVAL_HOURS (default 6), sleeping between:
   ingest → monitor → investigate → verify → pattern → write → review → Telegram
 
 Agents can use web_search to verify claims and create_skill to add new skills
@@ -21,6 +21,8 @@ import feedparser
 import requests
 import yaml
 
+import time
+
 from shared.config import (
     SOURCES_YAML,
     WATCHLIST_YAML,
@@ -31,6 +33,7 @@ from shared.config import (
     APPROVAL_MODE,
     ARTICLES_DIR,
     DRY_RUN_LOG,
+    CHECK_INTERVAL_HOURS,
 )
 from shared.db import (
     init_db,
@@ -531,6 +534,14 @@ if __name__ == "__main__":
         log.error("APPROVAL_MODE=telegram but TELEGRAM_BOT_TOKEN or TELEGRAM_DRAFT_CHAT_ID not set.")
         sys.exit(1)
 
-    log.info("Approval mode: %s", APPROVAL_MODE)
-    run_daily_cycle()
-    retry_held()
+    log.info("Approval mode: %s | Polling every %dh", APPROVAL_MODE, CHECK_INTERVAL_HOURS)
+
+    while True:
+        try:
+            run_daily_cycle()
+            retry_held()
+        except Exception as e:
+            log.error("Cycle failed: %s", e, exc_info=True)
+
+        log.info("Sleeping %dh until next cycle...", CHECK_INTERVAL_HOURS)
+        time.sleep(CHECK_INTERVAL_HOURS * 3600)

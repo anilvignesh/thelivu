@@ -24,6 +24,9 @@ DB_PATH = os.environ.get("DB_PATH", "thelivu.db")
 # "file"     : save draft to articles/drafts/ and log to dry-run-log (ban period / local)
 APPROVAL_MODE = os.environ.get("APPROVAL_MODE", "file")
 
+# --- Orchestrator polling interval ---
+CHECK_INTERVAL_HOURS = int(os.environ.get("CHECK_INTERVAL_HOURS", "6"))
+
 # --- Models ---
 CLAUDE_MODEL = "claude-sonnet-4-6"
 GEMINI_MODEL = "gemini-2.5-flash"
