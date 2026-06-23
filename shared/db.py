@@ -86,6 +86,15 @@ CREATE TABLE IF NOT EXISTS publications (
     confidence      TEXT,
     published_at    TIMESTAMP DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS active_agents (
+    id          SERIAL PRIMARY KEY,
+    run_id      INTEGER,
+    skill       TEXT,
+    model       TEXT,
+    topic       TEXT,
+    started_at  TIMESTAMP DEFAULT NOW()
+);
 """
 
 # SQLite fallback schema (same structure, SQLite syntax)
@@ -170,6 +179,15 @@ CREATE TABLE IF NOT EXISTS publications (
     channel_msg_ids TEXT,
     confidence      TEXT,
     published_at    TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS active_agents (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id      INTEGER,
+    skill       TEXT,
+    model       TEXT,
+    topic       TEXT,
+    started_at  TEXT DEFAULT (datetime('now'))
 );
 """
 
@@ -578,6 +596,53 @@ def get_pending_runs():
             "WHERE status = 'pending_human' ORDER BY id DESC"
         )
         return _fetchall(cur)
+    finally:
+        conn.close()
+
+
+def agent_start(skill, model, topic=None, run_id=None):
+    """Record that a skill agent has started. Returns the active_agent id."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(
+            f"INSERT INTO active_agents (run_id, skill, model, topic) VALUES ({ph},{ph},{ph},{ph})",
+            (run_id, skill, model, (topic or "")[:120]),
+        )
+        if _is_postgres():
+            cur.execute("SELECT lastval()")
+            aid = cur.fetchone()[0]
+        else:
+            aid = cur.lastrowid
+        conn.commit()
+        return aid
+    finally:
+        conn.close()
+
+
+def agent_done(agent_id):
+    """Remove the active_agent entry when a skill finishes."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(f"DELETE FROM active_agents WHERE id = {ph}", (agent_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def clear_stale_agents():
+    """Remove active_agent rows older than 30 minutes (crash recovery)."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        if _is_postgres():
+            cur.execute("DELETE FROM active_agents WHERE started_at < NOW() - INTERVAL '30 minutes'")
+        else:
+            cur.execute("DELETE FROM active_agents WHERE started_at < datetime('now', '-30 minutes')")
+        conn.commit()
     finally:
         conn.close()
 

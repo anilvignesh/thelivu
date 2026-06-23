@@ -152,22 +152,30 @@ def _run_claude_skill(skill_name, input_text, system_prompt, extra_tools, max_to
         return _extract_claude_text(response)
 
 
-def run_skill(skill_name, input_text, extra_tools=None, max_tokens=4096):
+def run_skill(skill_name, input_text, extra_tools=None, max_tokens=4096, run_id=None, topic=None):
     """
     Load engine/skills/{skill_name}/SKILL.md as system prompt and run.
     Research skills → Gemini + Google Search grounding.
     Editorial skills → Claude agentic loop.
     Falls back to Claude if GEMINI_API_KEY is not set.
     """
+    from shared.db import agent_start, agent_done
+
     system_prompt = _load_skill(skill_name)
 
-    if skill_name in _GEMINI_SKILLS and GEMINI_API_KEY:
-        try:
-            return _run_gemini_skill(skill_name, input_text, system_prompt, max_tokens, run_id=None)
-        except Exception as e:
-            log.warning("Gemini failed for %s (%s) — falling back to Claude", skill_name, e)
+    use_gemini = skill_name in _GEMINI_SKILLS and GEMINI_API_KEY
+    model_label = GEMINI_MODEL if use_gemini else CLAUDE_MODEL
+    aid = agent_start(skill_name, model_label, topic=topic, run_id=run_id)
 
-    return _run_claude_skill(skill_name, input_text, system_prompt, extra_tools, max_tokens, run_id=None)
+    try:
+        if use_gemini:
+            try:
+                return _run_gemini_skill(skill_name, input_text, system_prompt, max_tokens, run_id=run_id)
+            except Exception as e:
+                log.warning("Gemini failed for %s (%s) — falling back to Claude", skill_name, e)
+        return _run_claude_skill(skill_name, input_text, system_prompt, extra_tools, max_tokens, run_id=run_id)
+    finally:
+        agent_done(aid)
 
 
 def _extract_claude_text(response):
