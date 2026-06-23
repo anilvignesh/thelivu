@@ -3,7 +3,7 @@ import os
 service = os.environ.get("RAILWAY_SERVICE_NAME", "thelivu")
 
 if service == "thelivu-agent":
-    from engine.agents.orchestrator import run_daily_cycle, retry_held, send_cost_report, run_source_scout, run_story_scout
+    from engine.agents.orchestrator import run_daily_cycle, retry_held, send_cost_report, run_source_scout, run_story_scout, run_story_tracker, run_meta_synthesis
     import time, logging, sys
     from datetime import datetime, timezone, timedelta
     from shared.config import ANTHROPIC_API_KEY, APPROVAL_MODE, TELEGRAM_BOT_TOKEN, TELEGRAM_DRAFT_CHAT_ID, CHECK_INTERVAL_HOURS
@@ -42,17 +42,29 @@ if service == "thelivu-agent":
             except Exception as e:
                 log.error("Cost report failed: %s", e)
 
-        # Weekly source scout + story scout
+        # Weekly: source scout + story scout + story tracker
         try:
             last_scout = kv_get("last_scout_at")
             if not last_scout:
                 kv_set("last_scout_at", now_utc.isoformat())
-                log.info("Source scout scheduled for 7 days from now.")
+                log.info("Weekly jobs scheduled for 7 days from now.")
             elif (now_utc - datetime.fromisoformat(last_scout)).days >= 7:
                 run_source_scout()
                 run_story_scout()
+                run_story_tracker()
+                kv_set("last_scout_at", now_utc.isoformat())
         except Exception as e:
-            log.error("Source/story scout failed: %s", e)
+            log.error("Weekly jobs failed: %s", e)
+
+        # Monthly: meta-synthesis
+        try:
+            last_meta = kv_get("last_meta_at")
+            if not last_meta:
+                kv_set("last_meta_at", now_utc.isoformat())
+            elif (now_utc - datetime.fromisoformat(last_meta)).days >= 30:
+                run_meta_synthesis()
+        except Exception as e:
+            log.error("Meta-synthesis failed: %s", e)
 
         # Owner topics — check every 2 minutes, run immediately if queued
         try:
