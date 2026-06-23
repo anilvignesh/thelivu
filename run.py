@@ -3,7 +3,7 @@ import os
 service = os.environ.get("RAILWAY_SERVICE_NAME", "thelivu")
 
 if service == "thelivu-agent":
-    from engine.agents.orchestrator import run_daily_cycle, retry_held, send_cost_report, run_source_scout
+    from engine.agents.orchestrator import run_daily_cycle, retry_held, send_cost_report, run_source_scout, run_story_scout
     import time, logging, sys
     from datetime import datetime, timezone, timedelta
     from shared.config import ANTHROPIC_API_KEY, APPROVAL_MODE, TELEGRAM_BOT_TOKEN, TELEGRAM_DRAFT_CHAT_ID, CHECK_INTERVAL_HOURS
@@ -42,7 +42,7 @@ if service == "thelivu-agent":
             except Exception as e:
                 log.error("Cost report failed: %s", e)
 
-        # Weekly source scout
+        # Weekly source scout + story scout
         try:
             last_scout = kv_get("last_scout_at")
             if not last_scout:
@@ -50,8 +50,9 @@ if service == "thelivu-agent":
                 log.info("Source scout scheduled for 7 days from now.")
             elif (now_utc - datetime.fromisoformat(last_scout)).days >= 7:
                 run_source_scout()
+                run_story_scout()
         except Exception as e:
-            log.error("Source scout failed: %s", e)
+            log.error("Source/story scout failed: %s", e)
 
         # Owner topics — check every 2 minutes, run immediately if queued
         try:

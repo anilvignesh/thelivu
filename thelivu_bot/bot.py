@@ -456,6 +456,20 @@ async def _handle_approve(query, run_id, run):
         await query.message.reply_text(f"Run #{run_id} has no draft text. Cannot publish.")
         return
 
+    # publisher skill formats the final article (confidence label, footer, structure)
+    try:
+        from engine.agents.skill_runner import run_skill
+        review = run.get("review_text") or ""
+        formatted = run_skill(
+            "publisher",
+            f"APPROVED DRAFT:\n\n{draft}\n\nEDITORIAL REVIEW:\n\n{review}",
+        )
+        # publisher skill returns the formatted text ready to post
+        if formatted and len(formatted) > 100:
+            draft = formatted
+    except Exception as e:
+        log.warning("publisher skill failed (%s) — posting raw draft", e)
+
     try:
         msg_ids = _post_to_channel(draft)
     except Exception as e:
