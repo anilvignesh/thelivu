@@ -28,7 +28,7 @@ from shared.config import (
     TELEGRAM_CHANNEL_ID,
     TELEGRAM_DRAFT_CHAT_ID,
 )
-from shared.db import get_run, get_pending_runs, init_db, save_publication, update_run, queue_topic
+from shared.db import get_run, get_pending_runs, get_cost_report_data, init_db, save_publication, update_run, queue_topic
 
 logging.basicConfig(
     level=logging.INFO,
@@ -144,6 +144,39 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"  Published: {published}\n"
         f"  Held: {held}\n"
         f"  Killed: {killed}"
+    )
+
+
+async def cmd_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    _CLAUDE_IN  = 3.00;  _CLAUDE_OUT = 15.00
+    _GEMINI_IN  = 0.30;  _GEMINI_OUT = 1.00
+    _INR        = 84
+
+    def calc(model, i, o):
+        if "gemini" in model.lower():
+            return (i/1e6*_GEMINI_IN) + (o/1e6*_GEMINI_OUT)
+        return (i/1e6*_CLAUDE_IN) + (o/1e6*_CLAUDE_OUT)
+
+    data = get_cost_report_data()
+    rows = data["by_model"]
+    runs_today = data["runs_today"]
+
+    today_usd = month_usd = total_usd = 0.0
+    lines = []
+    for row in rows:
+        m = row["model"]
+        c = calc(m, row["today_in"] or 0, row["today_out"] or 0)
+        today_usd += c
+        month_usd += calc(m, row["month_in"] or 0, row["month_out"] or 0)
+        total_usd += calc(m, row["total_in"] or 0, row["total_out"] or 0)
+        lines.append(f"  {m}: ${c:.4f}")
+
+    await update.message.reply_text(
+        f"Thelivu costs:\n\n"
+        f"Today: ₹{today_usd*_INR:.2f} (${today_usd:.4f})\n"
+        f"This month: ₹{month_usd*_INR:.2f} (${month_usd:.4f})\n"
+        f"All time: ₹{total_usd*_INR:.2f} (${total_usd:.4f})\n\n"
+        + "\n".join(lines or ["No usage yet."]) + f"\n\nRuns today: {runs_today}"
     )
 
 
@@ -277,6 +310,7 @@ def main():
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("drafts", cmd_drafts))
+    app.add_handler(CommandHandler("cost", cmd_cost))
     app.add_handler(CommandHandler("topic", cmd_topic))
     app.add_handler(CommandHandler("runnow", cmd_runnow))
     app.add_handler(CallbackQueryHandler(button_callback))

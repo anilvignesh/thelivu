@@ -5,6 +5,16 @@ from datetime import datetime, timezone
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS token_usage (
+    id              SERIAL PRIMARY KEY,
+    run_id          INTEGER,
+    skill           TEXT,
+    model           TEXT,
+    input_tokens    INTEGER DEFAULT 0,
+    output_tokens   INTEGER DEFAULT 0,
+    recorded_at     TIMESTAMP DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS pending_topics (
     id          SERIAL PRIMARY KEY,
     topic       TEXT NOT NULL,
@@ -45,6 +55,16 @@ CREATE TABLE IF NOT EXISTS publications (
 
 # SQLite fallback schema (same structure, SQLite syntax)
 _SCHEMA_SQLITE = """
+CREATE TABLE IF NOT EXISTS token_usage (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id          INTEGER,
+    skill           TEXT,
+    model           TEXT,
+    input_tokens    INTEGER DEFAULT 0,
+    output_tokens   INTEGER DEFAULT 0,
+    recorded_at     TEXT DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS pending_topics (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     topic       TEXT NOT NULL,
@@ -289,6 +309,64 @@ def finish_topic(topic_id):
             f"UPDATE pending_topics SET status = 'done' WHERE id = {ph}", (topic_id,)
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def record_usage(skill, model, input_tokens, output_tokens, run_id=None):
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(
+            f"INSERT INTO token_usage (run_id, skill, model, input_tokens, output_tokens) "
+            f"VALUES ({ph},{ph},{ph},{ph},{ph})",
+            (run_id, skill, model, input_tokens, output_tokens),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_cost_report_data():
+    """Return token usage aggregated for today, this month, and all time."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        if _is_postgres():
+            cur.execute("""
+                SELECT
+                    model,
+                    SUM(input_tokens)  FILTER (WHERE recorded_at::date = CURRENT_DATE)  AS today_in,
+                    SUM(output_tokens) FILTER (WHERE recorded_at::date = CURRENT_DATE)  AS today_out,
+                    SUM(input_tokens)  FILTER (WHERE DATE_TRUNC('month', recorded_at) = DATE_TRUNC('month', NOW())) AS month_in,
+                    SUM(output_tokens) FILTER (WHERE DATE_TRUNC('month', recorded_at) = DATE_TRUNC('month', NOW())) AS month_out,
+                    SUM(input_tokens)  AS total_in,
+                    SUM(output_tokens) AS total_out
+                FROM token_usage
+                GROUP BY model
+            """)
+        else:
+            cur.execute("""
+                SELECT
+                    model,
+                    SUM(CASE WHEN date(recorded_at)=date('now') THEN input_tokens ELSE 0 END)  AS today_in,
+                    SUM(CASE WHEN date(recorded_at)=date('now') THEN output_tokens ELSE 0 END) AS today_out,
+                    SUM(CASE WHEN strftime('%Y-%m',recorded_at)=strftime('%Y-%m','now') THEN input_tokens ELSE 0 END)  AS month_in,
+                    SUM(CASE WHEN strftime('%Y-%m',recorded_at)=strftime('%Y-%m','now') THEN output_tokens ELSE 0 END) AS month_out,
+                    SUM(input_tokens)  AS total_in,
+                    SUM(output_tokens) AS total_out
+                FROM token_usage
+                GROUP BY model
+            """)
+        rows = _fetchall(cur)
+        # runs today
+        if _is_postgres():
+            cur.execute("SELECT COUNT(*) FROM pipeline_runs WHERE created_at::date = CURRENT_DATE")
+        else:
+            cur.execute("SELECT COUNT(*) FROM pipeline_runs WHERE date(created_at) = date('now')")
+        runs_today = cur.fetchone()[0]
+        return {"by_model": rows, "runs_today": runs_today}
     finally:
         conn.close()
 

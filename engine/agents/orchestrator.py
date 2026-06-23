@@ -42,6 +42,7 @@ from shared.db import (
     save_run,
     update_run,
     get_held_runs,
+    get_cost_report_data,
     pop_next_topic,
     finish_topic,
 )
@@ -495,6 +496,56 @@ def run_daily_cycle():
 
 
 # ---------------------------------------------------------------------------
+# Daily cost report (sent at 8pm IST / 14:30 UTC)
+# ---------------------------------------------------------------------------
+
+_CLAUDE_IN_PER_M  = 3.00
+_CLAUDE_OUT_PER_M = 15.00
+_GEMINI_IN_PER_M  = 0.30
+_GEMINI_OUT_PER_M = 1.00
+_USD_TO_INR       = 84
+
+
+def _calc_cost(model, in_tok, out_tok):
+    if "gemini" in model.lower():
+        return (in_tok / 1_000_000 * _GEMINI_IN_PER_M) + (out_tok / 1_000_000 * _GEMINI_OUT_PER_M)
+    return (in_tok / 1_000_000 * _CLAUDE_IN_PER_M) + (out_tok / 1_000_000 * _CLAUDE_OUT_PER_M)
+
+
+def send_cost_report():
+    from datetime import date
+    data = get_cost_report_data()
+    rows = data["by_model"]
+    runs_today = data["runs_today"]
+    today = date.today().isoformat()
+
+    today_usd = month_usd = total_usd = 0.0
+    lines = []
+    for row in rows:
+        model = row["model"]
+        c_today = _calc_cost(model, row["today_in"] or 0, row["today_out"] or 0)
+        c_month = _calc_cost(model, row["month_in"] or 0, row["month_out"] or 0)
+        c_total = _calc_cost(model, row["total_in"] or 0, row["total_out"] or 0)
+        today_usd += c_today
+        month_usd += c_month
+        total_usd += c_total
+        lines.append(
+            f"  {model}: {row['today_in'] or 0}in + {row['today_out'] or 0}out tokens = ${c_today:.4f}"
+        )
+
+    report = (
+        f"Thelivu Cost Report — {today}\n\n"
+        f"Today: ₹{today_usd * _USD_TO_INR:.2f} (~${today_usd:.4f})\n"
+        f"This month: ₹{month_usd * _USD_TO_INR:.2f} (~${month_usd:.4f})\n"
+        f"All time: ₹{total_usd * _USD_TO_INR:.2f} (~${total_usd:.4f})\n\n"
+        f"Today's breakdown:\n" + "\n".join(lines or ["  No usage recorded."]) + "\n\n"
+        f"Pipeline runs today: {runs_today}"
+    )
+    _notify(report)
+    log.info("Cost report sent.")
+
+
+# ---------------------------------------------------------------------------
 # Retry held stories (runs as part of the daily cycle)
 # ---------------------------------------------------------------------------
 
@@ -543,7 +594,20 @@ if __name__ == "__main__":
 
     log.info("Approval mode: %s | Polling every %dh", APPROVAL_MODE, CHECK_INTERVAL_HOURS)
 
+    _cost_report_sent_date = None
+
     while True:
+        now_utc = datetime.now(timezone.utc)
+
+        # Send cost report once per day at 14:30 UTC (8pm IST)
+        today = now_utc.date()
+        if now_utc.hour == 14 and now_utc.minute >= 30 and _cost_report_sent_date != today:
+            try:
+                send_cost_report()
+                _cost_report_sent_date = today
+            except Exception as e:
+                log.error("Cost report failed: %s", e)
+
         try:
             run_daily_cycle()
             retry_held()
