@@ -82,29 +82,20 @@ def _get_transcript(video_id):
         return None
 
 
-def _extract_claims_via_claude(transcript):
-    import anthropic
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    prompt = (
-        "Extract from this transcript (faithfully, without endorsing):\n"
-        "1. throughline: the video's central argument in 1-2 sentences, phrased as "
-        "the SOURCE's claim ('The source argues that...')\n"
-        "2. claims: each discrete factual assertion with [MM:SS] timestamp, a "
-        "provisional bucket (fact|allegation|inference), and any source the video "
-        "itself cites (or null).\n\n"
-        "Return ONLY valid JSON: "
-        '{\"throughline\": \"...\", \"claims\": [{\"text\", \"timestamp\", '
-        '\"provisional_bucket\", \"video_cited_source\"}]}\n\n'
-        "TRANSCRIPT:\n" + transcript
-    )
-    resp = client.messages.create(
-        model="claude-haiku-4-5-20251001",  # cheap extraction step
-        max_tokens=2000,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    text = resp.content[0].text.strip()
-    text = re.sub(r"^```(?:json)?|```$", "", text, flags=re.MULTILINE).strip()
-    return json.loads(text)
+def _extract_claims_via_skill(url, transcript=None):
+    """Use source-ingestor skill to extract structured claims from a video."""
+    prompt = f"URL: {url}\n\n"
+    if transcript:
+        prompt += f"TRANSCRIPT:\n{transcript}"
+    else:
+        prompt += "(No transcript available — extract from video context if possible.)"
+    output = run_skill("source-ingestor", prompt)
+    text = re.sub(r"^```(?:json)?|```$", "", output.strip(), flags=re.MULTILINE).strip()
+    # Find the JSON object in the output
+    m = re.search(r"\{.*\}", text, re.DOTALL)
+    if m:
+        return json.loads(m.group(0))
+    raise ValueError("source-ingestor did not return valid JSON")
 
 
 def _ingest_via_gemini(video_url):
@@ -145,21 +136,11 @@ def ingest_source(source):
             continue
 
         transcript = _get_transcript(vid)
-        if transcript:
-            try:
-                extracted = _extract_claims_via_claude(transcript)
-            except Exception as e:
-                log.warning("Claim extraction failed for %s: %s", vid, e)
-                extracted = {"throughline": entry.title, "claims": []}
-            method = "transcript"
-        elif GEMINI_API_KEY:
-            try:
-                extracted = _ingest_via_gemini(entry.link)
-            except Exception as e:
-                log.warning("Gemini fallback failed for %s: %s", vid, e)
-                extracted = {"throughline": entry.title, "claims": []}
-            method = "gemini_video"
-        else:
+        try:
+            extracted = _extract_claims_via_skill(entry.link, transcript)
+            method = "transcript" if transcript else "skill_only"
+        except Exception as e:
+            log.warning("source-ingestor failed for %s (%s) — title only", vid, e)
             extracted = {"throughline": entry.title, "claims": []}
             method = "title_only"
 
@@ -518,6 +499,31 @@ def run_daily_cycle():
         except Exception as e:
             log.error("Ingest failed for %s: %s", source["name"], e)
 
+    # 3b. beat-monitor: scan primary govt feeds for under-covered leads
+    log.info("Running beat-monitor (courts, ECI, RBI, CAG, govt portals)...")
+    try:
+        beat_output = run_skill("beat-monitor",
+            "Run the beat monitor for today's cycle. "
+            "Scan primary feeds: Kerala High Court, ECI, RBI, CAG, government portals. "
+            "Surface under-covered leads only — skip anything already well-covered.")
+        # Parse beat-monitor leads and add to pool as synthetic lead dicts
+        for line in beat_output.splitlines():
+            if line.startswith("## Lead"):
+                all_leads.append({
+                    "video_id": f"beat-{len(all_leads)}",
+                    "video_url": "",
+                    "title": line.replace("## Lead", "").strip(),
+                    "source": "beat-monitor",
+                    "source_id": "beat-monitor",
+                    "throughline": line.replace("## ", "").strip(),
+                    "claims": [],
+                    "ingest_method": "beat_monitor",
+                    "raw_beat_output": beat_output,
+                })
+        log.info("Beat monitor added %d lead(s) to the pool.", sum(1 for l in all_leads if l.get("source") == "beat-monitor"))
+    except Exception as e:
+        log.warning("Beat monitor failed: %s", e)
+
     if not all_leads:
         _notify("Thelivu daily cycle: no new leads today. Nothing to investigate.")
         log.info("No new leads. Exiting.")
@@ -639,6 +645,29 @@ def run_daily_cycle():
 # Source scout (runs weekly, proposes new sources via Telegram)
 # ---------------------------------------------------------------------------
 
+def run_story_scout():
+    """Weekly dig: pick one watchlist theme and produce a dig brief via story-scout."""
+    log.info("Running story-scout on watchlist...")
+    try:
+        watchlist_text = WATCHLIST_YAML.read_text() if WATCHLIST_YAML.exists() else "(no watchlist yet)"
+    except Exception:
+        watchlist_text = "(watchlist unreadable)"
+
+    prompt = (
+        "Run the weekly story scout. Pick the highest-priority theme from the "
+        "watchlist below that doesn't already have a story in progress, form a "
+        "sharp falsifiable question, identify the primary records to pull, and "
+        "output a dig brief.\n\n"
+        f"WATCHLIST:\n{watchlist_text}"
+    )
+    try:
+        brief = run_skill("story-scout", prompt)
+        _notify(f"Story scout — new dig brief:\n\n{brief}")
+        log.info("Story scout complete.")
+    except Exception as e:
+        log.error("Story scout failed: %s", e)
+
+
 def run_source_scout():
     log.info("Running source-scout...")
 
@@ -740,28 +769,45 @@ def send_cost_report():
     runs_today = data["runs_today"]
     today = date.today().isoformat()
 
-    today_usd = month_usd = total_usd = 0.0
-    lines = []
+    # Build raw data for finance-manager skill
+    claude_in = claude_out = gemini_in = gemini_out = 0
+    month_claude_in = month_claude_out = month_gemini_in = month_gemini_out = 0
+    total_claude_in = total_claude_out = total_gemini_in = total_gemini_out = 0
     for row in rows:
-        model = row["model"]
-        c_today = _calc_cost(model, row["today_in"] or 0, row["today_out"] or 0)
-        c_month = _calc_cost(model, row["month_in"] or 0, row["month_out"] or 0)
-        c_total = _calc_cost(model, row["total_in"] or 0, row["total_out"] or 0)
-        today_usd += c_today
-        month_usd += c_month
-        total_usd += c_total
-        lines.append(
-            f"  {model}: {row['today_in'] or 0}in + {row['today_out'] or 0}out tokens = ${c_today:.4f}"
-        )
+        if "gemini" in (row["model"] or "").lower():
+            gemini_in  += row["today_in"] or 0; gemini_out  += row["today_out"] or 0
+            month_gemini_in  += row["month_in"] or 0; month_gemini_out  += row["month_out"] or 0
+            total_gemini_in  += row["total_in"] or 0; total_gemini_out  += row["total_out"] or 0
+        else:
+            claude_in  += row["today_in"] or 0; claude_out  += row["today_out"] or 0
+            month_claude_in  += row["month_in"] or 0; month_claude_out  += row["month_out"] or 0
+            total_claude_in  += row["total_in"] or 0; total_claude_out  += row["total_out"] or 0
 
-    report = (
-        f"Thelivu Cost Report — {today}\n\n"
-        f"Today: ₹{today_usd * _USD_TO_INR:.2f} (~${today_usd:.4f})\n"
-        f"This month: ₹{month_usd * _USD_TO_INR:.2f} (~${month_usd:.4f})\n"
-        f"All time: ₹{total_usd * _USD_TO_INR:.2f} (~${total_usd:.4f})\n\n"
-        f"Today's breakdown:\n" + "\n".join(lines or ["  No usage recorded."]) + "\n\n"
-        f"Pipeline runs today: {runs_today}"
+    today_usd  = _calc_cost("claude", claude_in, claude_out) + _calc_cost("gemini", gemini_in, gemini_out)
+    month_usd  = _calc_cost("claude", month_claude_in, month_claude_out) + _calc_cost("gemini", month_gemini_in, month_gemini_out)
+    total_usd  = _calc_cost("claude", total_claude_in, total_claude_out) + _calc_cost("gemini", total_gemini_in, total_gemini_out)
+
+    data_prompt = (
+        f"Date: {today}\n"
+        f"Today — Claude: {claude_in} input + {claude_out} output tokens | "
+        f"Gemini: {gemini_in} input + {gemini_out} output tokens\n"
+        f"Today USD: ${today_usd:.6f} | Month USD: ${month_usd:.6f} | All-time USD: ${total_usd:.6f}\n"
+        f"USD to INR: 84\n"
+        f"Pipeline runs today: {runs_today}\n"
+        f"Month — Claude: {month_claude_in}in + {month_claude_out}out | "
+        f"Gemini: {month_gemini_in}in + {month_gemini_out}out\n"
+        f"All-time — Claude: {total_claude_in}in + {total_claude_out}out | "
+        f"Gemini: {total_gemini_in}in + {total_gemini_out}out"
     )
+    try:
+        report = run_skill("finance-manager", data_prompt)
+    except Exception as e:
+        log.warning("finance-manager skill failed (%s) — using raw data", e)
+        report = (
+            f"Thelivu Cost Report — {today}\n"
+            f"Today: ₹{today_usd*_USD_TO_INR:.2f} | Month: ₹{month_usd*_USD_TO_INR:.2f} | "
+            f"All-time: ₹{total_usd*_USD_TO_INR:.2f}\nRuns today: {runs_today}"
+        )
     _notify(report)
     log.info("Cost report sent.")
 
