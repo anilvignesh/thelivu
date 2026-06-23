@@ -320,6 +320,20 @@ def _parse_gate(text):
     return "HOLD"  # conservative default
 
 
+def _extract_brief(text):
+    """Pull the STORY_BRIEF block out of topic-intake output. Returns the block
+    as a string (with delimiters) or empty string if not present."""
+    m = re.search(r"(STORY_BRIEF\b.*?END_STORY_BRIEF)", text, re.DOTALL)
+    return m.group(1).strip() if m else ""
+
+
+def _with_brief(brief, input_text):
+    """Prepend the story brief to a skill input so every agent shares the frame."""
+    if not brief:
+        return input_text
+    return f"{brief}\n\n{input_text}"
+
+
 # ---------------------------------------------------------------------------
 # Main daily cycle
 # ---------------------------------------------------------------------------
@@ -343,8 +357,13 @@ def _run_topic_intake(pending):
         return
 
     # Otherwise topic-intake passes a scoped lead — run the full spine
+    brief = _extract_brief(intake_output)
+    if brief:
+        log.info("Story brief extracted:\n%s", brief)
+    else:
+        log.warning("No STORY_BRIEF block in topic-intake output — proceeding without brief.")
+
     log.info("Topic accepted. Running investigation...")
-    # Save early so /track can show live status
     live_run_id = save_run(
         video_id=f"topic-{topic_id}",
         source=pending.get("source", "owner"),
@@ -352,25 +371,35 @@ def _run_topic_intake(pending):
         trust_gate="investigating",
         status="investigating",
     )
-    dossier = run_skill("news-investigator", intake_output)
+
+    topic_label = topic_text[:120]
+    dossier = run_skill("news-investigator",
+        _with_brief(brief, intake_output),
+        run_id=live_run_id, topic=topic_label)
 
     log.info("Running source-verifier...")
-    verification = run_skill("source-verifier", f"EVIDENCE DOSSIER:\n\n{dossier}")
+    verification = run_skill("source-verifier",
+        _with_brief(brief, f"EVIDENCE DOSSIER:\n\n{dossier}"),
+        run_id=live_run_id, topic=topic_label)
     gate = _parse_gate(verification)
     log.info("Trust gate: %s", gate)
 
     if gate in ("KILL", "HOLD"):
         update_run(live_run_id, trust_gate=gate, verification_report=verification, status=gate.lower())
         finish_topic(topic_id)
-        _notify(f"Your topic was {gate}ed (run #{live_run_id}).\n\n{verification[:600]}")
+        _notify(f"Your topic was {gate}ed (run #{live_run_id}).\n\n{verification[:800]}")
         return
 
     update_run(live_run_id, trust_gate=gate, status="writing")
     pattern = run_skill("pattern-synthesizer",
-        f"VERIFIED DOSSIER:\n\n{dossier}\n\nVERIFICATION:\n\n{verification}")
+        _with_brief(brief, f"VERIFIED DOSSIER:\n\n{dossier}\n\nVERIFICATION:\n\n{verification}"),
+        run_id=live_run_id, topic=topic_label)
     draft = run_skill("article-writer",
-        f"DOSSIER:\n\n{dossier}\n\nVERIFICATION:\n\n{verification}\n\nPATTERN:\n\n{pattern}")
-    review = run_skill("editorial-reviewer", draft)
+        _with_brief(brief, f"DOSSIER:\n\n{dossier}\n\nVERIFICATION:\n\n{verification}\n\nPATTERN:\n\n{pattern}"),
+        run_id=live_run_id, topic=topic_label)
+    review = run_skill("editorial-reviewer",
+        _with_brief(brief, f"DRAFT:\n\n{draft}\n\nVERIFICATION REPORT:\n\n{verification}"),
+        run_id=live_run_id, topic=topic_label)
 
     update_run(live_run_id,
         throughline=topic_text[:200],
@@ -382,7 +411,7 @@ def _run_topic_intake(pending):
     )
     finish_topic(topic_id)
     send_for_approval(live_run_id, draft, verification, review)
-    log.info("Topic pipeline complete. Run #%d pending review.", run_id)
+    log.info("Topic pipeline complete. Run #%d pending review.", live_run_id)
 
 
 def run_daily_cycle():
@@ -451,7 +480,18 @@ def run_daily_cycle():
 
     log.info("Selected: %s", selected["throughline"][:80])
 
-    # 4. news-investigator: build evidence dossier (uses web_search)
+    # Build a story brief from the selected lead for downstream context
+    rss_brief = (
+        f"STORY_BRIEF\n"
+        f"Geography: Follow the story — match scope to evidence and impact\n"
+        f"Angle: {selected['throughline'][:200]}\n"
+        f"Source: {selected['source']}\n"
+        f"Scope: Investigate as reported; expand or narrow based on what the evidence shows\n"
+        f"END_STORY_BRIEF"
+    )
+    topic_label = selected["throughline"][:120]
+
+    # 4. news-investigator: build evidence dossier (uses web_search / Gemini)
     log.info("Running news-investigator...")
     investigate_input = (
         f"LEAD TO INVESTIGATE:\n\n"
@@ -462,14 +502,14 @@ def run_daily_cycle():
         + json.dumps(selected["claims"], indent=2, ensure_ascii=False)
         + f"\n\nMonitor context:\n{monitor_output}"
     )
-    dossier = run_skill("news-investigator", investigate_input)
+    dossier = run_skill("news-investigator",
+        _with_brief(rss_brief, investigate_input), topic=topic_label)
 
-    # 5. source-verifier: trust gate (uses web_search)
+    # 5. source-verifier: trust gate (uses web_search / Gemini)
     log.info("Running source-verifier...")
-    verification = run_skill(
-        "source-verifier",
-        f"EVIDENCE DOSSIER TO VERIFY:\n\n{dossier}",
-    )
+    verification = run_skill("source-verifier",
+        _with_brief(rss_brief, f"EVIDENCE DOSSIER TO VERIFY:\n\n{dossier}"),
+        topic=topic_label)
 
     gate = _parse_gate(verification)
     log.info("Trust gate: %s", gate)
@@ -485,34 +525,34 @@ def run_daily_cycle():
         )
         _notify(
             f"Thelivu: today's story {gate}ed (run #{run_id}).\n\n"
-            f"Reason:\n{verification[:600]}"
+            f"Reason:\n{verification[:800]}"
         )
         log.info("Story %s. Run #%d saved.", gate, run_id)
         return
 
     if gate == "FRAMING-FIX":
-        # Continue — the writer and reviewer will address framing
         log.info("FRAMING-FIX: continuing to write with framing notes.")
 
-    # 6. pattern-synthesizer: look for cross-story patterns
+    # 6. pattern-synthesizer
     log.info("Running pattern-synthesizer...")
-    pattern = run_skill(
-        "pattern-synthesizer",
-        f"VERIFIED DOSSIER:\n\n{dossier}\n\nVERIFICATION REPORT:\n\n{verification}",
-    )
+    pattern = run_skill("pattern-synthesizer",
+        _with_brief(rss_brief, f"VERIFIED DOSSIER:\n\n{dossier}\n\nVERIFICATION REPORT:\n\n{verification}"),
+        topic=topic_label)
 
-    # 7. article-writer: transparent-perspective draft
+    # 7. article-writer
     log.info("Running article-writer...")
-    draft = run_skill(
-        "article-writer",
-        f"VERIFIED DOSSIER:\n\n{dossier}\n\n"
-        f"VERIFICATION REPORT:\n\n{verification}\n\n"
-        f"PATTERN ANALYSIS:\n\n{pattern}",
-    )
+    draft = run_skill("article-writer",
+        _with_brief(rss_brief,
+            f"VERIFIED DOSSIER:\n\n{dossier}\n\n"
+            f"VERIFICATION REPORT:\n\n{verification}\n\n"
+            f"PATTERN ANALYSIS:\n\n{pattern}"),
+        topic=topic_label)
 
-    # 8. editorial-reviewer: framing, symmetry, legal check
+    # 8. editorial-reviewer — gets brief + draft + verification so it can check framing
     log.info("Running editorial-reviewer...")
-    review = run_skill("editorial-reviewer", draft)
+    review = run_skill("editorial-reviewer",
+        _with_brief(rss_brief, f"DRAFT:\n\n{draft}\n\nVERIFICATION REPORT:\n\n{verification}"),
+        topic=topic_label)
 
     # 9. Save and send for approval
     run_id = save_run(
