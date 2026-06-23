@@ -1,9 +1,50 @@
 import json
-import sqlite3
+import os
 from datetime import datetime, timezone
-from shared.config import DB_PATH
+
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS pending_topics (
+    id          SERIAL PRIMARY KEY,
+    topic       TEXT NOT NULL,
+    source      TEXT DEFAULT 'owner',
+    submitted_at TIMESTAMP DEFAULT NOW(),
+    status      TEXT DEFAULT 'queued'
+);
+
+CREATE TABLE IF NOT EXISTS seen_items (
+    video_id    TEXT PRIMARY KEY,
+    source      TEXT,
+    ingested_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS pipeline_runs (
+    id                  SERIAL PRIMARY KEY,
+    video_id            TEXT,
+    source              TEXT,
+    throughline         TEXT,
+    trust_gate          TEXT,
+    draft_text          TEXT,
+    review_text         TEXT,
+    verification_report TEXT,
+    status              TEXT DEFAULT 'investigating',
+    tg_msg_id           INTEGER,
+    created_at          TIMESTAMP DEFAULT NOW(),
+    updated_at          TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS publications (
+    id              SERIAL PRIMARY KEY,
+    run_id          INTEGER REFERENCES pipeline_runs(id),
+    channel_msg_ids TEXT,
+    confidence      TEXT,
+    published_at    TIMESTAMP DEFAULT NOW()
+);
+"""
+
+# SQLite fallback schema (same structure, SQLite syntax)
+_SCHEMA_SQLITE = """
 CREATE TABLE IF NOT EXISTS pending_topics (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     topic       TEXT NOT NULL,
@@ -44,123 +85,223 @@ CREATE TABLE IF NOT EXISTS publications (
 
 
 def _conn():
-    import pathlib
-    pathlib.Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
-    c = sqlite3.connect(DB_PATH)
-    c.row_factory = sqlite3.Row
-    return c
+    if DATABASE_URL:
+        import psycopg2
+        import psycopg2.extras
+        c = psycopg2.connect(DATABASE_URL)
+        return c
+    else:
+        import sqlite3
+        import pathlib
+        from shared.config import DB_PATH
+        pathlib.Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
+        c = sqlite3.connect(DB_PATH)
+        c.row_factory = sqlite3.Row
+        return c
+
+
+def _is_postgres():
+    return bool(DATABASE_URL)
+
+
+def _fetchone(cur):
+    row = cur.fetchone()
+    if row is None:
+        return None
+    if _is_postgres():
+        cols = [desc[0] for desc in cur.description]
+        return dict(zip(cols, row))
+    return dict(row)
+
+
+def _fetchall(cur):
+    rows = cur.fetchall()
+    if _is_postgres():
+        cols = [desc[0] for desc in cur.description]
+        return [dict(zip(cols, r)) for r in rows]
+    return [dict(r) for r in rows]
 
 
 def init_db():
-    with _conn() as c:
-        c.executescript(_SCHEMA)
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        if _is_postgres():
+            for statement in _SCHEMA.strip().split(";"):
+                s = statement.strip()
+                if s:
+                    cur.execute(s)
+        else:
+            cur.executescript(_SCHEMA_SQLITE)
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def is_seen(video_id):
-    with _conn() as c:
-        return c.execute(
-            "SELECT 1 FROM seen_items WHERE video_id = ?", (video_id,)
-        ).fetchone() is not None
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT 1 FROM seen_items WHERE video_id = %s" if _is_postgres()
+                    else "SELECT 1 FROM seen_items WHERE video_id = ?", (video_id,))
+        return cur.fetchone() is not None
+    finally:
+        conn.close()
 
 
 def mark_seen(video_id, source):
-    with _conn() as c:
-        c.execute(
-            "INSERT OR IGNORE INTO seen_items (video_id, source) VALUES (?, ?)",
-            (video_id, source),
-        )
-        c.commit()
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        if _is_postgres():
+            cur.execute(
+                "INSERT INTO seen_items (video_id, source) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                (video_id, source),
+            )
+        else:
+            cur.execute(
+                "INSERT OR IGNORE INTO seen_items (video_id, source) VALUES (?, ?)",
+                (video_id, source),
+            )
+        conn.commit()
+    finally:
+        conn.close()
 
 
-def save_run(
-    video_id,
-    source,
-    throughline,
-    trust_gate,
-    draft_text=None,
-    review_text=None,
-    verification_report=None,
-    status="investigating",
-):
-    with _conn() as c:
-        cur = c.execute(
-            """INSERT INTO pipeline_runs
+def save_run(video_id, source, throughline, trust_gate,
+             draft_text=None, review_text=None, verification_report=None, status="investigating"):
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(
+            f"""INSERT INTO pipeline_runs
                (video_id, source, throughline, trust_gate,
                 draft_text, review_text, verification_report, status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})""",
             (video_id, source, throughline, trust_gate,
              draft_text, review_text, verification_report, status),
         )
-        c.commit()
-        return cur.lastrowid
+        if _is_postgres():
+            cur.execute("SELECT lastval()")
+            run_id = cur.fetchone()[0]
+        else:
+            run_id = cur.lastrowid
+        conn.commit()
+        return run_id
+    finally:
+        conn.close()
 
 
 def update_run(run_id, **kwargs):
     kwargs["updated_at"] = datetime.now(timezone.utc).isoformat()
-    sets = ", ".join(f"{k} = ?" for k in kwargs)
-    with _conn() as c:
-        c.execute(
-            f"UPDATE pipeline_runs SET {sets} WHERE id = ?",
+    ph = "%s" if _is_postgres() else "?"
+    sets = ", ".join(f"{k} = {ph}" for k in kwargs)
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            f"UPDATE pipeline_runs SET {sets} WHERE id = {ph}",
             (*kwargs.values(), run_id),
         )
-        c.commit()
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def get_run(run_id):
-    with _conn() as c:
-        row = c.execute(
-            "SELECT * FROM pipeline_runs WHERE id = ?", (run_id,)
-        ).fetchone()
-        return dict(row) if row else None
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute("SELECT * FROM pipeline_runs WHERE id = " + ph, (run_id,))
+        return _fetchone(cur)
+    finally:
+        conn.close()
 
 
 def get_held_runs(older_than_days=3):
-    with _conn() as c:
-        rows = c.execute(
-            """SELECT * FROM pipeline_runs
-               WHERE status = 'held'
-               AND created_at < datetime('now', ?)""",
-            (f"-{older_than_days} days",),
-        ).fetchall()
-        return [dict(r) for r in rows]
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        if _is_postgres():
+            cur.execute(
+                "SELECT * FROM pipeline_runs WHERE status = 'held' "
+                "AND created_at < NOW() - INTERVAL '%s days'",
+                (older_than_days,),
+            )
+        else:
+            cur.execute(
+                "SELECT * FROM pipeline_runs WHERE status = 'held' "
+                "AND created_at < datetime('now', ?)",
+                (f"-{older_than_days} days",),
+            )
+        return _fetchall(cur)
+    finally:
+        conn.close()
 
 
 def queue_topic(topic, source="owner"):
-    with _conn() as c:
-        c.execute(
-            "INSERT INTO pending_topics (topic, source) VALUES (?, ?)",
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(
+            f"INSERT INTO pending_topics (topic, source) VALUES ({ph}, {ph})",
             (topic, source),
         )
-        c.commit()
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def pop_next_topic():
-    """Return and claim the oldest queued topic, or None."""
-    with _conn() as c:
-        row = c.execute(
-            "SELECT * FROM pending_topics WHERE status = 'queued' ORDER BY id LIMIT 1"
-        ).fetchone()
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        if _is_postgres():
+            cur.execute(
+                "SELECT * FROM pending_topics WHERE status = 'queued' ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED"
+            )
+        else:
+            cur.execute(
+                "SELECT * FROM pending_topics WHERE status = 'queued' ORDER BY id LIMIT 1"
+            )
+        row = _fetchone(cur)
         if not row:
             return None
-        c.execute(
-            "UPDATE pending_topics SET status = 'running' WHERE id = ?", (row["id"],)
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(
+            f"UPDATE pending_topics SET status = 'running' WHERE id = {ph}", (row["id"],)
         )
-        c.commit()
-        return dict(row)
+        conn.commit()
+        return row
+    finally:
+        conn.close()
 
 
 def finish_topic(topic_id):
-    with _conn() as c:
-        c.execute(
-            "UPDATE pending_topics SET status = 'done' WHERE id = ?", (topic_id,)
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(
+            f"UPDATE pending_topics SET status = 'done' WHERE id = {ph}", (topic_id,)
         )
-        c.commit()
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def save_publication(run_id, channel_msg_ids, confidence):
-    with _conn() as c:
-        c.execute(
-            "INSERT INTO publications (run_id, channel_msg_ids, confidence) VALUES (?, ?, ?)",
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(
+            f"INSERT INTO publications (run_id, channel_msg_ids, confidence) VALUES ({ph},{ph},{ph})",
             (run_id, json.dumps(channel_msg_ids), confidence),
         )
-        c.commit()
+        conn.commit()
+    finally:
+        conn.close()
