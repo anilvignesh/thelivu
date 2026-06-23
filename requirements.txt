@@ -1,0 +1,8 @@
+anthropic>=0.40.0
+python-telegram-bot>=21.0
+feedparser>=6.0
+youtube-transcript-api>=0.6
+google-genai>=1.0
+requests>=2.31
+pyyaml>=6.0
+duckduckgo-search>=6.0

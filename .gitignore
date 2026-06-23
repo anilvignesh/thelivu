@@ -4,6 +4,9 @@
 # Runtime / secrets — never commit
 .env
 published_log.jsonl
+thelivu.db
+*.db-shm
+*.db-wal
 
 # Python
 __pycache__/

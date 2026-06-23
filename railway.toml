@@ -1,0 +1,7 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+# Default service: the always-on Telegram bot
+startCommand = "python -m thelivu_bot.bot"
+restartPolicyType = "always"
