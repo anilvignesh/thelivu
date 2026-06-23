@@ -471,11 +471,13 @@ def _run_topic_intake(pending):
         f"SUBMITTED TOPIC:\n\n{topic_text}\n\nSource: {pending.get('source', 'owner')}",
     )
 
-    # topic-intake may DECLINE — respect that
-    if any(word in intake_output.upper() for word in ("DECLINE", "PARK", "OUT OF SCOPE")):
+    # topic-intake may DECLINE — only match the structured Decision line, not stray mentions
+    import re as _re
+    _decision = _re.search(r'Decision:\s*(PARK|DECLINE)', intake_output, _re.IGNORECASE)
+    if _decision:
         finish_topic(topic_id)
-        _notify(f"Topic-intake declined this topic:\n\n{intake_output[:600]}")
-        log.info("Topic declined by topic-intake.")
+        _notify(f"Topic-intake declined this topic ({_decision.group(1).upper()}):\n\n{intake_output[:800]}")
+        log.info("Topic declined by topic-intake: %s", _decision.group(1))
         return
 
     # Otherwise topic-intake passes a scoped lead — run the full spine
