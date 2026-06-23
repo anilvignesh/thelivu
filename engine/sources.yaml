@@ -145,6 +145,56 @@ sources:
     added: 2026-06-23
     notes: "India's best business investigations. Feed gives headline + summary — enough to surface leads."
 
+  # ── Investigative / fact-check / data journalism ───────────────────────────
+
+  - id: factly
+    name: Factly
+    platform: web
+    handle: "@factly_in"
+    feed: "https://factly.in/feed/"
+    role: verification
+    tier: 2
+    lean: "non-partisan data journalism and fact-checking"
+    status: active
+    added: 2026-06-23
+    notes: "Data-driven fact checks. Good for verifying claims in affidavits, budgets, government statistics."
+
+  - id: altnews
+    name: Alt News
+    platform: web
+    handle: "@AltNews"
+    feed: "https://www.altnews.in/feed/"
+    role: verification
+    tier: 2
+    lean: "fact-checking; left-leaning in selection but methodologically rigorous"
+    status: active
+    added: 2026-06-23
+    notes: "Best Indian misinformation tracker. Use to check if a circulating claim has already been debunked."
+
+  - id: behanbox
+    name: Behanbox
+    platform: web
+    handle: "@behanbox"
+    feed: "https://behanbox.com/feed/"
+    role: lead
+    tier: 2
+    lean: "gender and labour rights; data-driven; non-partisan"
+    status: active
+    added: 2026-06-23
+    notes: "Covers worker rights, ASHA workers, gender data gaps. Under-reported beat, data-rigorous."
+
+  - id: occrp
+    name: OCCRP
+    platform: web
+    handle: "@OCCRP"
+    feed: "https://www.occrp.org/en/feed"
+    role: lead
+    tier: 2
+    lean: "non-partisan investigative; international cross-border corruption focus"
+    status: active
+    added: 2026-06-23
+    notes: "Global corruption investigations. Useful for India stories with offshore/international dimensions — shell companies, money flows, sanctioned entities."
+
   - id: newsclick
     name: Newsclick
     platform: web
