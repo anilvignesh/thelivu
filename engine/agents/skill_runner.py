@@ -10,16 +10,151 @@ Falls back to Claude if the preferred provider is unconfigured or fails.
 """
 
 import logging
+import re
+import requests
+from datetime import date
 
 import anthropic
 from shared.config import (
     CLAUDE_MODEL, GEMINI_MODEL, GROQ_MODEL, DEEPSEEK_MODEL, MISTRAL_MODEL,
     ANTHROPIC_API_KEY, GEMINI_API_KEY, GROQ_API_KEY, DEEPSEEK_API_KEY, MISTRAL_API_KEY,
+    TELEGRAM_BOT_TOKEN, TELEGRAM_DRAFT_CHAT_ID,
     SKILLS_DIR,
 )
 from engine.agents.tools import WEB_SEARCH_TOOL, execute_tool
 
 log = logging.getLogger("skill_runner")
+
+
+# ── Quota / billing alert system ──────────────────────────────────────────────
+
+def _classify_error(provider, exc):
+    """
+    Return (alert_type, message, action) or None if it's a transient error
+    that doesn't need a user notification.
+
+    alert_types: 'free_tier' | 'billing_cap' | 'bad_key' | 'exhausted'
+    """
+    msg = str(exc).lower()
+
+    if provider == "gemini":
+        if "free_tier" in msg or "free tier" in msg or ("quota" in msg and "limit: 20" in str(exc)):
+            return ("free_tier",
+                    "Gemini free tier daily quota (20 requests) exhausted.",
+                    "Pipeline fell back to Claude. Resets at midnight Pacific.\n"
+                    "To avoid this: enable billing at aistudio.google.com")
+        if "resource_exhausted" in msg or "quota" in msg:
+            return ("exhausted",
+                    "Gemini paid quota or rate limit hit.",
+                    "Pipeline fell back to Claude. Check quota at console.cloud.google.com")
+        if "api_key" in msg or "401" in msg or "permission" in msg:
+            return ("bad_key",
+                    "Gemini API key rejected (invalid or billing not enabled).",
+                    "Check key at aistudio.google.com → API keys")
+
+    elif provider == "deepseek":
+        if "402" in msg or "insufficient" in msg or "balance" in msg:
+            return ("billing_cap",
+                    "DeepSeek account balance exhausted.",
+                    "Top up at platform.deepseek.com → Billing. Pipeline fell back to Claude.")
+        if "401" in msg or "invalid" in msg:
+            return ("bad_key",
+                    "DeepSeek API key rejected.",
+                    "Check key at platform.deepseek.com → API keys")
+        if "429" in msg or "rate" in msg:
+            return ("exhausted",
+                    "DeepSeek rate limit hit.",
+                    "Pipeline fell back to Claude. Usually recovers in a few minutes.")
+
+    elif provider == "groq":
+        if "429" in msg or "rate" in msg or "quota" in msg:
+            return ("free_tier",
+                    "Groq free tier rate limit hit.",
+                    "Pipeline fell back to Claude. Groq resets every minute/day depending on the limit.\n"
+                    "Free tier: 6,000 tokens/min, 14,400 req/day.")
+        if "401" in msg or "invalid" in msg:
+            return ("bad_key",
+                    "Groq API key rejected.",
+                    "Check key at console.groq.com → API keys")
+
+    elif provider == "mistral":
+        if "402" in msg or "billing" in msg:
+            return ("billing_cap",
+                    "Mistral billing limit hit.",
+                    "Top up at console.mistral.ai → Billing. Pipeline fell back to Claude.")
+        if "429" in msg:
+            return ("free_tier",
+                    "Mistral rate limit hit.",
+                    "Pipeline fell back to Claude.")
+
+    elif provider == "claude":
+        if "overloaded" in msg:
+            return None  # transient, don't alert
+        if "credit" in msg or "balance" in msg or "billing" in msg:
+            return ("billing_cap",
+                    "Anthropic account balance exhausted — Claude is unavailable.",
+                    "Top up at console.anthropic.com → Billing.\n"
+                    "⚠️ No fallback available — pipeline is stopped until this is resolved.")
+        if "401" in msg or "invalid" in msg:
+            return ("bad_key",
+                    "Anthropic API key rejected — Claude is unavailable.",
+                    "Check key at console.anthropic.com → API keys\n"
+                    "⚠️ No fallback available — pipeline is stopped.")
+
+    return None  # unclassified / transient
+
+
+def _alert_key(provider, alert_type):
+    return f"quota_alert_{provider}_{alert_type}_{date.today().isoformat()}"
+
+
+def _already_alerted(provider, alert_type):
+    """Return True if we already sent this alert today (avoid spam)."""
+    try:
+        from shared.db import kv_get
+        return bool(kv_get(_alert_key(provider, alert_type)))
+    except Exception:
+        return False
+
+
+def _mark_alerted(provider, alert_type):
+    try:
+        from shared.db import kv_set
+        kv_set(_alert_key(provider, alert_type), "1")
+    except Exception:
+        pass
+
+
+def _send_quota_alert(provider, skill_name, exc):
+    """Classify the error and send a Telegram notification if it warrants one."""
+    classification = _classify_error(provider, exc)
+    if not classification:
+        return
+
+    alert_type, what, action = classification
+
+    if _already_alerted(provider, alert_type):
+        return  # already told the user today
+
+    provider_label = provider.title()
+    icon = "🔴" if alert_type in ("billing_cap", "bad_key") else "🟡"
+
+    text = (
+        f"{icon} {provider_label} limit hit (skill: {skill_name})\n\n"
+        f"What: {what}\n\n"
+        f"Action needed: {action}"
+    )
+
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+            json={"chat_id": str(TELEGRAM_DRAFT_CHAT_ID), "text": text},
+            timeout=10,
+        )
+        _mark_alerted(provider, alert_type)
+        log.info("Quota alert sent for %s (%s)", provider, alert_type)
+    except Exception as e:
+        log.warning("Failed to send quota alert: %s", e)
 
 # ── Lazy clients ──────────────────────────────────────────────────────────────
 _claude_client  = None
@@ -283,6 +418,7 @@ def run_skill(skill_name, input_text, extra_tools=None, max_tokens=4096,
                 return _run_gemini(skill_name, input_text, system_prompt, max_tokens, run_id)
             except Exception as e:
                 log.warning("Gemini failed for %s (%s) — falling back to Claude", skill_name, e)
+                _send_quota_alert("gemini", skill_name, e)
 
         elif preferred == "deepseek":
             try:
@@ -292,6 +428,7 @@ def run_skill(skill_name, input_text, extra_tools=None, max_tokens=4096,
                 )
             except Exception as e:
                 log.warning("DeepSeek failed for %s (%s) — falling back to Claude", skill_name, e)
+                _send_quota_alert("deepseek", skill_name, e)
 
         elif preferred == "groq":
             try:
@@ -301,9 +438,14 @@ def run_skill(skill_name, input_text, extra_tools=None, max_tokens=4096,
                 )
             except Exception as e:
                 log.warning("Groq failed for %s (%s) — falling back to Claude", skill_name, e)
+                _send_quota_alert("groq", skill_name, e)
 
         # Claude — primary or fallback
-        return _run_claude(skill_name, input_text, system_prompt, extra_tools, max_tokens, run_id)
+        try:
+            return _run_claude(skill_name, input_text, system_prompt, extra_tools, max_tokens, run_id)
+        except Exception as e:
+            _send_quota_alert("claude", skill_name, e)
+            raise
 
     finally:
         agent_done(aid)
