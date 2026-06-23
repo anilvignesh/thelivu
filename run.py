@@ -35,7 +35,10 @@ if service == "thelivu-agent":
 
         try:
             last_scout = kv_get("last_scout_at")
-            if not last_scout or (now_utc - datetime.fromisoformat(last_scout)).days >= 7:
+            if not last_scout:
+                kv_set("last_scout_at", now_utc.isoformat())
+                log.info("Source scout: first boot, scheduled for 7 days from now.")
+            elif (now_utc - datetime.fromisoformat(last_scout)).days >= 7:
                 run_source_scout()
         except Exception as e:
             log.error("Source scout failed: %s", e)

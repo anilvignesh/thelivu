@@ -276,7 +276,8 @@ async def cmd_track(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     STATUS_LABELS = {
-        "investigating":  "🔍 Investigating",
+        "investigating":  "🔍 Investigating sources...",
+        "writing":        "✍️ Writing the draft...",
         "pending_human":  "📬 Ready for your review",
         "published":      "✅ Published",
         "killed":         "❌ Killed",

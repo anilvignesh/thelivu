@@ -323,6 +323,14 @@ def _run_topic_intake(pending):
 
     # Otherwise topic-intake passes a scoped lead — run the full spine
     log.info("Topic accepted. Running investigation...")
+    # Save early so /track can show live status
+    live_run_id = save_run(
+        video_id=f"topic-{topic_id}",
+        source=pending.get("source", "owner"),
+        throughline=topic_text[:200],
+        trust_gate="investigating",
+        status="investigating",
+    )
     dossier = run_skill("news-investigator", intake_output)
 
     log.info("Running source-verifier...")
@@ -331,27 +339,19 @@ def _run_topic_intake(pending):
     log.info("Trust gate: %s", gate)
 
     if gate in ("KILL", "HOLD"):
-        run_id = save_run(
-            video_id=f"topic-{topic_id}",
-            source=pending.get("source", "owner"),
-            throughline=topic_text[:200],
-            trust_gate=gate,
-            verification_report=verification,
-            status=gate.lower(),
-        )
+        update_run(live_run_id, trust_gate=gate, verification_report=verification, status=gate.lower())
         finish_topic(topic_id)
-        _notify(f"Your topic was {gate}ed (run #{run_id}).\n\n{verification[:600]}")
+        _notify(f"Your topic was {gate}ed (run #{live_run_id}).\n\n{verification[:600]}")
         return
 
+    update_run(live_run_id, trust_gate=gate, status="writing")
     pattern = run_skill("pattern-synthesizer",
         f"VERIFIED DOSSIER:\n\n{dossier}\n\nVERIFICATION:\n\n{verification}")
     draft = run_skill("article-writer",
         f"DOSSIER:\n\n{dossier}\n\nVERIFICATION:\n\n{verification}\n\nPATTERN:\n\n{pattern}")
     review = run_skill("editorial-reviewer", draft)
 
-    run_id = save_run(
-        video_id=f"topic-{topic_id}",
-        source=pending.get("source", "owner"),
+    update_run(live_run_id,
         throughline=topic_text[:200],
         trust_gate=gate,
         draft_text=draft,
@@ -360,7 +360,7 @@ def _run_topic_intake(pending):
         status="pending_human",
     )
     finish_topic(topic_id)
-    send_for_approval(run_id, draft, verification, review)
+    send_for_approval(live_run_id, draft, verification, review)
     log.info("Topic pipeline complete. Run #%d pending review.", run_id)
 
 
@@ -516,7 +516,26 @@ def run_daily_cycle():
 
 def run_source_scout():
     log.info("Running source-scout...")
-    output = run_skill("source-scout", "Run the weekly source scout. Focus on verification-grade and cross-spectrum sources for the Kerala/India beat.")
+
+    # Load current sources so the skill knows what's already in the pool
+    sources_data = yaml.safe_load(SOURCES_YAML.read_text())
+    current_sources = sources_data.get("sources", [])
+    db_sources = get_approved_sources()
+
+    sources_summary = "CURRENT SOURCE POOL (do not re-nominate these):\n\n"
+    for s in current_sources:
+        sources_summary += f"- {s['name']} ({s.get('platform')}) | role: {s.get('role')} | lean: {s.get('lean','')} | status: {s.get('status')}\n"
+    for s in db_sources:
+        sources_summary += f"- {s['name']} ({s.get('platform')}) | role: {s.get('role')} | lean: {s.get('lean','')} [approved via bot]\n"
+
+    prompt = (
+        f"Run the weekly source scout for the Kerala/India investigative beat.\n\n"
+        f"{sources_summary}\n"
+        f"Focus on finding verification-grade (Tier 1-2) and cross-spectrum sources "
+        f"that fill gaps in the current pool. Use Google Search to research candidates thoroughly."
+    )
+
+    output = run_skill("source-scout", prompt)
 
     # Parse PROPOSALS JSON block
     import re as _re
