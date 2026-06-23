@@ -53,6 +53,69 @@ themes:
     rtis: []
     status: scoping
 
+  - id: mla-wealth-trajectories
+    question: "Which sitting MLAs or MPs show asset growth in affidavits that outpaces any plausible income source — and what changed in their business interests between elections?"
+    why_under_told: "Affidavit data is public; very few outlets systematically compare term-on-term. The gaps are hiding in plain sight."
+    kerala_anchor: "Kerala MLAs — 2021 vs 2016 vs 2011 affidavits on MyNeta"
+    primary_records:
+      - "site:myneta.info — search by constituency and name"
+      - "MCA21 director filings — site:zaubacorp.com or site:tofler.in"
+      - "ECI electoral bond donor disclosures"
+    method: "Pull affidavits for the same person across two election cycles. Compute declared asset delta. Cross-check with company directorships added in the intervening period. Flag where delta > salary + known business income."
+    rtis: []
+    status: scoping
+
+  - id: government-contracts-dot-connect
+    question: "Who are the companies winning large Kerala government contracts, and do their directors have traceable connections to the awarding officials or parties?"
+    why_under_told: "Contracts are public on GeM/state tender portals; nobody systematically cross-references director data."
+    kerala_anchor: "Kerala state tenders, PWD, KIIFB-financed projects"
+    primary_records:
+      - "GeM portal: gem.gov.in — search by department and value"
+      - "Kerala tender portal: etenders.kerala.gov.in"
+      - "MCA21 director data: site:zaubacorp.com"
+      - "ECI electoral bond receipts for ruling parties"
+    method: "Pull top 20 contracts by value, last 12 months. For each company: get directors. Cross-check director names against ECI bond donor list and politician affidavit business associates."
+    rtis: []
+    status: scoping
+
+  - id: cag-findings-follow-up
+    question: "Which CAG findings on Kerala/India schemes have gone unimplemented or unreported, and what happened to the funds?"
+    why_under_told: "CAG reports are tabled in legislatures but rarely read — findings disappear without follow-up."
+    kerala_anchor: "CAG Kerala state finance reports, scheme-specific audit reports"
+    primary_records:
+      - "site:cag.gov.in — search Kerala and India audit reports 2022-2024"
+      - "State legislature records — was the CAG report debated?"
+      - "PFMS data — did spending recover after the finding?"
+    method: "For each CAG finding flagging fund misuse: (a) was it covered by any outlet? (b) did the department respond? (c) did the next budget increase or decrease that department's allocation? All three are stories."
+    rtis: []
+    status: scoping
+
+  - id: cooperative-bank-health
+    question: "Which Kerala cooperative banks are under financial stress, RBI regulatory action, or politically connected loan write-offs?"
+    why_under_told: "Cooperative banking failures hit ordinary depositors hardest; they're rarely covered until collapse."
+    kerala_anchor: "Kerala cooperative banks, district cooperative banks, PACS"
+    primary_records:
+      - "RBI enforcement actions: rbi.org.in penalties search"
+      - "CAG cooperative sector audit"
+      - "RTI on NPA levels at district cooperative banks"
+      - "Kerala Cooperative Societies Act compliance records"
+    method: "Search RBI penalty database for Kerala coop banks last 3 years. For each penalised bank: who are the directors? Any political office holders? What is the NPA ratio? Are deposits safe?"
+    rtis: []
+    status: scoping
+
+  - id: environmental-clearance-violations
+    question: "Which infrastructure or industrial projects in Kerala are operating without environmental clearance, or in violation of conditions?"
+    why_under_told: "EC violations are documented by KSPCB and MoEFCC but enforcement is invisible to most outlets."
+    kerala_anchor: "Kerala coastal zone, Western Ghats buffer, quarrying, sand mining"
+    primary_records:
+      - "MoEFCC project database: parivesh.nic.in"
+      - "NGT orders: greentribunal.gov.in"
+      - "KSPCB consent orders and violations"
+      - "High Court: PIL cases on environmental violations in Kerala"
+    method: "Pull NGT orders for Kerala (last 24 months). Cross-check which projects have court orders vs which are still operating. Any project continuing after a stop-notice is a story."
+    rtis: []
+    status: scoping
+
 # Declined (kept on record so the reasoning is visible):
 #   - id: musk-circular-financing
 #     reason: "International, saturated by the financial press, no India/Kerala hook. Out of scope.

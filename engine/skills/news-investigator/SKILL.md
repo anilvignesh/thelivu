@@ -13,6 +13,21 @@ This skill enforces the project's editorial charter (`../../CHARTER.md`). Read i
 
 Investigate to find out what's true, not to confirm the lead. The fastest way to ruin the channel is to assemble only the facts that fit the hunch. So actively hunt the disconfirming evidence and the other side's account with the same energy you spend on the incriminating bits. A dossier that contains no facts inconvenient to the story is an incomplete dossier.
 
+## Primary source database lookup — always run this first
+
+Before reading any news coverage, go to the primary records directly. Use web_search with these specific queries for the story's subject:
+
+- **ECI affidavits:** `site:myneta.info [person name]` — declared assets, criminal cases, education. Compare across election cycles.
+- **Company connections:** `site:zaubacorp.com [person/company name]` or `site:tofler.in [name]` — director relationships, registered address, authorised capital.
+- **CAG findings:** `CAG report [scheme/department/state] site:cag.gov.in` — look for the actual PDF paragraph, not just news coverage of it.
+- **Court orders:** `[party name] Kerala High Court order 2024` — look for orders the press didn't cover.
+- **RBI/SEBI enforcement:** `RBI penalty [entity] 2024` or `SEBI order [entity]`.
+- **Parliament/Assembly record:** `site:sansad.in [topic]` or `[minister name] statement [topic] Assembly 2024`.
+- **RTI disclosures:** `RTI [topic] [department] disclosure` — what was released under RTI even if not reported.
+- **PFMS / spending data:** `PFMS [scheme name] Kerala expenditure` — actual vs allocated spending.
+
+If the story came from a beat-monitor "join the dots" lead, explicitly cross-reference all databases the lead mentioned.
+
 ## What to do
 
 1. **Pull the primary records first.** Court filings, FIRs, government/RBI/ECI data, regulatory and company disclosures, official transcripts, datasets, peer-reviewed work. Secondary reporting is a pointer to these, not a substitute.
