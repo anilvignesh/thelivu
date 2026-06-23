@@ -1,6 +1,7 @@
 """Thelivu — Management Dashboard. Run: streamlit run dashboard.py"""
 
 import os
+import re
 import time
 import json
 import requests
@@ -8,6 +9,7 @@ import psycopg2
 import psycopg2.extras
 import pandas as pd
 import streamlit as st
+from pathlib import Path
 from datetime import datetime, timezone
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -218,6 +220,20 @@ with t_overview:
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 2 — DRAFTS
 # ══════════════════════════════════════════════════════════════════════════════
+def _load_file_drafts():
+    """Read draft .md files from articles/drafts/ that aren't in the DB."""
+    drafts_dir = Path(__file__).parent / "articles" / "drafts"
+    if not drafts_dir.exists():
+        return []
+    files = []
+    for f in sorted(drafts_dir.glob("*.md"), reverse=True):
+        text = f.read_text(encoding="utf-8")
+        # Extract first H1 heading as title
+        m = re.search(r'^#\s+(.+)', text, re.MULTILINE)
+        title = m.group(1).strip() if m else f.stem
+        files.append({"path": f, "name": f.name, "title": title, "text": text})
+    return files
+
 with t_drafts:
     drafts = q("""SELECT id, created_at::date as date, source, throughline,
                          trust_gate, draft_text, review_text, verification_report
@@ -288,6 +304,50 @@ with t_drafts:
                     if st.button("Requeue", key=f"req_{run['id']}", use_container_width=True):
                         execute("UPDATE pipeline_runs SET status='pending_human', updated_at=NOW() WHERE id=%s", (run['id'],))
                         st.cache_data.clear(); st.rerun()
+
+    # File-based drafts (APPROVAL_MODE=file, written to articles/drafts/)
+    file_drafts = _load_file_drafts()
+    if file_drafts:
+        st.subheader(f"File drafts ({len(file_drafts)})")
+        st.caption("Drafts written locally when APPROVAL_MODE=file. Approve to post to channel.")
+        published_dir = Path(__file__).parent / "articles" / "published"
+        killed_dir    = Path(__file__).parent / "articles" / "killed"
+        published_dir.mkdir(parents=True, exist_ok=True)
+        killed_dir.mkdir(parents=True, exist_ok=True)
+
+        for fd in file_drafts:
+            slug = fd["name"].replace(".md", "")
+            with st.container(border=True):
+                hc1, hc2 = st.columns([5, 2])
+                with hc1:
+                    st.markdown(f"**{fd['title']}**")
+                    st.caption(fd["name"])
+                with hc2:
+                    a1, a2, a3 = st.columns(3)
+                    approve = a1.button("✓ Approve", key=f"fapp_{slug}", type="primary", use_container_width=True)
+                    kill    = a2.button("✗ Kill",    key=f"fkil_{slug}", use_container_width=True)
+                    hold    = a3.button("⏸ Hold",   key=f"fhld_{slug}", use_container_width=True)
+
+                if approve:
+                    try:
+                        msg_ids = tg_post_channel(fd["text"])
+                        fd["path"].rename(published_dir / fd["name"])
+                        tg_notify(f"✅ Published file draft: {fd['name']} ({len(msg_ids)} message(s)).")
+                        st.success(f"Published! {len(msg_ids)} message(s) posted.")
+                        st.cache_data.clear(); time.sleep(1); st.rerun()
+                    except Exception as e:
+                        st.error(f"Publish failed: {e}")
+
+                if kill:
+                    fd["path"].rename(killed_dir / fd["name"])
+                    tg_notify(f"❌ File draft killed: {fd['name']}")
+                    st.cache_data.clear(); st.rerun()
+
+                if hold:
+                    st.info("File draft left in place — reload to see it again.")
+
+                with st.expander("Read draft"):
+                    st.markdown(fd["text"])
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 3 — PIPELINE
@@ -469,7 +529,7 @@ with t_costs:
     st.subheader("By skill (all time)")
     skill_usage = q("""
         SELECT skill, model, SUM(input_tokens) as i, SUM(output_tokens) as o, COUNT(*) as runs
-        FROM token_usage GROUP BY skill, model ORDER BY i+o DESC
+        FROM token_usage GROUP BY skill, model ORDER BY SUM(input_tokens)+SUM(output_tokens) DESC
     """)
     if skill_usage:
         df_skill = pd.DataFrame(skill_usage)
