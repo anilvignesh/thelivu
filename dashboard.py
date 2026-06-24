@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 # ── Config ────────────────────────────────────────────────────────────────────
 DB_URL         = os.environ.get("DATABASE_URL", "postgresql://postgres:***REMOVED-OLD-DB-PASSWORD***@reseau.proxy.rlwy.net:43183/railway")
 BOT_TOKEN      = os.environ.get("TELEGRAM_BOT_TOKEN", "***REMOVED-OLD-TELEGRAM-TOKEN***")
-CHANNEL_ID     = os.environ.get("TELEGRAM_CHANNEL_ID", "@thelivu")
+CHANNEL_ID     = os.environ.get("TELEGRAM_CHANNEL_ID", "-1004360555583")
 DRAFT_CHAT_ID  = os.environ.get("TELEGRAM_DRAFT_CHAT_ID", "7307159646")
 TG_API        = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
