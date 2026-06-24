@@ -308,12 +308,19 @@ def _send_via_telegram(run_id, draft_text, verification_report, review_text):
             f"Do NOT approve until a legal read has been done."
         )
 
+    # Pull a one-line verdict from the review (first non-empty line after APPROVED/PASS)
+    verdict = ""
+    for ln in (review_text or "").splitlines():
+        ln = ln.strip()
+        if ln and not ln.startswith("#") and not ln.startswith("```"):
+            verdict = ln[:120]
+            break
+
     summary = (
-        f"Draft ready — run #{run_id}\n\n"
-        f"{title}\n\n"
-        f"Trust gate: READY-FOR-HUMAN"
+        f"📰 New story ready — run #{run_id}\n\n"
+        f"*{title}*"
         f"{legal_warning}\n\n"
-        f"Review notes:\n{review_text[:500]}"
+        f"Read the draft below, then tap to decide."
     )
     keyboard = {
         "inline_keyboard": [[
