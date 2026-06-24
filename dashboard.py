@@ -136,7 +136,9 @@ with t_overview:
     c1,c2,c3,c4,c5 = st.columns(5)
     c1.metric("Live", rm.get("investigating",0)+rm.get("writing",0))
     c2.metric("Pending review", rm.get("pending_human",0))
-    c3.metric("Published", scalar("SELECT COUNT(*) FROM publications"))
+    _db_published = scalar("SELECT COUNT(*) FROM publications")
+    _file_published = len(list((Path(__file__).parent / "articles" / "published").glob("*.md"))) if (Path(__file__).parent / "articles" / "published").exists() else 0
+    c3.metric("Published", _db_published + _file_published)
     c4.metric("Killed", rm.get("killed",0)+rm.get("kill",0))
     c5.metric("Held", rm.get("held",0)+rm.get("hold",0))
 
@@ -332,6 +334,11 @@ with t_drafts:
                     try:
                         msg_ids = tg_post_channel(fd["text"])
                         fd["path"].rename(published_dir / fd["name"])
+                        # Record in DB so stats stay accurate
+                        execute(
+                            "INSERT INTO publications (run_id, channel_msg_ids, confidence) VALUES (%s,%s,%s)",
+                            (None, json.dumps(msg_ids), "Confirmed")
+                        )
                         tg_notify(f"✅ Published file draft: {fd['name']} ({len(msg_ids)} message(s)).")
                         st.success(f"Published! {len(msg_ids)} message(s) posted.")
                         st.cache_data.clear(); time.sleep(1); st.rerun()
