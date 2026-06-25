@@ -29,13 +29,16 @@ This skill enforces the project's editorial charter (`../../CHARTER.md`). Read i
    - Lifestyle, fashion, travel, food
    - PR announcements, product launches, corporate events with no accountability angle
    - Obituaries without a clear public-record accountability question
-   If a lead touches any of these, drop it before scoring. Volume means nothing — one real accountability lead is worth more than 50 cinema stories.
+   - **Already well-covered commodity news.** If multiple mainstream outlets are already reporting it, it is *not* a lead for us. Under-coverage is our entire reason to exist — wall-to-wall coverage means there is nothing for us to add. A development confirmed by five papers is disqualified, however "important" it sounds.
+   - **Routine political / administrative process** with no exposed accountability question: official-residence moves, appointments, swearing-in / oath-taking, cabinet reshuffles, ceremonial visits, ribbon-cuttings, foundation stones, courtesy calls. The *event* is never the story; only a verifiable wrongdoing attached to it (misuse of funds, illegality, conflict of interest) could be — and then the wrongdoing is the lead, not the event.
+   If a lead touches any of these, drop it before scoring. Volume means nothing — one real accountability lead is worth more than 50 cinema stories, or 50 politicians changing houses.
 5. **Discard at this stage** anything whose only hook is "it's suppressed", anything unfalsifiable, and anything that needs a conspiracy assumed to make ordinary facts cohere.
 5. **Hand off** the ranked queue. Do not investigate or verify here.
 
 ## Output format
 
-ALWAYS output a candidate queue in this structure, highest priority first:
+Output the candidate queue in this structure, highest priority first (omit the
+queue entirely if nothing clears the bar — see below):
 
 ```
 # Monitoring Cycle — [date] — [beat]
@@ -51,7 +54,19 @@ ALWAYS output a candidate queue in this structure, highest priority first:
 ## Lead 2: ...
 ```
 
-End with a one-line summary: how many leads, how many High priority, anything time-sensitive.
+Then end with this exact machine-readable block (the orchestrator reads it):
+
+```
+SELECTED_LEAD: <the Lead number you recommend investigating first, or NONE>
+WORTHINESS: HIGH | MEDIUM | LOW
+REASON: <one line — why this lead clears the bar, or why nothing does>
+```
+
+**Returning NONE is correct and expected on quiet days.** If every candidate is
+excluded, already well-covered, or routine process, output `SELECTED_LEAD: NONE`.
+Never crown the least-bad option just to have something — an empty cycle costs
+nothing; investigating a non-story wastes the engine's budget. Only pick a lead
+you would genuinely stake a published story on.
 
 ## Example
 
