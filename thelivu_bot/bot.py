@@ -98,6 +98,23 @@ def _prepare_for_publish(text):
     return text
 
 
+def _post_html_to_channel(html_text):
+    """Post a single HTML-formatted message to the channel (the teaser). Web
+    preview stays on so Telegram renders the Telegraph Instant-View card."""
+    r = requests.post(
+        f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+        json={
+            "chat_id": TELEGRAM_CHANNEL_ID,
+            "text": html_text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": False,
+        },
+        timeout=30,
+    )
+    r.raise_for_status()
+    return [r.json()["result"]["message_id"]]
+
+
 def _post_to_channel(text):
     """Post chunked text to the public channel. Returns list of message IDs."""
     text = _prepare_for_publish(text)
@@ -538,17 +555,29 @@ async def _handle_approve(query, run_id, run):
 
     # The publisher is "deliberately the dumbest stage": it formats, posts, and
     # logs — it never alters the article's substance (see publisher/SKILL.md).
-    # The draft the human reviewed and approved is exactly what gets posted; the
-    # only furniture added is the standing footer, appended deterministically in
-    # _post_to_channel. We do NOT run a free-form LLM over an approved article:
-    # that risks rewriting it, and once published a conversational meta-message
-    # ("pre-flight check…") instead of the article itself.
+    # The draft the human reviewed and approved is exactly what gets posted; we
+    # do NOT run a free-form LLM over an approved article (that risks rewriting
+    # it, and once posted a conversational meta-message instead of the article).
+    #
+    # Preferred presentation: a clean Telegraph Instant-View page + a short HTML
+    # teaser in the channel. If anything in that path fails, fall back to the
+    # chunked plain-text post — approval must never hard-fail.
+    prepared = _prepare_for_publish(draft)
+    how = "teaser"
     try:
-        msg_ids = _post_to_channel(draft)
+        import publishing.telegram as tg_render
+        teaser, url = tg_render.render(prepared, CONTACT_HANDLE)
+        msg_ids = _post_html_to_channel(teaser)
+        log.info("Published run #%d via Telegraph: %s", run_id, url)
     except Exception as e:
-        await query.message.reply_text(f"Failed to publish: {e}")
-        log.error("Publish failed for run #%d: %s", run_id, e)
-        return
+        log.warning("Telegraph path failed for run #%d (%s) — falling back to plain text", run_id, e)
+        how = "plain-text"
+        try:
+            msg_ids = _post_to_channel(draft)
+        except Exception as e2:
+            await query.message.reply_text(f"Failed to publish: {e2}")
+            log.error("Publish failed for run #%d: %s", run_id, e2)
+            return
 
     save_publication(run_id, msg_ids, "Confirmed")
     update_run(run_id, status="published")
@@ -560,10 +589,10 @@ async def _handle_approve(query, run_id, run):
         pass
 
     await query.message.reply_text(
-        f"Published run #{run_id} ✓\n"
+        f"Published run #{run_id} ✓ ({how})\n"
         f"{len(msg_ids)} message(s) posted to {TELEGRAM_CHANNEL_ID}."
     )
-    log.info("Published run #%d (%d chunks)", run_id, len(msg_ids))
+    log.info("Published run #%d (%s, %d msgs)", run_id, how, len(msg_ids))
 
 
 async def _handle_kill(query, run_id):
