@@ -14,6 +14,9 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_DRAFT_CHAT_ID = os.environ.get("TELEGRAM_DRAFT_CHAT_ID", "")
 # The public channel (@thelivu or numeric ID)
 TELEGRAM_CHANNEL_ID = os.environ.get("TELEGRAM_CHANNEL_ID", "")
+# Contact handle that fills the "[contact]" placeholder in the published footer
+# (corrections / grievances). Override via env; defaults to the owner's handle.
+CONTACT_HANDLE = os.environ.get("CONTACT_HANDLE", "@Blazedddddd")
 
 # --- Optional web search ---
 # Leave blank to use DuckDuckGo (free, no key). Set to use Brave Search.

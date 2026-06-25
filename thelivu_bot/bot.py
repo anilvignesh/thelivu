@@ -27,6 +27,7 @@ from shared.config import (
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_CHANNEL_ID,
     TELEGRAM_DRAFT_CHAT_ID,
+    CONTACT_HANDLE,
 )
 from shared.db import get_run, get_pending_runs, get_cost_report_data, get_queue_state, kv_get, init_db, save_publication, update_run, queue_topic, approve_proposal, skip_proposal, reset_run_for_review
 
@@ -67,10 +68,39 @@ def _split_chunks(text):
     return chunks
 
 
+def _strip_draft_scaffolding(text):
+    """Drop the writer's review-only header so it never reaches the channel.
+
+    article-writer prepends '# DRAFT — for human review' (sometimes inside a code
+    fence). Skip leading blank lines, code fences, and that marker until the first
+    line of real content (the standfirst)."""
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        s = lines[i].strip()
+        if s == "" or s.startswith("```") or ("DRAFT" in s.upper() and "HUMAN REVIEW" in s.upper()):
+            i += 1
+            continue
+        break
+    return "\n".join(lines[i:]).strip()
+
+
+def _prepare_for_publish(text):
+    """Turn an approved draft into exactly what goes to the channel: strip the
+    review scaffolding, ensure the standing footer is present exactly once, and
+    fill the [contact] placeholder. Substance is never touched."""
+    text = _strip_draft_scaffolding(text.strip())
+    # The writer's sources block already carries the standing footer text; only
+    # append the standalone footer when it is genuinely absent (avoid doubling).
+    if "Drafted with AI assistance" not in text:
+        text += _FOOTER
+    text = text.replace("[contact]", CONTACT_HANDLE)
+    return text
+
+
 def _post_to_channel(text):
     """Post chunked text to the public channel. Returns list of message IDs."""
-    if _FOOTER not in text:
-        text += _FOOTER
+    text = _prepare_for_publish(text)
     chunks = _split_chunks(text)
     msg_ids = []
     for chunk in chunks:
