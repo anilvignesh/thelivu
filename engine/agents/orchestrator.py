@@ -449,6 +449,43 @@ def _parse_gate(text):
     return "HOLD"  # conservative default
 
 
+def _parse_selected_lead(text, n_leads):
+    """Read the 'SELECTED_LEAD: <n|NONE>' block from news-monitor output.
+
+    Returns (status, idx): ('none', None) when the monitor found nothing worth
+    investigating, ('ok', 0-based index) for a valid pick, ('unparsed', None)
+    when the block is missing/out of range (caller falls back to fuzzy match).
+    """
+    m = re.search(r"SELECTED_LEAD:\s*(NONE|\d+)", text, re.IGNORECASE)
+    if not m:
+        return ("unparsed", None)
+    val = m.group(1).upper()
+    if val == "NONE":
+        return ("none", None)
+    idx = int(val) - 1
+    return ("ok", idx) if 0 <= idx < n_leads else ("unparsed", None)
+
+
+def _newsworthiness_verdict(selected):
+    """Absolute-floor gate on the selected lead, run before the expensive
+    investigation spine. Returns (pursue: bool, reason: str). Fails OPEN — a gate
+    error must never silently drop a real story."""
+    lead = (
+        f"Throughline: {selected.get('throughline', '')}\n"
+        f"Source: {selected.get('source', '')}\n"
+        "Claims: " + "; ".join(c.get("text", "")[:120] for c in selected.get("claims", [])[:5])
+    )
+    try:
+        out = run_skill("newsworthiness-gate", f"SELECTED LEAD:\n\n{lead}", max_tokens=200)
+    except Exception as e:
+        log.warning("Newsworthiness gate failed (%s) — defaulting to PURSUE", e)
+        return True, "gate error — defaulted to pursue"
+    rm = re.search(r"REASON:\s*(.+)", out)
+    reason = rm.group(1).strip()[:200] if rm else out.strip()[:160]
+    drop = re.search(r"VERDICT:\s*DROP", out, re.IGNORECASE)
+    return (not drop, reason)
+
+
 def _extract_brief(text):
     """Pull the STORY_BRIEF block out of topic-intake output. Returns the block
     as a string (with delimiters) or empty string if not present."""
@@ -644,14 +681,41 @@ def run_daily_cycle():
 
     monitor_output = run_skill("news-monitor", leads_text)
 
-    # Pick the selected lead (monitor should identify it clearly)
-    selected = all_leads[0]  # fallback: first lead
-    for item in all_leads:
-        if item["video_url"] in monitor_output or item["throughline"][:40] in monitor_output:
-            selected = item
-            break
+    # Honour news-monitor's structured pick — including an explicit "nothing worthy".
+    status, idx = _parse_selected_lead(monitor_output, len(all_leads))
+    if status == "none":
+        _notify(
+            f"Thelivu daily cycle: scanned {len(all_leads)} lead(s) — none worth investigating "
+            f"today. Nothing was investigated, no tokens spent on the spine."
+        )
+        log.info("news-monitor returned NONE — skipping investigation.")
+        return
+    if status == "ok":
+        selected = all_leads[idx]
+    else:
+        # Unparsed selection — fall back to fuzzy match, then the first lead.
+        selected = all_leads[0]
+        for item in all_leads:
+            if item["video_url"] in monitor_output or item["throughline"][:40] in monitor_output:
+                selected = item
+                break
 
     log.info("Selected: %s", selected["throughline"][:80])
+
+    # Absolute-floor newsworthiness gate BEFORE the expensive investigation spine:
+    # one cheap call that drops commodity / routine-process news so the engine
+    # never spends investigation + verification tokens on a non-story.
+    pursue, why = _newsworthiness_verdict(selected)
+    if not pursue:
+        _notify(
+            "Thelivu: dropped today's top lead before investigating — not our kind of story.\n\n"
+            f"Lead: {selected['throughline'][:160]}\n"
+            f"Reason: {why}\n\n"
+            "Nothing was investigated."
+        )
+        log.info("Newsworthiness gate DROPPED lead: %s", why)
+        return
+    log.info("Newsworthiness gate: PURSUE (%s)", why)
 
     # Build a story brief from the selected lead for downstream context
     rss_brief = (
@@ -1018,6 +1082,16 @@ def retry_held():
     log.info("Retrying %d held story/stories...", len(held))
     for run in held:
         log.info("  Retrying run #%d: %s", run["id"], run["throughline"][:60])
+        # Don't re-chew commodity / non-stories every 3 days — drop them for good.
+        pursue, why = _newsworthiness_verdict(run)
+        if not pursue:
+            update_run(run["id"], status="killed", trust_gate="KILL")
+            _notify(
+                f"Thelivu: killed held run #{run['id']} — not our kind of story, "
+                f"stopping the retry loop.\n\nLead: {run['throughline'][:160]}\nReason: {why}"
+            )
+            log.info("  Newsworthiness gate killed held run #%d: %s", run["id"], why)
+            continue
         # Re-verify with fresh sources
         try:
             verification = run_skill(
