@@ -787,3 +787,27 @@ def save_publication(run_id, channel_msg_ids, confidence):
         conn.commit()
     finally:
         conn.close()
+
+
+def reset_run_for_review(run_id):
+    """Undo a publication so a run can be approved again.
+
+    Deletes any publication rows for the run and sets its status back to
+    pending_human. Use when a run was published in error (or wrongly marked
+    published) and needs to go back through the human gate. Does NOT touch the
+    channel — any bad post already sent must be deleted there by hand.
+
+    Returns the refreshed run dict, or None if the run does not exist.
+    """
+    if get_run(run_id) is None:
+        return None
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(f"DELETE FROM publications WHERE run_id = {ph}", (run_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    update_run(run_id, status="pending_human")
+    return get_run(run_id)
