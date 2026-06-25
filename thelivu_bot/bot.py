@@ -28,7 +28,7 @@ from shared.config import (
     TELEGRAM_CHANNEL_ID,
     TELEGRAM_DRAFT_CHAT_ID,
 )
-from shared.db import get_run, get_pending_runs, get_cost_report_data, get_queue_state, kv_get, init_db, save_publication, update_run, queue_topic, approve_proposal, skip_proposal
+from shared.db import get_run, get_pending_runs, get_cost_report_data, get_queue_state, kv_get, init_db, save_publication, update_run, queue_topic, approve_proposal, skip_proposal, reset_run_for_review
 
 logging.basicConfig(
     level=logging.INFO,
@@ -380,6 +380,56 @@ async def cmd_drafts(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(text, reply_markup=keyboard)
 
 
+async def cmd_republish(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Reset a run that was already published (or wrongly marked published) back
+    to review, then re-send the draft with Approve/Kill/Hold buttons.
+
+    Recovery path for runs that left the human gate in error. The reset only
+    touches the database — a bad post already on the channel must be deleted
+    there by hand."""
+    if not context.args:
+        await update.message.reply_text(
+            "Usage: /republish [run_id]\n\n"
+            "Resets a run back to review and re-sends the draft with buttons. "
+            "Use it when a run was published in error and you want to approve it again."
+        )
+        return
+    try:
+        run_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("Usage: /republish [run_id] — run_id must be a number.")
+        return
+
+    run = reset_run_for_review(run_id)
+    if run is None:
+        await update.message.reply_text(f"Run #{run_id} not found.")
+        return
+
+    draft = run.get("draft_text") or ""
+    throughline = (run.get("throughline") or "Untitled")[:120]
+    gate = run.get("trust_gate") or "pending"
+
+    await update.message.reply_text(
+        f"Run #{run_id} reset to review; any prior publication record was cleared.\n"
+        f"⚠️ If a bad post reached the channel, delete it there by hand — this only resets the database.\n\n"
+        f"Re-read the draft below, then tap to decide."
+    )
+
+    if draft:
+        for chunk in _split_chunks(draft):
+            await update.message.reply_text(chunk)
+            time.sleep(0.3)
+
+    summary = f"#{run_id} — {throughline}\n{gate} | ready for your decision"
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✓ Approve", callback_data=f"approve_{run_id}"),
+        InlineKeyboardButton("✗ Kill",    callback_data=f"kill_{run_id}"),
+        InlineKeyboardButton("⏸ Hold",   callback_data=f"hold_{run_id}"),
+    ]])
+    await update.message.reply_text(summary, reply_markup=keyboard)
+    log.info("Run #%d reset for re-review via /republish", run_id)
+
+
 # ---------------------------------------------------------------------------
 # Inline button callbacks (the human gate)
 # ---------------------------------------------------------------------------
@@ -519,6 +569,7 @@ async def _post_init(app):
             BotCommand("topic",    "Submit a story to investigate now"),
             BotCommand("track",    "Check status of current or recent story"),
             BotCommand("drafts",   "List all drafts pending your review"),
+            BotCommand("republish","Reset a published run back to review by id"),
             BotCommand("queue",    "What's running, queued, and when next cycle fires"),
             BotCommand("runnow",   "Trigger an RSS cycle immediately"),
             BotCommand("feeds",    "List active RSS sources"),
@@ -552,6 +603,7 @@ def main():
     app.add_handler(CommandHandler("cost", cmd_cost))
     app.add_handler(CommandHandler("topic", cmd_topic))
     app.add_handler(CommandHandler("runnow", cmd_runnow))
+    app.add_handler(CommandHandler("republish", cmd_republish))
     app.add_handler(CallbackQueryHandler(button_callback))
 
     log.info("Polling for updates. Human gate active.")
