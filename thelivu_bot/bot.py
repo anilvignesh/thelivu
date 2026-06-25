@@ -456,20 +456,13 @@ async def _handle_approve(query, run_id, run):
         await query.message.reply_text(f"Run #{run_id} has no draft text. Cannot publish.")
         return
 
-    # publisher skill formats the final article (confidence label, footer, structure)
-    try:
-        from engine.agents.skill_runner import run_skill
-        review = run.get("review_text") or ""
-        formatted = run_skill(
-            "publisher",
-            f"APPROVED DRAFT:\n\n{draft}\n\nEDITORIAL REVIEW:\n\n{review}",
-        )
-        # publisher skill returns the formatted text ready to post
-        if formatted and len(formatted) > 100:
-            draft = formatted
-    except Exception as e:
-        log.warning("publisher skill failed (%s) — posting raw draft", e)
-
+    # The publisher is "deliberately the dumbest stage": it formats, posts, and
+    # logs — it never alters the article's substance (see publisher/SKILL.md).
+    # The draft the human reviewed and approved is exactly what gets posted; the
+    # only furniture added is the standing footer, appended deterministically in
+    # _post_to_channel. We do NOT run a free-form LLM over an approved article:
+    # that risks rewriting it, and once published a conversational meta-message
+    # ("pre-flight check…") instead of the article itself.
     try:
         msg_ids = _post_to_channel(draft)
     except Exception as e:
