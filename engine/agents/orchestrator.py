@@ -52,9 +52,11 @@ from shared.db import (
     set_proposal_msg_id,
     pop_next_topic,
     finish_topic,
+    requeue_topic,
     enqueue_lead,
     get_queued_leads,
     mark_lead_processed,
+    requeue_lead,
     expire_old_leads,
     kv_set,
     kv_get,
@@ -523,6 +525,22 @@ def _halt_run(run_id, stage, raw):
     log.error("Run #%s halted at %s (no structured output).", run_id, stage)
 
 
+def _pause_run(run_id, label, err):
+    """A provider went down mid-spine. Drop the half-finished run and let the
+    caller re-queue the work, so it resumes when credit returns — never lost,
+    never run on a substitute engine."""
+    if run_id is not None:
+        update_run(run_id, status="dropped", trust_gate="PAUSED")
+    _notify_card(
+        "⏸", "Paused — provider unavailable",
+        body=(f"<b>{_esc(label)}</b>\n\nA model is out of credit or unreachable, so "
+              f"the run paused and the work went back in the queue. It resumes "
+              f"automatically when the provider is back — nothing was lost.\n\n"
+              f"<i>{_esc(str(err)[:200])}</i>"),
+    )
+    log.warning("Paused run #%s (%s): %s", run_id, label, err)
+
+
 def _parse_selected_lead(text, n_leads):
     """Read the 'SELECTED_LEAD: <n|NONE>' block from news-monitor output.
 
@@ -601,6 +619,11 @@ def _run_topic_intake(pending):
         finish_topic(topic_id)
         _halt_run(None, "topic-intake", e.raw)
         return
+    except Exception as e:
+        # Provider down at the gate — put the topic back in the queue, don't lose it.
+        requeue_topic(topic_id)
+        _pause_run(None, topic_text[:120], e)
+        return
 
     decision = re.search(_M_DECISION, intake_output, re.IGNORECASE).group(1).upper()
     if decision in ("PARK", "DECLINE"):
@@ -665,33 +688,38 @@ def _run_topic_intake(pending):
             _with_brief(brief, f"EVIDENCE DOSSIER:\n\n{dossier}"),
             marker=_M_GATE, run_id=live_run_id, topic=topic_label,
         )
+
+        gate = _parse_gate(verification)
+        log.info("Trust gate: %s", gate)
+        if gate in ("KILL", "HOLD"):
+            update_run(live_run_id, trust_gate=gate, verification_report=verification, status=gate.lower())
+            _reason = _reason_from_report(verification)
+            _notify_card(
+                "❌" if gate == "KILL" else "⏸",
+                f"Your topic was {gate.title()}ed — run #{live_run_id}",
+                body=f"<b>{_esc((angle or topic_text)[:160])}</b>"
+                     + (f"\n\n{_esc(_reason)}" if _reason else ""),
+                report_title=f"Verification — run #{live_run_id}", report_md=verification,
+            )
+            return
+
+        update_run(live_run_id, trust_gate=gate, status="writing")
+        pattern = run_skill("pattern-synthesizer",
+            _with_brief(brief, f"VERIFIED DOSSIER:\n\n{dossier}\n\nVERIFICATION:\n\n{verification}"),
+            run_id=live_run_id, topic=topic_label)
+        draft = run_skill("article-writer",
+            _with_brief(brief, f"DOSSIER:\n\n{dossier}\n\nVERIFICATION:\n\n{verification}\n\nPATTERN:\n\n{pattern}"),
+            run_id=live_run_id, topic=topic_label)
+        draft, review = _revision_loop(brief, dossier, verification, pattern, draft,
+                                       live_run_id, topic_label)
     except StructuredOutputError as e:
         _halt_run(live_run_id, e.skill_name, e.raw)
         return
-
-    gate = _parse_gate(verification)
-    log.info("Trust gate: %s", gate)
-    if gate in ("KILL", "HOLD"):
-        update_run(live_run_id, trust_gate=gate, verification_report=verification, status=gate.lower())
-        _reason = _reason_from_report(verification)
-        _notify_card(
-            "❌" if gate == "KILL" else "⏸",
-            f"Your topic was {gate.title()}ed — run #{live_run_id}",
-            body=f"<b>{_esc((angle or topic_text)[:160])}</b>"
-                 + (f"\n\n{_esc(_reason)}" if _reason else ""),
-            report_title=f"Verification — run #{live_run_id}", report_md=verification,
-        )
+    except Exception as e:
+        # Provider down mid-spine — pause and put the topic back in the queue.
+        requeue_topic(topic_id)
+        _pause_run(live_run_id, (angle or topic_text)[:120], e)
         return
-
-    update_run(live_run_id, trust_gate=gate, status="writing")
-    pattern = run_skill("pattern-synthesizer",
-        _with_brief(brief, f"VERIFIED DOSSIER:\n\n{dossier}\n\nVERIFICATION:\n\n{verification}"),
-        run_id=live_run_id, topic=topic_label)
-    draft = run_skill("article-writer",
-        _with_brief(brief, f"DOSSIER:\n\n{dossier}\n\nVERIFICATION:\n\n{verification}\n\nPATTERN:\n\n{pattern}"),
-        run_id=live_run_id, topic=topic_label)
-    draft, review = _revision_loop(brief, dossier, verification, pattern, draft,
-                                   live_run_id, topic_label)
 
     update_run(live_run_id,
         throughline=(angle or topic_text)[:200],
@@ -886,6 +914,9 @@ def run_daily_cycle():
         f"Extracted claims:\n"
         + json.dumps(selected["claims"], indent=2, ensure_ascii=False)
     )
+    # The whole spine is wrapped: a malformed stage halts the run (needs_attention);
+    # a provider going down anywhere pauses the run and puts the lead back in the
+    # queue, to resume when credit returns — never lost, never run on a substitute.
     try:
         dossier = run_structured_skill("news-investigator",
             _with_brief(rss_brief, investigate_input),
@@ -895,48 +926,52 @@ def run_daily_cycle():
         verification = run_structured_skill("source-verifier",
             _with_brief(rss_brief, f"EVIDENCE DOSSIER TO VERIFY:\n\n{dossier}"),
             marker=_M_GATE, run_id=run_id, topic=topic_label)
+
+        gate = _parse_gate(verification)
+        log.info("Trust gate: %s", gate)
+
+        if gate in ("KILL", "HOLD"):
+            update_run(run_id, trust_gate=gate, verification_report=verification, status=gate.lower())
+            _reason = _reason_from_report(verification)
+            _notify_card(
+                "❌" if gate == "KILL" else "⏸",
+                f"Today's story {gate.title()}ed — run #{run_id}",
+                body=f"<b>{_esc(selected['throughline'][:160])}</b>"
+                     + (f"\n\n{_esc(_reason)}" if _reason else ""),
+                report_title=f"Verification — run #{run_id}", report_md=verification,
+            )
+            log.info("Story %s. Run #%d.", gate, run_id)
+            return
+
+        if gate == "FRAMING-FIX":
+            log.info("FRAMING-FIX: continuing to write with framing notes.")
+
+        # 6. pattern-synthesizer
+        log.info("Running pattern-synthesizer...")
+        pattern = run_skill("pattern-synthesizer",
+            _with_brief(rss_brief, f"VERIFIED DOSSIER:\n\n{dossier}\n\nVERIFICATION REPORT:\n\n{verification}"),
+            run_id=run_id, topic=topic_label)
+
+        # 7. article-writer
+        log.info("Running article-writer...")
+        draft = run_skill("article-writer",
+            _with_brief(rss_brief,
+                f"VERIFIED DOSSIER:\n\n{dossier}\n\n"
+                f"VERIFICATION REPORT:\n\n{verification}\n\n"
+                f"PATTERN ANALYSIS:\n\n{pattern}"),
+            run_id=run_id, topic=topic_label)
+
+        # 8. editorial-reviewer with revision loop
+        log.info("Running editorial-reviewer (with revision loop)...")
+        draft, review = _revision_loop(rss_brief, dossier, verification, pattern, draft,
+                                       run_id, topic_label)
     except StructuredOutputError as e:
         _halt_run(run_id, e.skill_name, e.raw)
         return
-
-    gate = _parse_gate(verification)
-    log.info("Trust gate: %s", gate)
-
-    if gate in ("KILL", "HOLD"):
-        update_run(run_id, trust_gate=gate, verification_report=verification, status=gate.lower())
-        _reason = _reason_from_report(verification)
-        _notify_card(
-            "❌" if gate == "KILL" else "⏸",
-            f"Today's story {gate.title()}ed — run #{run_id}",
-            body=f"<b>{_esc(selected['throughline'][:160])}</b>"
-                 + (f"\n\n{_esc(_reason)}" if _reason else ""),
-            report_title=f"Verification — run #{run_id}", report_md=verification,
-        )
-        log.info("Story %s. Run #%d.", gate, run_id)
+    except Exception as e:
+        requeue_lead(selected.get("queue_id"))
+        _pause_run(run_id, selected["throughline"][:120], e)
         return
-
-    if gate == "FRAMING-FIX":
-        log.info("FRAMING-FIX: continuing to write with framing notes.")
-
-    # 6. pattern-synthesizer
-    log.info("Running pattern-synthesizer...")
-    pattern = run_skill("pattern-synthesizer",
-        _with_brief(rss_brief, f"VERIFIED DOSSIER:\n\n{dossier}\n\nVERIFICATION REPORT:\n\n{verification}"),
-        topic=topic_label)
-
-    # 7. article-writer
-    log.info("Running article-writer...")
-    draft = run_skill("article-writer",
-        _with_brief(rss_brief,
-            f"VERIFIED DOSSIER:\n\n{dossier}\n\n"
-            f"VERIFICATION REPORT:\n\n{verification}\n\n"
-            f"PATTERN ANALYSIS:\n\n{pattern}"),
-        topic=topic_label)
-
-    # 8. editorial-reviewer with revision loop
-    log.info("Running editorial-reviewer (with revision loop)...")
-    draft, review = _revision_loop(rss_brief, dossier, verification, pattern, draft,
-                                   run_id, topic_label)
 
     # 9. Save and send for approval
     update_run(run_id,

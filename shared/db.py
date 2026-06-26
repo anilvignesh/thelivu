@@ -444,6 +444,21 @@ def finish_topic(topic_id):
         conn.close()
 
 
+def requeue_topic(topic_id):
+    """Put an owner topic back in the queue (e.g. a provider outage paused it) so a
+    later cycle retries it instead of dropping it."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(
+            f"UPDATE pending_topics SET status = 'queued' WHERE id = {ph}", (topic_id,)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 # ── Lead queue ────────────────────────────────────────────────────────────────
 # Captured leads persist here so the cheap "find leads" stage survives a provider
 # outage; the expensive spine drains the queue when credit is available.
@@ -518,6 +533,24 @@ def mark_lead_processed(queue_id):
         cur.execute(
             f"UPDATE lead_queue SET status = 'processed', processed_at = {ph} WHERE id = {ph}",
             (ts, queue_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def requeue_lead(queue_id):
+    """Put a lead back in the queue (e.g. a provider went down mid-spine) so it is
+    retried from scratch on a later cycle instead of being lost."""
+    if not queue_id:
+        return
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(
+            f"UPDATE lead_queue SET status = 'queued', processed_at = NULL WHERE id = {ph}",
+            (queue_id,),
         )
         conn.commit()
     finally:

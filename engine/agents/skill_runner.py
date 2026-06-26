@@ -465,10 +465,15 @@ def run_skill(skill_name, input_text, extra_tools=None, max_tokens=4096,
                 return _run_gemini(skill_name, input_text, system_prompt, max_tokens, run_id,
                                    model=gemini_model)
             except Exception as e:
-                log.warning("Gemini failed for %s (%s) — falling back to Claude", skill_name, e)
+                # No cross-engine fallback for grounded research. Switching the
+                # research engine to Claude silently would change how facts are
+                # sourced; instead we raise so the run pauses and the lead waits in
+                # the queue until Gemini is back. (Same philosophy as a Claude
+                # outage: if it's down, it's down — capture, queue, resume later.)
+                log.warning("Gemini failed for %s (%s) — pausing (no fallback).", skill_name, e)
                 _send_quota_alert("gemini", skill_name, e)
+                raise
 
-        # Claude — primary or fallback
         try:
             return _run_claude(skill_name, input_text, system_prompt, extra_tools, max_tokens, run_id)
         except Exception as e:
