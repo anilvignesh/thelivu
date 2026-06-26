@@ -16,7 +16,7 @@ from datetime import date
 
 import anthropic
 from shared.config import (
-    CLAUDE_MODEL, GEMINI_MODEL, GROQ_MODEL, DEEPSEEK_MODEL, MISTRAL_MODEL,
+    CLAUDE_MODEL, GEMINI_MODEL, GEMINI_PRO_MODEL, GROQ_MODEL, DEEPSEEK_MODEL, MISTRAL_MODEL,
     ANTHROPIC_API_KEY, GEMINI_API_KEY, GROQ_API_KEY, DEEPSEEK_API_KEY, MISTRAL_API_KEY,
     TELEGRAM_BOT_TOKEN, TELEGRAM_DRAFT_CHAT_ID,
     SKILLS_DIR,
@@ -242,6 +242,10 @@ _GEMINI_SKILLS = {
     "story-tracker",
 }
 
+# Search-grounded skills that warrant the stronger (Pro) Gemini for sharper
+# adversarial reasoning. The trust gate is the most consequential decision.
+_GEMINI_PRO_SKILLS = {"source-verifier"}
+
 # Tier 2: DeepSeek R1 — reasoning-heavy, no search needed
 _DEEPSEEK_SKILLS = {
     "pattern-synthesizer",
@@ -272,8 +276,9 @@ _CLAUDE_SKILL_TOOLS = {
 
 # Per-provider cost per 1M tokens (USD) — for spend tracking
 _COSTS = {
-    CLAUDE_MODEL:   {"in": 3.00,  "out": 15.00},
-    GEMINI_MODEL:   {"in": 0.30,  "out": 1.00},
+    CLAUDE_MODEL:    {"in": 3.00,  "out": 15.00},
+    GEMINI_MODEL:    {"in": 0.30,  "out": 1.00},
+    GEMINI_PRO_MODEL:{"in": 1.25,  "out": 10.00},
     GROQ_MODEL:     {"in": 0.00,  "out": 0.00},   # free tier
     DEEPSEEK_MODEL: {"in": 0.55,  "out": 2.19},
     MISTRAL_MODEL:  {"in": 0.20,  "out": 0.60},
@@ -294,7 +299,8 @@ def _load_skill(skill_name):
 
 # ── Provider runners ──────────────────────────────────────────────────────────
 
-def _run_gemini(skill_name, input_text, system_prompt, max_tokens, run_id=None):
+def _run_gemini(skill_name, input_text, system_prompt, max_tokens, run_id=None,
+                model=GEMINI_MODEL):
     from google.genai import types
     from shared.db import record_usage
 
@@ -304,13 +310,13 @@ def _run_gemini(skill_name, input_text, system_prompt, max_tokens, run_id=None):
         tools=[types.Tool(google_search=types.GoogleSearch())],
         max_output_tokens=max_tokens,
     )
-    log.info("Running %s via Gemini + Google Search", skill_name)
+    log.info("Running %s via %s + Google Search", skill_name, model)
     response = client.models.generate_content(
-        model=GEMINI_MODEL, contents=input_text, config=config,
+        model=model, contents=input_text, config=config,
     )
     try:
         u = response.usage_metadata
-        record_usage(skill=skill_name, model=GEMINI_MODEL,
+        record_usage(skill=skill_name, model=model,
                      input_tokens=getattr(u, "prompt_token_count", 0),
                      output_tokens=getattr(u, "candidates_token_count", 0),
                      run_id=run_id)
@@ -428,7 +434,8 @@ def run_skill(skill_name, input_text, extra_tools=None, max_tokens=4096,
     # fallback. Groq / Mistral / DeepSeek are no longer in the pipeline.
     if skill_name in _GEMINI_SKILLS and GEMINI_API_KEY:
         preferred = "gemini"
-        model_label = GEMINI_MODEL
+        gemini_model = GEMINI_PRO_MODEL if skill_name in _GEMINI_PRO_SKILLS else GEMINI_MODEL
+        model_label = gemini_model
     else:
         preferred = "claude"
         model_label = CLAUDE_MODEL
@@ -438,7 +445,8 @@ def run_skill(skill_name, input_text, extra_tools=None, max_tokens=4096,
     try:
         if preferred == "gemini":
             try:
-                return _run_gemini(skill_name, input_text, system_prompt, max_tokens, run_id)
+                return _run_gemini(skill_name, input_text, system_prompt, max_tokens, run_id,
+                                   model=gemini_model)
             except Exception as e:
                 log.warning("Gemini failed for %s (%s) — falling back to Claude", skill_name, e)
                 _send_quota_alert("gemini", skill_name, e)
