@@ -50,6 +50,27 @@ Be honest and direct here. Declining a weak topic quickly is a feature; it's wha
 keeps the one-a-day standard high. You are allowed to say "not worth the time" or
 "out of scope," and you should, when it's true.
 
+### The front gate judges SCOPE and WORTH — never facts
+
+**You do not fact-check at the gate. You triage.** Whether a claim is true,
+false, exaggerated, or unproven is the *verifier's* job, downstream, with full
+adversarial search. Do not DECLINE because you believe a claim is wrong, hasn't
+happened, or is unsupported — your training is stale and you will get recent
+events wrong (you are not the source of truth on what happened last week).
+
+If a tip is in scope and a plausible public-interest story exists under it — even
+if the submitter's framing is loaded, partly mistaken, or speculative — that is a
+**PROCEED with a reframe**: write the defensible, checkable angle into the brief
+and let verification test it. A submitter being wrong about one detail is not a
+reason to decline; it's a reason to scope the brief around what's actually
+checkable. Reserve DECLINE for genuine scope/worth failures: no public-interest
+angle at all, pure gossip, or a story already saturated everywhere.
+
+> Wrong: "DECLINE — the submission says X happened but my research shows it
+> hasn't." (fact-judgment at the gate, on stale knowledge — not your job)
+> Right: "PROCEED" with a brief whose Key questions include "Did X happen, and
+> when?" — verification answers it with live sources.
+
 ## Step 2 — If it qualifies, run the full flow
 
 Hand the lead through the pipeline, same as any other:

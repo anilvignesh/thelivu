@@ -555,7 +555,7 @@ def _run_topic_intake(pending):
     decision = re.search(_M_DECISION, intake_output, re.IGNORECASE).group(1).upper()
     if decision in ("PARK", "DECLINE"):
         finish_topic(topic_id)
-        _notify(f"Topic {decision}d by intake — not taken up:\n\n{intake_output[:800]}")
+        _notify(f"Topic {decision}d by intake — not taken up:\n\n{intake_output}")
         log.info("Topic %s by topic-intake.", decision)
         return
 
@@ -565,7 +565,7 @@ def _run_topic_intake(pending):
         finish_topic(topic_id)
         _notify(
             "Topic-intake said PROCEED but emitted no STORY_BRIEF block — not "
-            f"investigating (would run unframed).\n\n{intake_output[:600]}"
+            f"investigating (would run unframed).\n\n{intake_output}"
         )
         log.warning("PROCEED without STORY_BRIEF — skipping.")
         return
