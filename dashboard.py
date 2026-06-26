@@ -13,10 +13,10 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 # ── Config ────────────────────────────────────────────────────────────────────
-DB_URL         = os.environ.get("DATABASE_URL", "postgresql://postgres:***REMOVED-OLD-DB-PASSWORD***@reseau.proxy.rlwy.net:43183/railway")
-BOT_TOKEN      = os.environ.get("TELEGRAM_BOT_TOKEN", "***REMOVED-OLD-TELEGRAM-TOKEN***")
-CHANNEL_ID     = os.environ.get("TELEGRAM_CHANNEL_ID", "-1004360555583")
-DRAFT_CHAT_ID  = os.environ.get("TELEGRAM_DRAFT_CHAT_ID", "7307159646")
+DB_URL         = os.environ.get("DATABASE_URL", "")
+BOT_TOKEN      = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+CHANNEL_ID     = os.environ.get("TELEGRAM_CHANNEL_ID", "")
+DRAFT_CHAT_ID  = os.environ.get("TELEGRAM_DRAFT_CHAT_ID", "")
 TG_API        = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 _INR = 84
@@ -29,6 +29,33 @@ _MODEL_COSTS = {
 }
 
 st.set_page_config(page_title="Thelivu", page_icon="📰", layout="wide")
+
+
+# ── Auth gate ─────────────────────────────────────────────────────────────────
+# This dashboard can publish, kill, and run raw SQL — it must never be served
+# open. Set DASHBOARD_PASSWORD on the host; without it, the app refuses to start.
+def _require_auth():
+    expected = os.environ.get("DASHBOARD_PASSWORD", "")
+    if not expected:
+        st.error("Server misconfigured: DASHBOARD_PASSWORD is not set. "
+                 "Refusing to start unprotected.")
+        st.stop()
+    if st.session_state.get("auth_ok"):
+        return
+    st.title("Thelivu — sign in")
+    with st.form("login"):
+        pw = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Enter")
+    if submitted and pw == expected:
+        st.session_state["auth_ok"] = True
+        st.rerun()
+    elif submitted:
+        st.error("Wrong password.")
+    st.stop()
+
+
+_require_auth()
+
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
 @st.cache_data(ttl=10)
