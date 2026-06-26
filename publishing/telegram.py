@@ -72,3 +72,12 @@ def render(markdown, contact):
     nodes = _blocks_to_nodes(article.blocks)
     url = telegraph.create_page(article.title, nodes)
     return _build_teaser(article, url, contact), url
+
+
+def report_to_telegraph(title, markdown):
+    """Publish any markdown body (a verification report, a draft preview, etc.) as
+    a clean Telegraph page and return its URL. Used by owner-facing comms so long
+    reports become a link instead of a wall of raw markdown in the chat."""
+    from publishing.parser import parse_blocks
+    nodes = _blocks_to_nodes(parse_blocks(markdown or ""))
+    return telegraph.create_page(title or "Thelivu report", nodes)

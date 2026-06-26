@@ -245,11 +245,13 @@ def _split_chunks(text):
     return chunks or ["(empty)"]
 
 
-def _tg_post(chat_id, text, reply_markup=None):
+def _tg_post(chat_id, text, reply_markup=None, parse_mode=None):
     """Send a single message — caller must ensure len(text) ≤ 4096."""
-    payload = {"chat_id": str(chat_id), "text": text}
+    payload = {"chat_id": str(chat_id), "text": text, "disable_web_page_preview": False}
     if reply_markup:
         payload["reply_markup"] = json.dumps(reply_markup)
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
     try:
         r = requests.post(
             f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
@@ -275,8 +277,53 @@ def _tg_send_long(chat_id, text):
 
 
 def _notify(text):
-    """Send a short status notification to Anil's draft chat."""
+    """Send a short status notification to Anil's draft chat (plain text)."""
     _tg_send_long(TELEGRAM_DRAFT_CHAT_ID, text)
+
+
+# ── Owner-facing cards — clean HTML, long reports offloaded to Telegraph ────────
+
+def _esc(s):
+    import html as _html
+    return _html.escape(str(s), quote=False)
+
+
+def _report_link(title, markdown):
+    """Publish a long report to Telegraph; return an HTML link, or '' on failure."""
+    if not markdown:
+        return ""
+    try:
+        from publishing.telegram import report_to_telegraph
+        import html as _html
+        url = report_to_telegraph(title, markdown)
+        return f'▸ <a href="{_html.escape(url, quote=True)}">Full report</a>'
+    except Exception as e:
+        log.warning("Telegraph report failed (%s) — trimming inline", e)
+        return _esc(markdown[:1200])
+
+
+def _reason_from_report(report):
+    """Pull a one-line reason out of a verification/review report."""
+    for label in ("Blocking claims", "Required before it moves", "Required Edit"):
+        m = re.search(rf"{label}\s*[:\-]?\s*(.+)", report or "")
+        if m and m.group(1).strip() and m.group(1).strip() not in ("[", "—"):
+            return m.group(1).strip()[:300]
+    return ""
+
+
+def _notify_card(emoji, title, body="", report_title=None, report_md=None,
+                 reply_markup=None):
+    """Build and send a clean HTML card to the owner. Long report_md goes to
+    Telegraph as a 'Full report' link instead of flooding the chat."""
+    parts = [f"{emoji} <b>{_esc(title)}</b>"]
+    if body:
+        parts += ["", body]
+    link = _report_link(report_title or title, report_md)
+    if link:
+        parts += ["", link]
+    html = "\n".join(parts)
+    _tg_post(TELEGRAM_DRAFT_CHAT_ID, html[:4096], reply_markup=reply_markup,
+             parse_mode="HTML")
 
 
 def send_for_approval(run_id, draft_text, verification_report, review_text):
@@ -306,30 +353,27 @@ def _send_via_telegram(run_id, draft_text, verification_report, review_text):
     if legal_flag:
         update_run_legal_flag(run_id, True, legal_reason)
 
-    title = draft_text.lstrip("# ").splitlines()[0][:80]
+    title = draft_text.lstrip("# ").splitlines()[0][:100]
 
-    legal_warning = ""
+    parts = [f"📰 <b>New story ready — run #{run_id}</b>", "", f"<b>{_esc(title)}</b>"]
     if legal_flag:
-        legal_warning = (
-            f"\n\n⚠️ LEGAL REVIEW REQUIRED before approving.\n"
-            f"Reason: {legal_reason}\n"
-            f"Do NOT approve until a legal read has been done."
-        )
+        parts += ["", "⚠️ <b>LEGAL REVIEW REQUIRED before approving.</b>",
+                  f"Reason: {_esc(legal_reason)}",
+                  "Do NOT approve until a legal read has been done."]
 
-    # Pull a one-line verdict from the review (first non-empty line after APPROVED/PASS)
-    verdict = ""
-    for ln in (review_text or "").splitlines():
-        ln = ln.strip()
-        if ln and not ln.startswith("#") and not ln.startswith("```"):
-            verdict = ln[:120]
-            break
+    # Offer the draft as a clean Telegraph read; fall back to raw chunks if it fails.
+    preview_ok = False
+    try:
+        from publishing.telegram import report_to_telegraph
+        import html as _html
+        url = report_to_telegraph(title, draft_text)
+        parts += ["", f'▸ <a href="{_html.escape(url, quote=True)}">Read the draft</a>, then tap to decide.']
+        preview_ok = True
+    except Exception as e:
+        log.warning("Draft preview to Telegraph failed (%s) — sending raw", e)
+        parts += ["", "Read the draft below, then tap to decide."]
 
-    summary = (
-        f"📰 New story ready — run #{run_id}\n\n"
-        f"*{title}*"
-        f"{legal_warning}\n\n"
-        f"Read the draft below, then tap to decide."
-    )
+    summary = "\n".join(parts)
     keyboard = {
         "inline_keyboard": [[
             {"text": "✓ Approve", "callback_data": f"approve_{run_id}"},
@@ -337,9 +381,11 @@ def _send_via_telegram(run_id, draft_text, verification_report, review_text):
             {"text": "⏸ Hold",   "callback_data": f"hold_{run_id}"},
         ]]
     }
-    msg_id = _tg_post(TELEGRAM_DRAFT_CHAT_ID, summary[:_TG_LIMIT], reply_markup=keyboard)
+    msg_id = _tg_post(TELEGRAM_DRAFT_CHAT_ID, summary[:_TG_LIMIT], reply_markup=keyboard,
+                      parse_mode="HTML")
     update_run(run_id, tg_msg_id=msg_id)
-    _tg_send_long(TELEGRAM_DRAFT_CHAT_ID, draft_text)
+    if not preview_ok:
+        _tg_send_long(TELEGRAM_DRAFT_CHAT_ID, draft_text)
 
 
 def _save_to_file(run_id, draft_text, verification_report, review_text):
@@ -464,11 +510,11 @@ def _halt_run(run_id, stage, raw):
     if run_id is not None:
         update_run(run_id, status="needs_attention", trust_gate="NEEDS-ATTENTION",
                    verification_report=(raw or "")[:4000])
-    _notify(
-        f"⚠️ Thelivu: run #{run_id} halted at the *{stage}* stage — it returned no "
-        f"valid structured output after a retry, so the pipeline stopped rather than "
-        f"publish or silently hold garbage. Nothing was posted.\n\n"
-        f"First 300 chars of what it returned:\n{(raw or '')[:300]}"
+    _notify_card(
+        "⚠️", f"Run #{run_id} halted at “{stage}”",
+        body=("It returned no valid structured output after a retry, so the pipeline "
+              "stopped rather than publish or silently hold garbage. Nothing was posted."),
+        report_title=f"Halt — {stage} — run #{run_id}", report_md=raw,
     )
     log.error("Run #%s halted at %s (no structured output).", run_id, stage)
 
@@ -555,7 +601,12 @@ def _run_topic_intake(pending):
     decision = re.search(_M_DECISION, intake_output, re.IGNORECASE).group(1).upper()
     if decision in ("PARK", "DECLINE"):
         finish_topic(topic_id)
-        _notify(f"Topic {decision}d by intake — not taken up:\n\n{intake_output}")
+        _notify_card(
+            "🚫" if decision == "DECLINE" else "🅿️",
+            f"Topic {decision.title()}d by intake",
+            body=_esc(topic_text[:200]),
+            report_title=f"Intake {decision} — {topic_text[:50]}", report_md=intake_output,
+        )
         log.info("Topic %s by topic-intake.", decision)
         return
 
@@ -563,9 +614,10 @@ def _run_topic_intake(pending):
     brief = _extract_brief(intake_output)
     if not brief:
         finish_topic(topic_id)
-        _notify(
-            "Topic-intake said PROCEED but emitted no STORY_BRIEF block — not "
-            f"investigating (would run unframed).\n\n{intake_output}"
+        _notify_card(
+            "⚠️", "Intake said PROCEED but gave no brief",
+            body="Not investigating (it would run unframed).",
+            report_title="Intake output", report_md=intake_output,
         )
         log.warning("PROCEED without STORY_BRIEF — skipping.")
         return
@@ -580,9 +632,9 @@ def _run_topic_intake(pending):
     )
     if not pursue:
         finish_topic(topic_id)
-        _notify(
-            "Thelivu: this topic isn't the kind of story we do — not investigating.\n\n"
-            f"Topic: {topic_text[:160]}\nReason: {why}"
+        _notify_card(
+            "🗑", "Topic dropped — not our kind of story",
+            body=f"<b>Topic:</b> {_esc(topic_text[:200])}\n<b>Reason:</b> {_esc(why)}",
         )
         log.info("Owner topic dropped by newsworthiness gate: %s", why)
         return
@@ -617,7 +669,14 @@ def _run_topic_intake(pending):
     log.info("Trust gate: %s", gate)
     if gate in ("KILL", "HOLD"):
         update_run(live_run_id, trust_gate=gate, verification_report=verification, status=gate.lower())
-        _notify(f"Your topic was {gate}ed (run #{live_run_id}).\n\n{verification}")
+        _reason = _reason_from_report(verification)
+        _notify_card(
+            "❌" if gate == "KILL" else "⏸",
+            f"Your topic was {gate.title()}ed — run #{live_run_id}",
+            body=f"<b>{_esc((angle or topic_text)[:160])}</b>"
+                 + (f"\n\n{_esc(_reason)}" if _reason else ""),
+            report_title=f"Verification — run #{live_run_id}", report_md=verification,
+        )
         return
 
     update_run(live_run_id, trust_gate=gate, status="writing")
@@ -771,11 +830,10 @@ def run_daily_cycle():
     # never spends investigation + verification tokens on a non-story.
     pursue, why = _newsworthiness_verdict(selected)
     if not pursue:
-        _notify(
-            "Thelivu: dropped today's top lead before investigating — not our kind of story.\n\n"
-            f"Lead: {selected['throughline'][:160]}\n"
-            f"Reason: {why}\n\n"
-            "Nothing was investigated."
+        _notify_card(
+            "🗑", "Dropped today's top lead — not our kind of story",
+            body=f"<b>{_esc(selected['throughline'][:160])}</b>\n\n"
+                 f"<b>Reason:</b> {_esc(why)}\nNothing was investigated.",
         )
         log.info("Newsworthiness gate DROPPED lead: %s", why)
         return
@@ -828,9 +886,13 @@ def run_daily_cycle():
 
     if gate in ("KILL", "HOLD"):
         update_run(run_id, trust_gate=gate, verification_report=verification, status=gate.lower())
-        _notify(
-            f"Thelivu: today's story {gate}ed (run #{run_id}).\n\n"
-            f"Reason:\n{verification}"
+        _reason = _reason_from_report(verification)
+        _notify_card(
+            "❌" if gate == "KILL" else "⏸",
+            f"Today's story {gate.title()}ed — run #{run_id}",
+            body=f"<b>{_esc(selected['throughline'][:160])}</b>"
+                 + (f"\n\n{_esc(_reason)}" if _reason else ""),
+            report_title=f"Verification — run #{run_id}", report_md=verification,
         )
         log.info("Story %s. Run #%d.", gate, run_id)
         return
@@ -1060,7 +1122,11 @@ def run_meta_synthesis():
         output = run_skill("meta-synthesizer", runs_text)
         log.info("Meta-synthesis complete.")
 
-        _notify(f"Monthly meta-synthesis complete — {len(all_runs)} stories reviewed.\n\n{output}")
+        _notify_card(
+            "🧭", "Monthly meta-synthesis complete",
+            body=f"{len(all_runs)} stories reviewed.",
+            report_title="Meta-synthesis report", report_md=output,
+        )
         kv_set("last_meta_at", datetime.now(timezone.utc).isoformat())
     except Exception as e:
         log.error("Meta-synthesis failed: %s", e, exc_info=True)
@@ -1150,9 +1216,10 @@ def retry_held():
         pursue, why = _newsworthiness_verdict(run)
         if not pursue:
             update_run(run["id"], status="killed", trust_gate="KILL")
-            _notify(
-                f"Thelivu: killed held run #{run['id']} — not our kind of story, "
-                f"stopping the retry loop.\n\nLead: {run['throughline'][:160]}\nReason: {why}"
+            _notify_card(
+                "❌", f"Killed held run #{run['id']} — stopping the retry loop",
+                body=f"<b>{_esc(run['throughline'][:160])}</b>\n\n"
+                     f"Not our kind of story.\n<b>Reason:</b> {_esc(why)}",
             )
             log.info("  Newsworthiness gate killed held run #%d: %s", run["id"], why)
             continue
