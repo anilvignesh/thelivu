@@ -112,9 +112,9 @@ Two providers. **Gemini** for anything that must touch the live web; **Claude** 
 
 **Why two, not five.** Earlier versions routed cheap tiers (Groq/Llama, DeepSeek, Mistral) onto parse-critical and fact-judging stages. Weak models there produced malformed output and stale "facts" from training memory. Consolidating to two strong providers — and deleting most of the multi-provider quota machinery — bought reliability and far less to maintain; at ~1 story/day the cost delta is negligible. The verifier, the single most consequential decision, runs on Gemini **Pro**.
 
-**Search capability is non-negotiable for facts.** Research/verification only ever runs on a search-grounded model (Gemini, with Claude's web-search as the fallback). A model without live search is *never* allowed to verify — which is exactly why a no-search model is not a fallback for those stages. If both search-capable providers are down, the run **holds**; it does not fabricate.
+**No cross-engine fallback — pause, don't degrade.** If a provider is out of credit, the pipeline does **not** silently switch engines (e.g. run research on Claude's web-search, or judgment on a weaker model). Switching engines changes *how* facts are sourced and erodes the consistency of the flow. Instead, both providers behave the same way: the run pauses and the work goes back in the queue, resuming automatically when credit returns. Lead capture is cheap and keeps running throughout, so nothing is lost — a dead provider costs you time, never stories. (A no-search model is *doubly* barred from research: it can't ground facts at all.)
 
-**Provider outage = pause, not degrade.** Lead capture is cheap and keeps running; the expensive spine waits for credit (see Resilience above). Quota alerts hit Telegram immediately — 🟡 temporary, 🔴 billing — one per issue per day.
+**Symmetric outage behavior.** Gemini down → research/verify pause, leads wait. Claude down → judgment/writing pause, leads wait. Either way the queue keeps filling and drains when the provider is back. Quota alerts hit Telegram immediately — 🟡 temporary, 🔴 billing — one per issue per day; a pause posts a ⏸ card.
 
 ---
 
