@@ -36,6 +36,8 @@ CHECK_INTERVAL_HOURS = int(os.environ.get("CHECK_INTERVAL_HOURS", "6"))
 # --- Models ---
 CLAUDE_MODEL    = "claude-sonnet-4-6"
 GEMINI_MODEL    = "gemini-2.5-flash"
+# Stronger Gemini for the highest-stakes search-grounded stage (the trust gate).
+GEMINI_PRO_MODEL = os.environ.get("GEMINI_PRO_MODEL", "gemini-2.5-pro")
 GROQ_MODEL      = "llama-3.3-70b-versatile"
 DEEPSEEK_MODEL  = "deepseek-reasoner"   # R1 — reasoning tier
 MISTRAL_MODEL   = "mistral-small-latest"
