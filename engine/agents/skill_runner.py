@@ -427,7 +427,16 @@ def run_skill(skill_name, input_text, extra_tools=None, max_tokens=4096,
     """
     from shared.db import agent_start, agent_done
 
-    system_prompt = _PIPELINE_CONTRACT + _load_skill(skill_name)
+    # Anchor every skill to "now" so search-grounded stages hunt for the latest
+    # instead of falling back on stale training memory for recent events.
+    today = date.today().isoformat()
+    date_anchor = (
+        f"Today's date is {today}. Treat this as 'now'. For anything fast-moving "
+        f"(prices, valuations, net worth, share moves, ongoing events), actively "
+        f"search for developments up to today; never rely on training memory for "
+        f"recent events. If live sources and your memory disagree, the sources win.\n\n"
+    )
+    system_prompt = date_anchor + _PIPELINE_CONTRACT + _load_skill(skill_name)
 
     # Two providers only: Gemini for the search-grounded research skills, Claude
     # for everything else (judgment / structured / writing / gates) and as the
