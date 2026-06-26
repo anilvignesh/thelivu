@@ -52,6 +52,10 @@ from shared.db import (
     set_proposal_msg_id,
     pop_next_topic,
     finish_topic,
+    enqueue_lead,
+    get_queued_leads,
+    mark_lead_processed,
+    expire_old_leads,
     kv_set,
     kv_get,
 )
@@ -772,13 +776,23 @@ def run_daily_cycle():
     if dropped:
         log.info("Pre-filter dropped %d entertainment/gossip lead(s).", dropped)
 
+    # Capture: persist newly-found leads to the queue so they survive a provider
+    # outage. This is the cheap "find leads, hold them" stage — it runs whether or
+    # not the expensive spine can.
+    captured = sum(1 for l in all_leads if enqueue_lead(l))
+    expired = expire_old_leads(max_age_days=7)
+    log.info("Captured %d new lead(s); expired %d stale.", captured, expired)
+
+    # Process: draw from the accumulated queue (not just this cycle's finds), so a
+    # backlog built up during an outage drains once credit returns.
+    all_leads = get_queued_leads(limit=40, max_age_days=7)
     if not all_leads:
-        _notify("Thelivu daily cycle: no new leads today. Nothing to investigate.")
-        log.info("No new leads. Exiting.")
+        _notify("Thelivu daily cycle: no leads in the queue. Nothing to investigate.")
+        log.info("Empty lead queue. Exiting.")
         return
 
     # 4. news-monitor: pick the top lead by impact × under-coverage
-    log.info("Running news-monitor on %d lead(s)...", len(all_leads))
+    log.info("Running news-monitor on %d queued lead(s)...", len(all_leads))
 
     # Prepend source reliability context so the monitor can weight sources
     reliability = get_source_reliability()
@@ -830,6 +844,7 @@ def run_daily_cycle():
     # never spends investigation + verification tokens on a non-story.
     pursue, why = _newsworthiness_verdict(selected)
     if not pursue:
+        mark_lead_processed(selected.get("queue_id"))
         _notify_card(
             "🗑", "Dropped today's top lead — not our kind of story",
             body=f"<b>{_esc(selected['throughline'][:160])}</b>\n\n"
@@ -850,12 +865,15 @@ def run_daily_cycle():
     )
     topic_label = selected["throughline"][:120]
 
-    # Create the run now so a downstream halt has an id to mark.
+    # Create the run now so a downstream halt has an id to mark. The lead is now
+    # "taken" — mark it processed so it won't be re-selected next cycle (its run
+    # carries it from here; a mid-spine failure halts the run, not the queue).
     run_id = save_run(
         video_id=selected["video_id"], source=selected["source"],
         throughline=selected["throughline"], trust_gate="investigating",
         status="investigating",
     )
+    mark_lead_processed(selected.get("queue_id"))
 
     # 4. news-investigator — build the dossier from the brief + lead facts.
     # NOT the raw monitor reply (that cascade is the run #18 poisoning vector).

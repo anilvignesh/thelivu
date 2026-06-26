@@ -97,6 +97,20 @@ CREATE TABLE IF NOT EXISTS active_agents (
     topic       TEXT,
     started_at  TIMESTAMP DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS lead_queue (
+    id           SERIAL PRIMARY KEY,
+    video_id     TEXT UNIQUE,
+    source       TEXT,
+    source_id    TEXT,
+    video_url    TEXT,
+    title        TEXT,
+    throughline  TEXT,
+    claims       TEXT,
+    status       TEXT DEFAULT 'queued',
+    created_at   TIMESTAMP DEFAULT NOW(),
+    processed_at TIMESTAMP
+);
 """
 
 # SQLite fallback schema (same structure, SQLite syntax)
@@ -192,6 +206,20 @@ CREATE TABLE IF NOT EXISTS active_agents (
     model       TEXT,
     topic       TEXT,
     started_at  TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS lead_queue (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_id     TEXT UNIQUE,
+    source       TEXT,
+    source_id    TEXT,
+    video_url    TEXT,
+    title        TEXT,
+    throughline  TEXT,
+    claims       TEXT,
+    status       TEXT DEFAULT 'queued',
+    created_at   TEXT DEFAULT (datetime('now')),
+    processed_at TEXT
 );
 """
 
@@ -412,6 +440,109 @@ def finish_topic(topic_id):
             f"UPDATE pending_topics SET status = 'done' WHERE id = {ph}", (topic_id,)
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+# ── Lead queue ────────────────────────────────────────────────────────────────
+# Captured leads persist here so the cheap "find leads" stage survives a provider
+# outage; the expensive spine drains the queue when credit is available.
+
+def enqueue_lead(lead):
+    """Insert a captured lead if its video_id isn't already queued. Returns True
+    if newly enqueued. Dedup is by video_id (ON CONFLICT DO NOTHING)."""
+    vid = lead.get("video_id")
+    if not vid:
+        return False
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        conflict = "ON CONFLICT (video_id) DO NOTHING" if _is_postgres() else "OR IGNORE"
+        if _is_postgres():
+            sql = (f"INSERT INTO lead_queue (video_id, source, source_id, video_url, "
+                   f"title, throughline, claims) VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph}) {conflict}")
+        else:
+            sql = (f"INSERT OR IGNORE INTO lead_queue (video_id, source, source_id, video_url, "
+                   f"title, throughline, claims) VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph})")
+        cur.execute(sql, (
+            vid, lead.get("source"), lead.get("source_id"), lead.get("video_url"),
+            lead.get("title"), lead.get("throughline"),
+            json.dumps(lead.get("claims") or []),
+        ))
+        newly = cur.rowcount > 0
+        conn.commit()
+        return newly
+    finally:
+        conn.close()
+
+
+def get_queued_leads(limit=40, max_age_days=7):
+    """Return queued leads newer than max_age_days, freshest first, as lead dicts
+    the daily cycle can feed straight into news-monitor / the spine."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        if _is_postgres():
+            cur.execute(
+                "SELECT * FROM lead_queue WHERE status = 'queued' "
+                "AND created_at > NOW() - INTERVAL '%s days' "
+                "ORDER BY created_at DESC LIMIT %s",
+                (max_age_days, limit),
+            )
+        else:
+            cur.execute(
+                "SELECT * FROM lead_queue WHERE status = 'queued' "
+                "AND created_at > datetime('now', ?) ORDER BY created_at DESC LIMIT ?",
+                (f"-{max_age_days} days", limit),
+            )
+        leads = []
+        for row in _fetchall(cur):
+            try:
+                row["claims"] = json.loads(row.get("claims") or "[]")
+            except Exception:
+                row["claims"] = []
+            row["queue_id"] = row["id"]
+            leads.append(row)
+        return leads
+    finally:
+        conn.close()
+
+
+def mark_lead_processed(queue_id):
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        ts = datetime.now(timezone.utc).isoformat()
+        cur.execute(
+            f"UPDATE lead_queue SET status = 'processed', processed_at = {ph} WHERE id = {ph}",
+            (ts, queue_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def expire_old_leads(max_age_days=7):
+    """Drop queued leads older than the window so the backlog can't fill with
+    stale news. Returns the number expired."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        if _is_postgres():
+            cur.execute(
+                "UPDATE lead_queue SET status = 'dropped' WHERE status = 'queued' "
+                "AND created_at < NOW() - INTERVAL '%s days'", (max_age_days,),
+            )
+        else:
+            cur.execute(
+                "UPDATE lead_queue SET status = 'dropped' WHERE status = 'queued' "
+                "AND created_at < datetime('now', ?)", (f"-{max_age_days} days",),
+            )
+        n = cur.rowcount
+        conn.commit()
+        return n
     finally:
         conn.close()
 
