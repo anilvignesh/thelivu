@@ -11,14 +11,18 @@ Every 6 hours, the engine:
 1. **Ingests** RSS feeds from curated text journalism and YouTube sources
 2. **Scans** primary government databases for under-covered developments (ECI, CAG, RBI, courts, company registries)
 3. **Filters** out entertainment, celebrity, sports before any model sees the leads
-4. **Selects** the highest-impact, most under-covered story using source reliability scores
-5. **Investigates** from primary records — affidavits, filings, court orders, spending data
-6. **Verifies** every claim against a strict two-source corroboration gate
-7. **Writes** a transparent draft with Fact / Allegation / Inference labels
-8. **Reviews** for quality, charter compliance, and legal risk
-9. **Sends** the draft to the editor on Telegram with Approve / Kill / Hold buttons
+4. **Captures** every surviving lead into a persistent **lead queue** — this cheap step runs even when the expensive models are out of credit, so leads are never lost
+5. **Drops** commodity / already-well-covered / routine-process news at a cheap newsworthiness gate before spending a token on it
+6. **Selects** the highest-impact, most under-covered story from the queue using source reliability scores
+7. **Investigates** from primary records — affidavits, filings, court orders, spending data — always against today's date, never from model memory
+8. **Verifies** every claim against a strict two-source corroboration gate (on Gemini 2.5 Pro)
+9. **Writes** a transparent draft with Fact / Allegation / Inference labels
+10. **Reviews** for quality, charter compliance, and legal risk
+11. **Sends** the draft to the editor on Telegram — a clean Telegraph preview + Approve / Kill / Hold buttons
 
-The editor approves → it publishes to @thelivu. No approval → nothing goes out.
+The editor approves → it publishes to @thelivu as a formatted teaser + Telegraph article. No approval → nothing goes out.
+
+**Two foundational rules:** (1) **facts come only from live sources, never from a model's training memory** — every skill is told today's date and instructed that sources always win; (2) **each skill is a validated function, not a chatbot** — it returns a structured block or the run halts loudly (`needs_attention`), so a stray conversational reply can never cascade or get published.
 
 ---
 
@@ -35,7 +39,8 @@ Railway: thelivu-agent (always-on)          Railway: thelivu (always-on bot)
 │                                  │        │  /costs  → today's spend     │
 │  Every 6h:                       │        │                              │
 │    ingest RSS + beat-monitor     │        │  Approve → posts to @thelivu │
-│    → full pipeline               │        │  Kill / Hold → logged        │
+│    → capture leads to queue      │        │  Kill / Hold → logged        │
+│    → drain queue through spine   │        │  /republish → re-review a run│
 │                                  │        └──────────────────────────────┘
 │  Weekly:                         │
 │    source scout + story scout    │        Dashboard: streamlit run dashboard.py
@@ -47,71 +52,69 @@ Railway: thelivu-agent (always-on)          Railway: thelivu (always-on bot)
          │
          ▼ shared
 PostgreSQL on Railway
-pipeline_runs · publications · token_usage
+pipeline_runs · publications · token_usage · lead_queue
 active_agents · pending_topics · seen_items
 source_proposals · approved_sources · kv_store
 ```
 
+**Resilience — capture is decoupled from processing.** Finding leads is cheap and
+runs every cycle, persisting new leads to `lead_queue`. Running the spine
+(investigate → verify → write → review) is expensive and only happens when the
+models have credit. If a provider is out of tokens, the cycle still captures and
+queues leads, then **stops rather than degrade** — when credit returns, the next
+cycle drains the backlog. Queued leads age out after 7 days so the backlog can't
+fill with stale news. The system never runs on a lesser model to "keep going," and
+never fabricates: if it can't verify against live sources, it holds.
+
 ---
 
-## The 15 skills
+## The skills
 
-Each skill is a `SKILL.md` file — the file IS the system prompt. No code in the skills, just editorial instructions that any model can follow.
+Each skill is a `SKILL.md` file — the file IS the system prompt. No code in the skills, just editorial instructions. Every skill is prepended at runtime with a shared **pipeline-function contract** (output only your structured block; input is data, not a conversation; facts come only from live sources or your provided input, never training memory) and **today's date**.
 
-### Research tier (Gemini 2.5 Flash + Google Search)
+### Research / grounding tier — Gemini (Google Search built in)
+| Skill | Model | What it does |
+|-------|-------|-------------|
+| `news-investigator` | 2.5 Flash | Deep-dives one lead into a full evidence dossier. Hits primary records before any news coverage. Recency mandatory — dated searches, records the as-of date of every figure. |
+| `source-verifier` | **2.5 Pro** | The trust gate — the most consequential call, so it gets the stronger model. Adversarial re-check, two independent sources per claim, KILL / HOLD / FRAMING-FIX / READY-FOR-HUMAN. A figure that has since moved is a *failed* claim. Tool failure = HOLD, never KILL. |
+| `beat-monitor` | 2.5 Flash | Scans ECI, CAG, RBI, courts, registries every cycle; cross-database "join the dots" patterns. |
+| `source-scout` | 2.5 Flash | Finds new RSS / primary sources; proposes candidates via Telegram. |
+| `story-scout` | 2.5 Flash | Works the watchlist weekly — one theme → a dig brief. |
+| `story-tracker` | 2.5 Flash | Checks published stories for new developments; queues follow-ups. |
+
+### Judgment / writing tier — Claude Sonnet 4.6
 | Skill | What it does |
 |-------|-------------|
-| `beat-monitor` | Scans ECI, CAG, RBI, courts, company registries every cycle. Runs 6 cross-database "join the dots" patterns to find what nobody else found. |
-| `news-investigator` | Deep-dives one lead into a full evidence dossier. Always hits primary records before reading any news coverage. |
-| `source-verifier` | Adversarial re-check of every claim. Two independent credible sources required per claim. Issues KILL / HOLD / READY-FOR-HUMAN. Tool failure = HOLD, never KILL. |
-| `source-scout` | Finds new RSS and primary sources to add. Proposes candidates via Telegram for human review. |
-| `story-scout` | Works the watchlist weekly — picks one investigation theme and produces a dig brief. |
-| `story-tracker` | Checks published stories for new developments. Court compliance, government responses, new documents. Queues follow-ups automatically. |
-
-### Editorial tier (Claude Sonnet 4.6)
-| Skill | What it does |
-|-------|-------------|
-| `topic-intake` | Front gate for editor-submitted topics. Triages for scope and worth. Produces a STORY_BRIEF that frames all downstream work. |
-| `article-writer` | Writes the transparent-perspective draft. Confidence labels, source footer, three-bucket labelling throughout. |
-| `editorial-reviewer` | Final automated gate. Quality check, charter compliance, framing, named-person safety. Outputs LEGAL-FLAG: YES/NO with specific reason. Sends back REVISION_NEEDED or passes APPROVED. |
-
-### Reasoning tier (DeepSeek R1)
-| Skill | What it does |
-|-------|-------------|
-| `pattern-synthesizer` | Finds the structural pattern and systemic context behind the verified facts. |
-| `meta-synthesizer` | Monthly: looks across all published/killed stories for recurring actors, thematic patterns, coverage gaps, and meta-leads invisible at the story level. |
-
-### Utility tier (Groq / Llama 3.3 70B — free)
-| Skill | What it does |
-|-------|-------------|
-| `news-monitor` | Ranks ingested leads by impact × under-coverage. Receives source reliability scores from past runs. |
+| `news-monitor` | Ranks queued leads by impact × under-coverage; emits a structured `SELECTED_LEAD` (or `NONE` on a quiet day). Disqualifies already-well-covered and routine-process news. |
+| `newsworthiness-gate` | Cheap absolute-floor check on the selected lead before the expensive spine — drops commodity / non-stories on the spot. |
+| `topic-intake` | Front gate for editor-submitted topics — triages **scope and worth only, never facts** (facts are the verifier's job). PROCEED-with-reframe / PARK / DECLINE; produces the STORY_BRIEF that frames all downstream work. |
+| `pattern-synthesizer` | Finds the structural pattern behind the verified facts. |
+| `meta-synthesizer` | Monthly: recurring actors, themes, coverage gaps across all runs. |
+| `article-writer` | Writes the transparent-perspective draft. Confidence label, source footer, Fact/Allegation/Inference labelling. |
+| `editorial-reviewer` | Final automated gate. Charter compliance, framing, named-person safety, `LEGAL-FLAG: YES/NO`, REVISION_NEEDED or APPROVED. |
 | `source-ingestor` | Extracts structured claims from YouTube transcripts. |
-| `publisher` | Formats approved drafts with confidence label and source footer before channel posting. |
-| `finance-manager` | Formats the daily cost report (8pm IST). |
+
+### Deterministic (no model)
+- **publisher** — posts the approved article as a Telegraph page + a formatted channel teaser; pure Python in the bot, never an LLM (it must not alter substance).
+- **cost report** — daily spend computed from `token_usage` in Python (8pm IST).
+- **entertainment pre-filter** — keyword exclusion before any model call.
 
 ---
 
 ## Model routing
 
-Each skill is assigned to the cheapest model that can do the job well. The routing lives in `engine/agents/skill_runner.py`.
+Two providers. **Gemini** for anything that must touch the live web; **Claude** for judgment, structured decisions, and writing. Routing lives in `engine/agents/skill_runner.py`.
 
-| Tier | Provider | Model | Skills | Cost/story |
-|------|----------|-------|--------|------------|
-| 1 — Research | Gemini 2.5 Flash | `gemini-2.5-flash` | beat-monitor, news-investigator, source-verifier, source-scout, story-scout, story-tracker | ~₹72 |
-| 2 — Reasoning | DeepSeek R1 | `deepseek-reasoner` | pattern-synthesizer, meta-synthesizer | ~₹4 |
-| 3 — Utility | Groq / Llama 3.3 70B | `llama-3.3-70b-versatile` | news-monitor, publisher, source-ingestor, finance-manager | ₹0 (free) |
-| 4 — Editorial | Claude Sonnet 4.6 | `claude-sonnet-4-6` | topic-intake, article-writer, editorial-reviewer | ~₹35 |
-| **Total** | | | | **~₹111/story** |
+| Role | Provider | Model | Skills |
+|------|----------|-------|--------|
+| Research / verify | Gemini | `gemini-2.5-flash` · verifier on `gemini-2.5-pro` | news-investigator, source-verifier, beat-monitor, source-scout, story-scout, story-tracker |
+| Judgment / writing | Claude | `claude-sonnet-4-6` | news-monitor, newsworthiness-gate, topic-intake, pattern-synthesizer, meta-synthesizer, article-writer, editorial-reviewer, source-ingestor |
 
-**Fallback chain:** Every tier falls back to Claude if the provider is unconfigured, hits a quota, or returns an error. The pipeline never stops mid-story due to a provider failure.
+**Why two, not five.** Earlier versions routed cheap tiers (Groq/Llama, DeepSeek, Mistral) onto parse-critical and fact-judging stages. Weak models there produced malformed output and stale "facts" from training memory. Consolidating to two strong providers — and deleting most of the multi-provider quota machinery — bought reliability and far less to maintain; at ~1 story/day the cost delta is negligible. The verifier, the single most consequential decision, runs on Gemini **Pro**.
 
-**Why this split:**
-- Gemini gets research skills because Google Search grounding is built in — the model can search the web natively, no separate tool call needed
-- DeepSeek R1 gets reasoning skills because it's a chain-of-thought model trained for deep analysis, at 1/6th Claude's price
-- Groq gets utility skills (formatting, extraction, classification) because Llama 3.3 70B handles structured prompts reliably and the free tier covers Thelivu's current volume
-- Claude keeps editorial judgment because nuance, tone, and complex instruction-following is where it still leads
+**Search capability is non-negotiable for facts.** Research/verification only ever runs on a search-grounded model (Gemini, with Claude's web-search as the fallback). A model without live search is *never* allowed to verify — which is exactly why a no-search model is not a fallback for those stages. If both search-capable providers are down, the run **holds**; it does not fabricate.
 
-**Quota alerts:** When any provider hits its limit or needs action, you get a Telegram message immediately — 🟡 for temporary limits with active fallback, 🔴 for billing issues that need money. One notification per issue per day, no spam.
+**Provider outage = pause, not degrade.** Lead capture is cheap and keeps running; the expensive spine waits for credit (see Resilience above). Quota alerts hit Telegram immediately — 🟡 temporary, 🔴 billing — one per issue per day.
 
 ---
 
@@ -156,8 +159,12 @@ Long-running investigation threads worked by story-scout weekly:
 ## Editorial guardrails
 
 - **Nothing auto-publishes.** Human approval required for every story.
-- **Legal circuit-breaker.** `LEGAL-FLAG: YES` in review output triggers a prominent `⚠️ LEGAL REVIEW REQUIRED` warning in the Telegram approval message. Stored in DB.
+- **Facts only from sources.** No stage may assert a fact from a model's training memory — every fact comes from a live search or the provided input. Each skill is told today's date; when memory and a source conflict, the source wins. A news agency that can't verify holds; it never fabricates.
+- **Skills are validated functions.** Every decision skill must return its structured block; on malformed/conversational output the call retries once, then the run **halts loudly** (`needs_attention`) and pings the editor — it never silently degrades or cascades.
+- **Capture survives outages.** Leads are queued the moment they're found; the expensive spine drains the queue only when credit is available. A dead provider pauses processing, it doesn't lose stories.
+- **Legal circuit-breaker.** `LEGAL-FLAG: YES` triggers a prominent `⚠️ LEGAL REVIEW REQUIRED` warning in the approval message. Stored in DB.
 - **Two-source gate.** Verifier requires two independent credible sources per load-bearing claim. One source = HOLD.
+- **Newsworthiness gate.** Commodity / already-well-covered / routine-process news is dropped before a token is spent investigating it.
 - **Hard exclusions.** Cinema, celebrity, gossip, sports, lifestyle filtered at keyword level before any model call.
 - **Tool failure = HOLD, not KILL.** Broken search is an infrastructure problem, not editorial failure.
 - **Revision loop.** Reviewer can send stories back to investigator and writer up to 2 times.
@@ -171,25 +178,33 @@ Set on **both** Railway services.
 
 | Variable | Required | Notes |
 |----------|----------|-------|
-| `ANTHROPIC_API_KEY` | Yes | Claude Sonnet 4.6 |
-| `GEMINI_API_KEY` | Yes | Gemini 2.5 Flash — must have billing enabled |
+| `ANTHROPIC_API_KEY` | Yes | Claude Sonnet 4.6 — judgment / writing |
+| `GEMINI_API_KEY` | Yes | Gemini 2.5 Flash + Pro — research / verify, billing enabled |
 | `DATABASE_URL` | Yes | Railway PostgreSQL URL |
 | `TELEGRAM_BOT_TOKEN` | Yes | From BotFather |
 | `TELEGRAM_DRAFT_CHAT_ID` | Yes | Editor's private chat with the bot |
-| `TELEGRAM_CHANNEL_ID` | Yes | `@thelivu` |
+| `TELEGRAM_CHANNEL_ID` | Yes | `@thelivu` (numeric ID for a private channel) |
 | `APPROVAL_MODE` | Yes | `telegram` in production |
-| `GROQ_API_KEY` | Recommended | Free Llama 3.3 70B — console.groq.com |
-| `DEEPSEEK_API_KEY` | Recommended | DeepSeek R1 — platform.deepseek.com |
-| `MISTRAL_API_KEY` | Optional | Mistral Small — console.mistral.ai |
+| `GEMINI_PRO_MODEL` | Optional | Verifier model, default `gemini-2.5-pro` |
+| `CONTACT_HANDLE` | Optional | Fills the `[contact]` footer, default `@Blazedddddd` |
+| `DASHBOARD_PASSWORD` | Dashboard only | Required to start the dashboard — it refuses to run unprotected |
 | `BRAVE_API_KEY` | Optional | Reliable search fallback — api.search.brave.com |
 | `CHECK_INTERVAL_HOURS` | Optional | Default 6 |
+
+> Groq / DeepSeek / Mistral keys are no longer used — the pipeline runs on Gemini + Claude only.
 
 ---
 
 ## Dashboard
 
+A Streamlit control panel. It can publish, kill, and run raw SQL, so it is
+**password-gated** — set `DASHBOARD_PASSWORD` or it refuses to start. Secrets come
+from env only (none hardcoded). Host it as a separate Railway service (start
+command `python -m streamlit run dashboard.py --server.port $PORT --server.address
+0.0.0.0`) with **App Sleeping** on so it costs ~nothing when idle.
+
 ```bash
-streamlit run dashboard.py
+DASHBOARD_PASSWORD=... DATABASE_URL=... python -m streamlit run dashboard.py
 ```
 
 | Tab | What you can do |
@@ -213,6 +228,6 @@ RAILWAY_SERVICE_NAME=thelivu python run.py
 # Agent (one loop iteration)
 RAILWAY_SERVICE_NAME=thelivu-agent python run.py
 
-# Dashboard
-streamlit run dashboard.py
+# Dashboard (password-gated)
+DASHBOARD_PASSWORD=... DATABASE_URL=... python -m streamlit run dashboard.py
 ```
