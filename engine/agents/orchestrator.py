@@ -55,7 +55,15 @@ from shared.db import (
     kv_set,
     kv_get,
 )
-from engine.agents.skill_runner import run_skill
+from engine.agents.skill_runner import run_skill, run_structured_skill, StructuredOutputError
+
+# Structured-output markers each decision skill MUST emit (anchored to the exact
+# formats in their SKILL.md). run_structured_skill validates + retries on these.
+_M_GATE     = r"Trust gate:\s*\**\s*(KILL|HOLD|FRAMING-FIX|READY-FOR-HUMAN)"
+_M_DECISION = r"Decision:\s*(PROCEED|PARK|DECLINE)"
+_M_SELECTED = r"SELECTED_LEAD:\s*(NONE|\d+)"
+_M_VERDICT  = r"VERDICT:\s*(PURSUE|DROP)"
+_M_DOSSIER  = r"(Evidence Dossier|Handoff note|## Claims)"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -443,10 +451,26 @@ def _revision_loop(brief, dossier, verification, pattern, draft, run_id, topic_l
 # ---------------------------------------------------------------------------
 
 def _parse_gate(text):
-    for gate in ("KILL", "FRAMING-FIX", "HOLD", "READY-FOR-HUMAN"):
-        if gate in text:
-            return gate
-    return "HOLD"  # conservative default
+    """Read the verifier's gate from its anchored '## Trust gate: <D>' line.
+    Returns the decision, or None if the line is absent (caller halts loudly
+    instead of silently defaulting to HOLD)."""
+    m = re.search(_M_GATE, text or "", re.IGNORECASE)
+    return m.group(1).upper() if m else None
+
+
+def _halt_run(run_id, stage, raw):
+    """Fail-loud: a stage returned no usable structured output even after a retry.
+    Park the run as needs_attention (NOT a silent HOLD) and tell the owner."""
+    if run_id is not None:
+        update_run(run_id, status="needs_attention", trust_gate="NEEDS-ATTENTION",
+                   verification_report=(raw or "")[:4000])
+    _notify(
+        f"⚠️ Thelivu: run #{run_id} halted at the *{stage}* stage — it returned no "
+        f"valid structured output after a retry, so the pipeline stopped rather than "
+        f"publish or silently hold garbage. Nothing was posted.\n\n"
+        f"First 300 chars of what it returned:\n{(raw or '')[:300]}"
+    )
+    log.error("Run #%s halted at %s (no structured output).", run_id, stage)
 
 
 def _parse_selected_lead(text, n_leads):
@@ -505,56 +529,94 @@ def _with_brief(brief, input_text):
 # ---------------------------------------------------------------------------
 
 def _run_topic_intake(pending):
-    """Run the full pipeline on an owner-submitted topic via topic-intake."""
+    """Run the full pipeline on an owner-submitted topic via topic-intake.
+
+    Hardened: topic-intake must return a structured Decision; only the extracted
+    STORY_BRIEF (never the raw, possibly-chatty reply) is passed downstream; the
+    newsworthiness gate runs before the expensive spine; and any stage that fails
+    to return valid structured output halts the run loudly instead of cascading.
+    """
     topic_id = pending["id"]
     topic_text = pending["topic"]
+    topic_label = topic_text[:120]
 
     log.info("Running topic-intake on: %s", topic_text[:80])
-    intake_output = run_skill(
-        "topic-intake",
-        f"SUBMITTED TOPIC:\n\n{topic_text}\n\nSource: {pending.get('source', 'owner')}",
-    )
-
-    # topic-intake may DECLINE — only match the structured Decision line, not stray mentions
-    import re as _re
-    _decision = _re.search(r'Decision:\s*(PARK|DECLINE)', intake_output, _re.IGNORECASE)
-    if _decision:
+    try:
+        intake_output = run_structured_skill(
+            "topic-intake",
+            f"SUBMITTED TOPIC:\n\n{topic_text}\n\nSource: {pending.get('source', 'owner')}",
+            marker=_M_DECISION,
+        )
+    except StructuredOutputError as e:
         finish_topic(topic_id)
-        _notify(f"Topic-intake declined this topic ({_decision.group(1).upper()}):\n\n{intake_output[:800]}")
-        log.info("Topic declined by topic-intake: %s", _decision.group(1))
+        _halt_run(None, "topic-intake", e.raw)
         return
 
-    # Otherwise topic-intake passes a scoped lead — run the full spine
-    brief = _extract_brief(intake_output)
-    if brief:
-        log.info("Story brief extracted:\n%s", brief)
-    else:
-        log.warning("No STORY_BRIEF block in topic-intake output — proceeding without brief.")
+    decision = re.search(_M_DECISION, intake_output, re.IGNORECASE).group(1).upper()
+    if decision in ("PARK", "DECLINE"):
+        finish_topic(topic_id)
+        _notify(f"Topic {decision}d by intake — not taken up:\n\n{intake_output[:800]}")
+        log.info("Topic %s by topic-intake.", decision)
+        return
 
-    log.info("Topic accepted. Running investigation...")
+    # PROCEED — require a clean STORY_BRIEF; pass ONLY that downstream (no raw reply).
+    brief = _extract_brief(intake_output)
+    if not brief:
+        finish_topic(topic_id)
+        _notify(
+            "Topic-intake said PROCEED but emitted no STORY_BRIEF block — not "
+            f"investigating (would run unframed).\n\n{intake_output[:600]}"
+        )
+        log.warning("PROCEED without STORY_BRIEF — skipping.")
+        return
+
+    # Absolute-floor newsworthiness gate before any expensive work.
+    angle = ""
+    m_angle = re.search(r"Angle:\s*(.+)", brief)
+    if m_angle:
+        angle = m_angle.group(1).strip()
+    pursue, why = _newsworthiness_verdict(
+        {"throughline": angle or topic_text, "source": "owner-topic", "claims": []}
+    )
+    if not pursue:
+        finish_topic(topic_id)
+        _notify(
+            "Thelivu: this topic isn't the kind of story we do — not investigating.\n\n"
+            f"Topic: {topic_text[:160]}\nReason: {why}"
+        )
+        log.info("Owner topic dropped by newsworthiness gate: %s", why)
+        return
+
+    log.info("Topic accepted (PROCEED). Brief:\n%s", brief)
     live_run_id = save_run(
         video_id=f"topic-{topic_id}",
         source=pending.get("source", "owner"),
-        throughline=topic_text[:200],
+        throughline=(angle or topic_text)[:200],
         trust_gate="investigating",
         status="investigating",
     )
+    finish_topic(topic_id)
 
-    topic_label = topic_text[:120]
-    dossier = run_skill("news-investigator",
-        _with_brief(brief, intake_output),
-        run_id=live_run_id, topic=topic_label)
+    try:
+        # Investigate from the BRIEF + the topic as submitted — never the raw intake reply.
+        dossier = run_structured_skill(
+            "news-investigator",
+            _with_brief(brief, f"TOPIC AS SUBMITTED:\n{topic_text}"),
+            marker=_M_DOSSIER, run_id=live_run_id, topic=topic_label,
+        )
+        verification = run_structured_skill(
+            "source-verifier",
+            _with_brief(brief, f"EVIDENCE DOSSIER:\n\n{dossier}"),
+            marker=_M_GATE, run_id=live_run_id, topic=topic_label,
+        )
+    except StructuredOutputError as e:
+        _halt_run(live_run_id, e.skill_name, e.raw)
+        return
 
-    log.info("Running source-verifier...")
-    verification = run_skill("source-verifier",
-        _with_brief(brief, f"EVIDENCE DOSSIER:\n\n{dossier}"),
-        run_id=live_run_id, topic=topic_label)
     gate = _parse_gate(verification)
     log.info("Trust gate: %s", gate)
-
     if gate in ("KILL", "HOLD"):
         update_run(live_run_id, trust_gate=gate, verification_report=verification, status=gate.lower())
-        finish_topic(topic_id)
         _notify(f"Your topic was {gate}ed (run #{live_run_id}).\n\n{verification}")
         return
 
@@ -569,14 +631,13 @@ def _run_topic_intake(pending):
                                    live_run_id, topic_label)
 
     update_run(live_run_id,
-        throughline=topic_text[:200],
+        throughline=(angle or topic_text)[:200],
         trust_gate=gate,
         draft_text=draft,
         review_text=review,
         verification_report=verification,
         status="pending_human",
     )
-    finish_topic(topic_id)
     send_for_approval(live_run_id, draft, verification, review)
     log.info("Topic pipeline complete. Run #%d pending review.", live_run_id)
 
@@ -679,7 +740,13 @@ def run_daily_cycle():
         for i, item in enumerate(all_leads)
     )
 
-    monitor_output = run_skill("news-monitor", leads_text)
+    try:
+        monitor_output = run_structured_skill("news-monitor", leads_text, marker=_M_SELECTED)
+    except StructuredOutputError as e:
+        _notify("Thelivu daily cycle: news-monitor returned no usable selection after a retry — "
+                "skipping this cycle, nothing investigated.")
+        log.error("news-monitor: no SELECTED_LEAD. Raw: %s", (e.raw or "")[:200])
+        return
 
     # Honour news-monitor's structured pick — including an explicit "nothing worthy".
     status, idx = _parse_selected_lead(monitor_output, len(all_leads))
@@ -690,15 +757,12 @@ def run_daily_cycle():
         )
         log.info("news-monitor returned NONE — skipping investigation.")
         return
-    if status == "ok":
-        selected = all_leads[idx]
-    else:
-        # Unparsed selection — fall back to fuzzy match, then the first lead.
-        selected = all_leads[0]
-        for item in all_leads:
-            if item["video_url"] in monitor_output or item["throughline"][:40] in monitor_output:
-                selected = item
-                break
+    if status != "ok":
+        # Marker present but index out of range — skip, never force lead #0.
+        _notify("Thelivu daily cycle: news-monitor picked an out-of-range lead — skipping this cycle.")
+        log.error("Selection out of range. Raw: %s", monitor_output[:200])
+        return
+    selected = all_leads[idx]
 
     log.info("Selected: %s", selected["throughline"][:80])
 
@@ -728,7 +792,15 @@ def run_daily_cycle():
     )
     topic_label = selected["throughline"][:120]
 
-    # 4. news-investigator: build evidence dossier (uses web_search / Gemini)
+    # Create the run now so a downstream halt has an id to mark.
+    run_id = save_run(
+        video_id=selected["video_id"], source=selected["source"],
+        throughline=selected["throughline"], trust_gate="investigating",
+        status="investigating",
+    )
+
+    # 4. news-investigator — build the dossier from the brief + lead facts.
+    # NOT the raw monitor reply (that cascade is the run #18 poisoning vector).
     log.info("Running news-investigator...")
     investigate_input = (
         f"LEAD TO INVESTIGATE:\n\n"
@@ -737,34 +809,30 @@ def run_daily_cycle():
         f"Throughline: {selected['throughline']}\n\n"
         f"Extracted claims:\n"
         + json.dumps(selected["claims"], indent=2, ensure_ascii=False)
-        + f"\n\nMonitor context:\n{monitor_output}"
     )
-    dossier = run_skill("news-investigator",
-        _with_brief(rss_brief, investigate_input), topic=topic_label)
-
-    # 5. source-verifier: trust gate (uses web_search / Gemini)
-    log.info("Running source-verifier...")
-    verification = run_skill("source-verifier",
-        _with_brief(rss_brief, f"EVIDENCE DOSSIER TO VERIFY:\n\n{dossier}"),
-        topic=topic_label)
+    try:
+        dossier = run_structured_skill("news-investigator",
+            _with_brief(rss_brief, investigate_input),
+            marker=_M_DOSSIER, run_id=run_id, topic=topic_label)
+        # 5. source-verifier: trust gate (uses web_search / Gemini)
+        log.info("Running source-verifier...")
+        verification = run_structured_skill("source-verifier",
+            _with_brief(rss_brief, f"EVIDENCE DOSSIER TO VERIFY:\n\n{dossier}"),
+            marker=_M_GATE, run_id=run_id, topic=topic_label)
+    except StructuredOutputError as e:
+        _halt_run(run_id, e.skill_name, e.raw)
+        return
 
     gate = _parse_gate(verification)
     log.info("Trust gate: %s", gate)
 
     if gate in ("KILL", "HOLD"):
-        run_id = save_run(
-            video_id=selected["video_id"],
-            source=selected["source"],
-            throughline=selected["throughline"],
-            trust_gate=gate,
-            verification_report=verification,
-            status=gate.lower(),
-        )
+        update_run(run_id, trust_gate=gate, verification_report=verification, status=gate.lower())
         _notify(
             f"Thelivu: today's story {gate}ed (run #{run_id}).\n\n"
             f"Reason:\n{verification}"
         )
-        log.info("Story %s. Run #%d saved.", gate, run_id)
+        log.info("Story %s. Run #%d.", gate, run_id)
         return
 
     if gate == "FRAMING-FIX":
@@ -788,18 +856,12 @@ def run_daily_cycle():
     # 8. editorial-reviewer with revision loop
     log.info("Running editorial-reviewer (with revision loop)...")
     draft, review = _revision_loop(rss_brief, dossier, verification, pattern, draft,
-                                   None, topic_label)
+                                   run_id, topic_label)
 
     # 9. Save and send for approval
-    run_id = save_run(
-        video_id=selected["video_id"],
-        source=selected["source"],
-        throughline=selected["throughline"],
-        trust_gate=gate,
-        draft_text=draft,
-        review_text=review,
-        verification_report=verification,
-        status="pending_human",
+    update_run(run_id,
+        trust_gate=gate, draft_text=draft, review_text=review,
+        verification_report=verification, status="pending_human",
     )
 
     log.info("Sending draft for approval (run #%d)...", run_id)
@@ -1046,27 +1108,29 @@ def send_cost_report():
     month_usd  = _calc_cost("claude", month_claude_in, month_claude_out) + _calc_cost("gemini", month_gemini_in, month_gemini_out)
     total_usd  = _calc_cost("claude", total_claude_in, total_claude_out) + _calc_cost("gemini", total_gemini_in, total_gemini_out)
 
-    data_prompt = (
-        f"Date: {today}\n"
-        f"Today — Claude: {claude_in} input + {claude_out} output tokens | "
-        f"Gemini: {gemini_in} input + {gemini_out} output tokens\n"
-        f"Today USD: ${today_usd:.6f} | Month USD: ${month_usd:.6f} | All-time USD: ${total_usd:.6f}\n"
-        f"USD to INR: 84\n"
-        f"Pipeline runs today: {runs_today}\n"
-        f"Month — Claude: {month_claude_in}in + {month_claude_out}out | "
-        f"Gemini: {month_gemini_in}in + {month_gemini_out}out\n"
-        f"All-time — Claude: {total_claude_in}in + {total_claude_out}out | "
-        f"Gemini: {total_gemini_in}in + {total_gemini_out}out"
+    # Pure-Python report — no LLM. All figures are already computed above; the
+    # old finance-manager skill only reformatted them (zero reasoning).
+    inr = lambda usd: usd * _USD_TO_INR
+    claude_today = _calc_cost("claude", claude_in, claude_out)
+    gemini_today = _calc_cost("gemini", gemini_in, gemini_out)
+
+    notes = "All normal."
+    if runs_today and (claude_in + claude_out + gemini_in + gemini_out) / runs_today > 50_000:
+        notes = "⚠️ High token use per run today — check for a runaway investigation."
+    elif today_usd == 0:
+        notes = "No runs today — zero spend."
+
+    report = (
+        f"Thelivu Cost Report — {today}\n\n"
+        f"Today: ₹{inr(today_usd):.2f} (~${today_usd:.4f})\n"
+        f"This month: ₹{inr(month_usd):.2f} (~${month_usd:.4f})\n"
+        f"All time: ₹{inr(total_usd):.2f} (~${total_usd:.4f})\n\n"
+        f"Today's breakdown:\n"
+        f"  Claude: {claude_in:,} in + {claude_out:,} out = ${claude_today:.4f}\n"
+        f"  Gemini: {gemini_in:,} in + {gemini_out:,} out = ${gemini_today:.4f}\n"
+        f"  Pipeline runs today: {runs_today}\n\n"
+        f"Notes: {notes}"
     )
-    try:
-        report = run_skill("finance-manager", data_prompt)
-    except Exception as e:
-        log.warning("finance-manager skill failed (%s) — using raw data", e)
-        report = (
-            f"Thelivu Cost Report — {today}\n"
-            f"Today: ₹{today_usd*_USD_TO_INR:.2f} | Month: ₹{month_usd*_USD_TO_INR:.2f} | "
-            f"All-time: ₹{total_usd*_USD_TO_INR:.2f}\nRuns today: {runs_today}"
-        )
     _notify(report)
     log.info("Cost report sent.")
 
@@ -1103,8 +1167,8 @@ def retry_held():
                 update_run(run["id"], trust_gate=gate, verification_report=verification, status="pending_human")
                 send_for_approval(run["id"], run["draft_text"] or "", verification, run["review_text"] or "")
             else:
-                update_run(run["id"], trust_gate=gate, verification_report=verification)
-                log.info("  Still %s — keeping on hold.", gate)
+                update_run(run["id"], trust_gate=gate or "HOLD", verification_report=verification)
+                log.info("  Still %s — keeping on hold.", gate or "HOLD")
         except Exception as e:
             log.error("  Retry failed for run #%d: %s", run["id"], e)
 
