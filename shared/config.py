@@ -1,12 +1,9 @@
 import os
 from pathlib import Path
 
-# --- Model API keys ---
+# --- Model API keys (pipeline runs on Gemini + Claude only) ---
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 GEMINI_API_KEY    = os.environ.get("GEMINI_API_KEY", "")
-GROQ_API_KEY      = os.environ.get("GROQ_API_KEY", "")
-DEEPSEEK_API_KEY  = os.environ.get("DEEPSEEK_API_KEY", "")
-MISTRAL_API_KEY   = os.environ.get("MISTRAL_API_KEY", "")
 
 # --- Telegram ---
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
@@ -38,9 +35,6 @@ CLAUDE_MODEL    = "claude-sonnet-4-6"
 GEMINI_MODEL    = "gemini-2.5-flash"
 # Stronger Gemini for the highest-stakes search-grounded stage (the trust gate).
 GEMINI_PRO_MODEL = os.environ.get("GEMINI_PRO_MODEL", "gemini-2.5-pro")
-GROQ_MODEL      = "llama-3.3-70b-versatile"
-DEEPSEEK_MODEL  = "deepseek-reasoner"   # R1 — reasoning tier
-MISTRAL_MODEL   = "mistral-small-latest"
 
 # --- Paths ---
 REPO_ROOT = Path(__file__).parent.parent
