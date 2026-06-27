@@ -91,16 +91,23 @@ Confidence levels (Confirmed / Developing / Contested) belong in the **footer**,
 
 ---
 
-## The standing furniture (every draft carries it)
+## The standing furniture (NON-NEGOTIABLE — every draft carries all of it)
+
+These three are mandatory on every piece (charter §5). A draft missing the
+confidence line or the sources block is incomplete and will be flagged before the
+human ever sees it — do not omit them.
 
 **At the top** — a one-line standfirst (what this piece is and that it argues a view):
 > *From Thelivu — explanatory journalism on the side of ordinary people. It argues a view and tells you when it's doing so. Facts are sourced and confirmed; the opinion is mine and is flagged. Drafted with AI assistance, reviewed by a human editor.*
 
-**Confidence label** (one line in the sources footer, not inline):
+**Confidence label** — REQUIRED, exactly this form, one line in the sources footer:
 > *Confidence: [Confirmed / Developing / Contested] — [one-sentence explanation of the weakest load-bearing claim.]*
 
-**Sources footer** (one block at the end, not scattered):
-> *Sources: [named sources, each with what it provided, partisanship noted if relevant]. Drafted with AI assistance, reviewed by a human editor before publishing. Spotted an error? We correct openly — [contact].*
+**Sources footer** — REQUIRED, one block at the end. Name each source AND, for
+every load-bearing claim, give the specific source it rests on (with its URL when
+the dossier provides one — the charter promises readers can follow what a piece
+rests on). Do not invent URLs; use those carried in the dossier/verification.
+> *Sources: [named sources, each with what it provided and a link where available, partisanship noted if relevant]. Drafted with AI assistance, reviewed by a human editor before publishing. Spotted an error? We correct openly — [contact].*
 
 ---
 
