@@ -10,6 +10,7 @@ Agents can use web_search to verify claims and create_skill to add new skills
 when they identify recurring editorial patterns.
 """
 
+import hashlib
 import json
 import logging
 import re
@@ -69,7 +70,9 @@ _M_GATE     = r"Trust gate:\s*\**\s*(KILL|HOLD|FRAMING-FIX|READY-FOR-HUMAN)"
 _M_DECISION = r"Decision:\s*(PROCEED|PARK|DECLINE)"
 _M_SELECTED = r"SELECTED_LEAD:\s*(NONE|\d+)"
 _M_VERDICT  = r"VERDICT:\s*(PURSUE|DROP)"
-_M_DOSSIER  = r"(Evidence Dossier|Handoff note|## Claims)"
+# Anchored to a real heading at line start — a conversational "I'm ready to build
+# the Evidence Dossier…" must NOT pass (that was the run #18 poisoning vector).
+_M_DOSSIER  = r"^#{1,3}\s+(Evidence Dossier|Claims|Handoff note)"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -267,6 +270,13 @@ def _tg_post(chat_id, text, reply_markup=None, parse_mode=None):
         r.raise_for_status()
         return r.json().get("result", {}).get("message_id")
     except Exception as e:
+        # An HTML send can fail if a 4096-cut split a tag/entity ("can't parse
+        # entities"). Never lose the message (or an attached approval keyboard) —
+        # retry once as plain text with the markup stripped of tags.
+        if parse_mode:
+            log.warning("Telegram HTML send failed (%s) — retrying as plain text", e)
+            plain = re.sub(r"<[^>]+>", "", text)
+            return _tg_post(chat_id, plain, reply_markup=reply_markup, parse_mode=None)
         log.error("Telegram send failed: %s", e)
         return None
 
@@ -341,14 +351,16 @@ def send_for_approval(run_id, draft_text, verification_report, review_text):
 
 
 def _parse_legal_flag(review_text):
-    """Extract LEGAL-FLAG and LEGAL-REASON from editorial reviewer output."""
-    flag = False
-    reason = ""
-    for line in (review_text or "").splitlines():
-        if line.startswith("LEGAL-FLAG:"):
-            flag = "YES" in line.upper()
-        if line.startswith("LEGAL-REASON:"):
-            reason = line.split(":", 1)[-1].strip()
+    """Extract LEGAL-FLAG and LEGAL-REASON from editorial reviewer output.
+
+    Anchored so an indented 'LEGAL-FLAG: YES' is still caught, and the verdict is
+    matched as a whole word (not a stray 'YES' inside 'LEGAL-FLAG: NO — ...YES...')
+    — a missed or spurious legal flag is a safety problem either way."""
+    text = review_text or ""
+    fm = re.search(r"^\s*LEGAL-FLAG:\s*(YES|NO)\b", text, re.IGNORECASE | re.MULTILINE)
+    flag = bool(fm) and fm.group(1).upper() == "YES"
+    rm = re.search(r"^\s*LEGAL-REASON:\s*(.+)", text, re.IGNORECASE | re.MULTILINE)
+    reason = rm.group(1).strip() if rm else ""
     return flag, reason
 
 
@@ -359,7 +371,8 @@ def _send_via_telegram(run_id, draft_text, verification_report, review_text):
     if legal_flag:
         update_run_legal_flag(run_id, True, legal_reason)
 
-    title = draft_text.lstrip("# ").splitlines()[0][:100]
+    _lines = (draft_text or "").lstrip("# ").splitlines()
+    title = (_lines[0][:100] if _lines else f"Run #{run_id}")
 
     parts = [f"📰 <b>New story ready — run #{run_id}</b>", "", f"<b>{_esc(title)}</b>"]
     if legal_flag:
@@ -541,6 +554,50 @@ def _pause_run(run_id, label, err):
     log.warning("Paused run #%s (%s): %s", run_id, label, err)
 
 
+# A transient provider/infra failure (retry forever — not the item's fault) vs a
+# content/code failure that reliably breaks on this specific item (cap + drop, so
+# it can't head-of-line-block the queue or loop until the 7-day TTL).
+_OUTAGE_MARKERS = (
+    "429", "quota", "rate limit", "resource_exhausted", "resource exhausted",
+    "overloaded", "unavailable", "503", "502", "500", "timeout", "timed out",
+    "connection", "insufficient", "balance", "billing", "credit",
+)
+_MAX_SPINE_FAILS = 3
+
+
+def _is_provider_outage(exc):
+    m = str(exc).lower()
+    return any(k in m for k in _OUTAGE_MARKERS)
+
+
+def _route_spine_failure(run_id, label, err, fail_key, requeue_fn, drop_fn):
+    """Decide what a mid-spine exception means and act:
+      • provider outage  → pause + requeue (transient; resumes when credit's back)
+      • content/code bug  → count it; requeue until _MAX_SPINE_FAILS, then DROP it
+        (notify) so a poison item can't block the queue or loop for 7 days."""
+    if _is_provider_outage(err):
+        requeue_fn()
+        _pause_run(run_id, label, err)
+        return
+    n = int(kv_get(fail_key) or 0) + 1
+    if n >= _MAX_SPINE_FAILS:
+        kv_set(fail_key, "")
+        if run_id is not None:
+            update_run(run_id, status="needs_attention", trust_gate="NEEDS-ATTENTION")
+        drop_fn()
+        _notify_card(
+            "⚠️", "Dropped a repeatedly-failing item",
+            body=(f"<b>{_esc(label)}</b>\n\nThis failed {n}× with a non-outage error, so "
+                  f"it was dropped to stop it blocking the queue. Not a provider outage.\n\n"
+                  f"<i>{_esc(str(err)[:200])}</i>"),
+        )
+        log.error("Dropped poison item after %d fails (%s): %s", n, fail_key, err)
+    else:
+        kv_set(fail_key, str(n))
+        requeue_fn()
+        log.warning("Item %s failed %d× (non-outage, will retry): %s", fail_key, n, err)
+
+
 def _run_spine(brief, investigate_input, run_id, topic_label, display_label,
                display_title, on_pause):
     """The shared investigation spine: investigate → verify → trust gate →
@@ -677,9 +734,13 @@ def _run_topic_intake(pending):
         _halt_run(None, "topic-intake", e.raw)
         return
     except Exception as e:
-        # Provider down at the gate — put the topic back in the queue, don't lose it.
-        requeue_topic(topic_id)
-        _pause_run(None, topic_text[:120], e)
+        # Provider outage → requeue and wait; a content/code failure that keeps
+        # breaking gets capped and dropped so it can't head-of-line-block the queue.
+        _route_spine_failure(
+            None, topic_text[:120], e, fail_key=f"topicfail_{topic_id}",
+            requeue_fn=lambda: requeue_topic(topic_id),
+            drop_fn=lambda: finish_topic(topic_id),
+        )
         return
 
     decision = re.search(_M_DECISION, intake_output, re.IGNORECASE).group(1).upper()
@@ -734,9 +795,12 @@ def _run_topic_intake(pending):
     finish_topic(topic_id)
 
     def _on_pause(e):
-        # Provider down mid-spine — pause and put the topic back in the queue.
-        requeue_topic(topic_id)
-        _pause_run(live_run_id, (angle or topic_text)[:120], e)
+        _route_spine_failure(
+            live_run_id, (angle or topic_text)[:120], e,
+            fail_key=f"topicfail_{topic_id}",
+            requeue_fn=lambda: requeue_topic(topic_id),
+            drop_fn=lambda: finish_topic(topic_id),
+        )
 
     result = _run_spine(
         brief, f"TOPIC AS SUBMITTED:\n{topic_text}", live_run_id, topic_label,
@@ -819,13 +883,18 @@ def run_daily_cycle():
             # Parse beat-monitor leads and add to pool as synthetic lead dicts
             for line in beat_output.splitlines():
                 if line.startswith("## Lead"):
+                    throughline = line.replace("## ", "").strip()
+                    # Content-based id so the SAME beat lead dedups across cycles and
+                    # DIFFERENT leads never collide. (A positional f"beat-{len}" id
+                    # collided on RSS-volume coincidence and permanently blocked slots.)
+                    vid = "beat-" + hashlib.sha1(throughline.encode("utf-8")).hexdigest()[:16]
                     all_leads.append({
-                        "video_id": f"beat-{len(all_leads)}",
+                        "video_id": vid,
                         "video_url": "",
                         "title": line.replace("## Lead", "").strip(),
                         "source": "beat-monitor",
                         "source_id": "beat-monitor",
-                        "throughline": line.replace("## ", "").strip(),
+                        "throughline": throughline,
                         "claims": [],
                         "ingest_method": "beat_monitor",
                         "raw_beat_output": beat_output,
@@ -850,7 +919,9 @@ def run_daily_cycle():
 
     # Process: draw from the accumulated queue (not just this cycle's finds), so a
     # backlog built up during an outage drains once credit returns.
-    all_leads = get_queued_leads(limit=40, max_age_days=7)
+    # Pull a generous window so older queued leads still reach the selector and
+    # aren't truncated out (and silently expired) by a burst of fresh ones.
+    all_leads = get_queued_leads(limit=60, max_age_days=7)
     if not all_leads:
         _notify("Thelivu daily cycle: no leads in the queue. Nothing to investigate.")
         log.info("Empty lead queue. Exiting.")
@@ -954,8 +1025,12 @@ def run_daily_cycle():
     )
 
     def _on_pause(e):
-        requeue_lead(selected.get("queue_id"))
-        _pause_run(run_id, selected["throughline"][:120], e)
+        _route_spine_failure(
+            run_id, selected["throughline"][:120], e,
+            fail_key=f"leadfail_{selected['video_id']}",
+            requeue_fn=lambda: requeue_lead(selected.get("queue_id")),
+            drop_fn=lambda: mark_lead_processed(selected.get("queue_id")),
+        )
 
     result = _run_spine(
         rss_brief, investigate_input, run_id, topic_label,
