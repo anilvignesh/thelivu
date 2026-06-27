@@ -367,12 +367,20 @@ def _run_claude(skill_name, input_text, system_prompt, extra_tools, max_tokens, 
     client = _get_claude()
     total_in = total_out = 0
 
+    # Cache the system prompt (contract + date anchor + full SKILL.md, ~1.5-2k
+    # tokens). When the same skill is called again within the cache window — the
+    # revision loop re-runs article-writer / editorial-reviewer up to 3× minutes
+    # apart with an identical system prompt — the repeat bills at ~0.1×. Below the
+    # model's minimum cacheable size the flag is simply ignored, never an error.
+    system_blocks = [{"type": "text", "text": system_prompt,
+                      "cache_control": {"type": "ephemeral"}}]
+
     log.info("Running %s via Claude", skill_name)
 
     while True:
         response = client.messages.create(
             model=CLAUDE_MODEL,
-            system=system_prompt,
+            system=system_blocks,
             tools=tools,
             messages=messages,
             max_tokens=max_tokens,

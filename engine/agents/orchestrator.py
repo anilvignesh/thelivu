@@ -772,30 +772,41 @@ def run_daily_cycle():
         except Exception as e:
             log.error("Ingest failed for %s: %s", source["name"], e)
 
-    # 3b. beat-monitor: scan primary govt feeds for under-covered leads
-    log.info("Running beat-monitor (courts, ECI, RBI, CAG, govt portals)...")
-    try:
-        beat_output = run_skill("beat-monitor",
-            "Run the beat monitor for today's cycle. "
-            "Scan primary feeds: Kerala High Court, ECI, RBI, CAG, government portals. "
-            "Surface under-covered leads only — skip anything already well-covered.")
-        # Parse beat-monitor leads and add to pool as synthetic lead dicts
-        for line in beat_output.splitlines():
-            if line.startswith("## Lead"):
-                all_leads.append({
-                    "video_id": f"beat-{len(all_leads)}",
-                    "video_url": "",
-                    "title": line.replace("## Lead", "").strip(),
-                    "source": "beat-monitor",
-                    "source_id": "beat-monitor",
-                    "throughline": line.replace("## ", "").strip(),
-                    "claims": [],
-                    "ingest_method": "beat_monitor",
-                    "raw_beat_output": beat_output,
-                })
-        log.info("Beat monitor added %d lead(s) to the pool.", sum(1 for l in all_leads if l.get("source") == "beat-monitor"))
-    except Exception as e:
-        log.warning("Beat monitor failed: %s", e)
+    # 3b. beat-monitor: scan primary govt feeds for under-covered leads.
+    # Once per day, not every cycle — courts/ECI/RBI/CAG don't post intraday, and
+    # this is a grounded (search-billed) Gemini call. Leads it finds sit in the
+    # same 7-day queue, so nothing is lost by scanning daily instead of 4×/day.
+    last_beat = kv_get("last_beat_at")
+    beat_due = (not last_beat) or (
+        (datetime.now(timezone.utc) - datetime.fromisoformat(last_beat)).total_seconds() >= 20 * 3600
+    )
+    if not beat_due:
+        log.info("beat-monitor already ran today — skipping this cycle.")
+    else:
+        log.info("Running beat-monitor (courts, ECI, RBI, CAG, govt portals)...")
+        try:
+            kv_set("last_beat_at", datetime.now(timezone.utc).isoformat())
+            beat_output = run_skill("beat-monitor",
+                "Run the beat monitor for today's cycle. "
+                "Scan primary feeds: Kerala High Court, ECI, RBI, CAG, government portals. "
+                "Surface under-covered leads only — skip anything already well-covered.")
+            # Parse beat-monitor leads and add to pool as synthetic lead dicts
+            for line in beat_output.splitlines():
+                if line.startswith("## Lead"):
+                    all_leads.append({
+                        "video_id": f"beat-{len(all_leads)}",
+                        "video_url": "",
+                        "title": line.replace("## Lead", "").strip(),
+                        "source": "beat-monitor",
+                        "source_id": "beat-monitor",
+                        "throughline": line.replace("## ", "").strip(),
+                        "claims": [],
+                        "ingest_method": "beat_monitor",
+                        "raw_beat_output": beat_output,
+                    })
+            log.info("Beat monitor added %d lead(s) to the pool.", sum(1 for l in all_leads if l.get("source") == "beat-monitor"))
+        except Exception as e:
+            log.warning("Beat monitor failed: %s", e)
 
     # Pre-filter: drop entertainment / celebrity / gossip before touching the model
     before = len(all_leads)
