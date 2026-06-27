@@ -380,6 +380,18 @@ def _send_via_telegram(run_id, draft_text, verification_report, review_text):
                   f"Reason: {_esc(legal_reason)}",
                   "Do NOT approve until a legal read has been done."]
 
+    # Charter §5 furniture check — warn the human if the mandatory confidence label
+    # or sources block is missing, so it's caught before it reaches readers.
+    _d = draft_text or ""
+    missing = []
+    if not re.search(r"Confidence\s*[:—-]", _d, re.IGNORECASE):
+        missing.append("confidence label")
+    if not re.search(r"^\s*\*?\s*Sources?\s*:", _d, re.IGNORECASE | re.MULTILINE):
+        missing.append("sources block")
+    if missing:
+        parts += ["", f"⚠️ <b>Missing required furniture:</b> {_esc(', '.join(missing))} "
+                      "(charter §5). Add it before approving."]
+
     # Offer the draft as a clean Telegraph read; fall back to raw chunks if it fails.
     preview_ok = False
     try:
@@ -465,8 +477,13 @@ def _parse_revision(review_text):
 
 def _revision_loop(brief, dossier, verification, pattern, draft, run_id, topic_label, revision_num=0):
     """Run reviewer; if REVISION_NEEDED send back to investigator/writer; repeat up to _MAX_REVISIONS."""
+    # Give the reviewer the recent archive so its charter-mandated anti-monotony /
+    # self-similarity check (same opening device / throughline / house line) can
+    # actually run against real prior pieces instead of nothing.
+    archive = _published_context(
+        header="RECENT PUBLISHED PIECES (check this draft isn't a structural repeat):")
     review = run_skill("editorial-reviewer",
-        _with_brief(brief, f"DRAFT:\n\n{draft}\n\nVERIFICATION REPORT:\n\n{verification}"),
+        _with_brief(brief, f"{archive}DRAFT:\n\n{draft}\n\nVERIFICATION REPORT:\n\n{verification}"),
         run_id=run_id, topic=topic_label)
 
     needs_revision, inv_tasks, wri_tasks = _parse_revision(review)
@@ -523,6 +540,40 @@ def _parse_gate(text):
     return m.group(1).upper() if m else None
 
 
+def _undersourced_load_bearing(verification):
+    """Charter §4.1 backstop. Parse the verifier's per-claim table and return any
+    LOAD-BEARING claim marked 'Verified' that lists FEWER THAN TWO independent
+    sources — i.e. the model called something confirmed on a single source, which
+    the two-source rule forbids.
+
+    Table columns: | Claim | Load-bearing | Verdict | Independent sources | ... |
+    This only ever makes the gate STRICTER, and only on rows it can parse cleanly;
+    an unparseable/absent table yields [] so it can never falsely block a story."""
+    out = []
+    for line in (verification or "").splitlines():
+        s = line.strip()
+        if not s.startswith("|"):
+            continue
+        # Separator row (|---|---|) — only dashes/colons/spaces.
+        if set(s) <= {"|", "-", ":", " "}:
+            continue
+        cells = [c.strip() for c in s.strip("|").split("|")]
+        if len(cells) < 4:
+            continue
+        claim, lb, verdict, sources = cells[0], cells[1].lower(), cells[2].lower(), cells[3]
+        # Header row — the load-bearing/verdict cells carry their column names.
+        if lb in ("load-bearing", "load bearing") or verdict == "verdict":
+            continue
+        if "yes" not in lb:
+            continue
+        if verdict != "verified":          # exact: 'unverified'/'failed' already HOLD/KILL
+            continue
+        nums = re.findall(r"\d+", sources)
+        if nums and int(nums[0]) < 2:
+            out.append(claim[:120])
+    return out
+
+
 def _halt_run(run_id, stage, raw):
     """Fail-loud: a stage returned no usable structured output even after a retry.
     Park the run as needs_attention (NOT a silent HOLD) and tell the owner."""
@@ -552,6 +603,24 @@ def _pause_run(run_id, label, err):
               f"<i>{_esc(str(err)[:200])}</i>"),
     )
     log.warning("Paused run #%s (%s): %s", run_id, label, err)
+
+
+def _published_context(days=45, header="RECENTLY PUBLISHED (do not repeat these):"):
+    """A compact list of what the channel already ran — fed to news-monitor (so it
+    doesn't re-select a covered topic) and to the reviewer (anti-monotony /
+    self-similarity check the charter mandates). Empty string if nothing/failure."""
+    try:
+        rows = get_published_stories(days=days)
+    except Exception as e:
+        log.warning("Could not load published context: %s", e)
+        return ""
+    if not rows:
+        return ""
+    lines = [header]
+    for r in rows[:15]:
+        d = str(r.get("created_at", ""))[:10]
+        lines.append(f"  - [{d}] {(r.get('throughline') or '')[:140]}")
+    return "\n".join(lines) + "\n\n"
 
 
 # A transient provider/infra failure (retry forever — not the item's fault) vs a
@@ -619,6 +688,23 @@ def _run_spine(brief, investigate_input, run_id, topic_label, display_label,
 
         gate = _parse_gate(verification)
         log.info("Trust gate: %s", gate)
+
+        # Two-source backstop: if the verifier passed a story (READY / FRAMING-FIX)
+        # while its own table shows a load-bearing claim "Verified" on <2 sources,
+        # override to HOLD. This catches model leniency the prose verdict misses
+        # (the kind that let a single-sourced load-bearing claim publish before).
+        if gate in ("READY-FOR-HUMAN", "FRAMING-FIX"):
+            undersourced = _undersourced_load_bearing(verification)
+            if undersourced:
+                log.warning("Two-source backstop forced HOLD: %s", undersourced)
+                gate = "HOLD"
+                verification += (
+                    "\n\n## Two-source backstop (automated)\n"
+                    "Forced HOLD — load-bearing claim(s) marked Verified but listing "
+                    "fewer than two independent sources (charter §4.1):\n"
+                    + "\n".join(f"- {c}" for c in undersourced)
+                )
+
         if gate in ("KILL", "HOLD"):
             update_run(run_id, trust_gate=gate, verification_report=verification, status=gate.lower())
             reason = _reason_from_report(verification)
@@ -631,8 +717,18 @@ def _run_spine(brief, investigate_input, run_id, topic_label, display_label,
             )
             return None
 
+        # On FRAMING-FIX the facts hold but the verifier flagged how they're framed.
+        # Surface that requirement to the writer up front (not buried in the report);
+        # the editorial-reviewer then re-checks framing and can still send it back.
+        framing_directive = ""
         if gate == "FRAMING-FIX":
-            log.info("FRAMING-FIX: continuing to write with framing notes.")
+            fix = _reason_from_report(verification)
+            log.info("FRAMING-FIX: %s", fix or "(see report)")
+            framing_directive = (
+                "FRAMING FIX REQUIRED (the facts hold; the framing does not). The "
+                "verifier flagged this — apply it and let the evidence speak, do not "
+                f"assert beyond it:\n{fix or '(see the verification report below)'}\n\n"
+            )
 
         update_run(run_id, trust_gate=gate, status="writing")
         pattern = run_skill("pattern-synthesizer",
@@ -640,6 +736,7 @@ def _run_spine(brief, investigate_input, run_id, topic_label, display_label,
             run_id=run_id, topic=topic_label)
         draft = run_skill("article-writer",
             _with_brief(brief,
+                f"{framing_directive}"
                 f"VERIFIED DOSSIER:\n\n{dossier}\n\n"
                 f"VERIFICATION REPORT:\n\n{verification}\n\n"
                 f"PATTERN ANALYSIS:\n\n{pattern}"),
@@ -940,7 +1037,10 @@ def run_daily_cycle():
             lines.append(f"  {r['source']}: {r['total']} stories, {pct}% verified, {r['killed']} killed")
         reliability_ctx = "\n".join(lines) + "\n\nUse this to weight leads — prefer sources with higher verified rates.\n\n"
 
-    leads_text = reliability_ctx + "LEADS TO EVALUATE:\n\n" + "\n\n---\n\n".join(
+    # Archive context so the monitor doesn't re-select a story we've already run.
+    published_ctx = _published_context(
+        header="ALREADY PUBLISHED — do not pick a lead that merely repeats one of these:")
+    leads_text = published_ctx + reliability_ctx + "LEADS TO EVALUATE:\n\n" + "\n\n---\n\n".join(
         f"**Lead {i+1}** (source: {item['source']})\n"
         f"Throughline: {item['throughline']}\n"
         f"URL: {item['video_url']}\n"
