@@ -20,12 +20,11 @@ DRAFT_CHAT_ID  = os.environ.get("TELEGRAM_DRAFT_CHAT_ID", "")
 TG_API        = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 _INR = 84
+# Pipeline runs on Gemini + Claude only. Verifier uses Gemini Pro (priced apart).
 _MODEL_COSTS = {
-    "claude":   {"in": 3.00,  "out": 15.00},
-    "gemini":   {"in": 0.30,  "out": 1.00},
-    "deepseek": {"in": 0.55,  "out": 2.19},
-    "groq":     {"in": 0.00,  "out": 0.00},
-    "mistral":  {"in": 0.20,  "out": 0.60},
+    "claude":     {"in": 3.00, "out": 15.00},
+    "gemini":     {"in": 0.30, "out": 1.00},   # Flash
+    "gemini-pro": {"in": 1.25, "out": 10.00},
 }
 
 st.set_page_config(page_title="Thelivu", page_icon="📰", layout="wide")
@@ -83,10 +82,8 @@ def scalar(sql, params=None):
 
 def cost(model, i, o):
     m = (model or "").lower()
-    if "gemini" in m:   tier = "gemini"
-    elif "deepseek" in m: tier = "deepseek"
-    elif "llama" in m or "groq" in m: tier = "groq"
-    elif "mistral" in m: tier = "mistral"
+    if "gemini" in m and "pro" in m: tier = "gemini-pro"
+    elif "gemini" in m: tier = "gemini"
     else: tier = "claude"
     c = _MODEL_COSTS[tier]
     return (i/1e6 * c["in"]) + (o/1e6 * c["out"])
@@ -133,8 +130,8 @@ SKILL_ICON = {
     "news-investigator": "🔍", "source-verifier": "🔎", "news-monitor": "📡",
     "article-writer": "✍️", "editorial-reviewer": "📝", "pattern-synthesizer": "🧩",
     "topic-intake": "📥", "source-scout": "🕵️", "beat-monitor": "📻",
-    "story-scout": "🗺️", "publisher": "📤", "finance-manager": "💰",
-    "source-ingestor": "📼",
+    "story-scout": "🗺️", "story-tracker": "📌", "newsworthiness-gate": "🚦",
+    "meta-synthesizer": "🧭", "source-ingestor": "📼",
 }
 
 # ── Header ────────────────────────────────────────────────────────────────────

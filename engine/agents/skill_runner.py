@@ -1,12 +1,12 @@
 """
-Skill runner — four-tier model routing.
+Skill runner — two-provider routing.
 
-Tier 1 (Research)   : Gemini 2.5 Flash + Google Search grounding
-Tier 2 (Reasoning)  : DeepSeek R1 (chain-of-thought, no search needed)
-Tier 3 (Utility)    : Groq / Llama 3.3 70B (free, fast, structured tasks)
-Tier 4 (Editorial)  : Claude Sonnet (judgment, nuance, instruction-following)
+Research / verify : Gemini 2.5 Flash + Google Search grounding (verifier on Pro)
+Everything else   : Claude Sonnet (judgment, structured decisions, writing)
 
-Falls back to Claude if the preferred provider is unconfigured or fails.
+A provider outage raises (the caller pauses + re-queues the work) — there is no
+cross-engine fallback, because switching engines would change how facts are
+sourced. See engine/CHARTER.md and the robustness design doc.
 """
 
 import logging
@@ -16,8 +16,8 @@ from datetime import date
 
 import anthropic
 from shared.config import (
-    CLAUDE_MODEL, GEMINI_MODEL, GEMINI_PRO_MODEL, GROQ_MODEL, DEEPSEEK_MODEL, MISTRAL_MODEL,
-    ANTHROPIC_API_KEY, GEMINI_API_KEY, GROQ_API_KEY, DEEPSEEK_API_KEY, MISTRAL_API_KEY,
+    CLAUDE_MODEL, GEMINI_MODEL, GEMINI_PRO_MODEL,
+    ANTHROPIC_API_KEY, GEMINI_API_KEY,
     TELEGRAM_BOT_TOKEN, TELEGRAM_DRAFT_CHAT_ID,
     SKILLS_DIR,
 )
@@ -75,52 +75,17 @@ def _classify_error(provider, exc):
     if provider == "gemini":
         if "free_tier" in msg or "free tier" in msg or ("quota" in msg and "limit: 20" in str(exc)):
             return ("free_tier",
-                    "Gemini free tier daily quota (20 requests) exhausted.",
-                    "Pipeline fell back to Claude. Resets at midnight Pacific.\n"
-                    "To avoid this: enable billing at aistudio.google.com")
+                    "Gemini free tier daily quota exhausted.",
+                    "Research/verify paused — leads stay queued and resume when it resets "
+                    "(midnight Pacific). To avoid: enable billing at aistudio.google.com")
         if "resource_exhausted" in msg or "quota" in msg:
             return ("exhausted",
                     "Gemini paid quota or rate limit hit.",
-                    "Pipeline fell back to Claude. Check quota at console.cloud.google.com")
+                    "Research/verify paused — leads stay queued. Check quota at console.cloud.google.com")
         if "api_key" in msg or "401" in msg or "permission" in msg:
             return ("bad_key",
                     "Gemini API key rejected (invalid or billing not enabled).",
                     "Check key at aistudio.google.com → API keys")
-
-    elif provider == "deepseek":
-        if "402" in msg or "insufficient" in msg or "balance" in msg:
-            return ("billing_cap",
-                    "DeepSeek account balance exhausted.",
-                    "Top up at platform.deepseek.com → Billing. Pipeline fell back to Claude.")
-        if "401" in msg or "invalid" in msg:
-            return ("bad_key",
-                    "DeepSeek API key rejected.",
-                    "Check key at platform.deepseek.com → API keys")
-        if "429" in msg or "rate" in msg:
-            return ("exhausted",
-                    "DeepSeek rate limit hit.",
-                    "Pipeline fell back to Claude. Usually recovers in a few minutes.")
-
-    elif provider == "groq":
-        if "429" in msg or "rate" in msg or "quota" in msg:
-            return ("free_tier",
-                    "Groq free tier rate limit hit.",
-                    "Pipeline fell back to Claude. Groq resets every minute/day depending on the limit.\n"
-                    "Free tier: 6,000 tokens/min, 14,400 req/day.")
-        if "401" in msg or "invalid" in msg:
-            return ("bad_key",
-                    "Groq API key rejected.",
-                    "Check key at console.groq.com → API keys")
-
-    elif provider == "mistral":
-        if "402" in msg or "billing" in msg:
-            return ("billing_cap",
-                    "Mistral billing limit hit.",
-                    "Top up at console.mistral.ai → Billing. Pipeline fell back to Claude.")
-        if "429" in msg:
-            return ("free_tier",
-                    "Mistral rate limit hit.",
-                    "Pipeline fell back to Claude.")
 
     elif provider == "claude":
         if "overloaded" in msg:
@@ -194,9 +159,6 @@ def _send_quota_alert(provider, skill_name, exc):
 # ── Lazy clients ──────────────────────────────────────────────────────────────
 _claude_client  = None
 _gemini_client  = None
-_groq_client    = None
-_deepseek_client = None
-_mistral_client = None
 
 
 def _get_claude():
@@ -214,33 +176,9 @@ def _get_gemini():
     return _gemini_client
 
 
-def _get_groq():
-    global _groq_client
-    if _groq_client is None:
-        from openai import OpenAI
-        _groq_client = OpenAI(api_key=GROQ_API_KEY, base_url="https://api.groq.com/openai/v1")
-    return _groq_client
-
-
-def _get_deepseek():
-    global _deepseek_client
-    if _deepseek_client is None:
-        from openai import OpenAI
-        _deepseek_client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
-    return _deepseek_client
-
-
-def _get_mistral():
-    global _mistral_client
-    if _mistral_client is None:
-        from openai import OpenAI
-        _mistral_client = OpenAI(api_key=MISTRAL_API_KEY, base_url="https://api.mistral.ai/v1")
-    return _mistral_client
-
-
 # ── Skill → provider routing ──────────────────────────────────────────────────
 
-# Tier 1: Gemini — needs Google Search grounding for research
+# Gemini — needs Google Search grounding for research/verification.
 _GEMINI_SKILLS = {
     "news-investigator",
     "source-verifier",
@@ -254,42 +192,15 @@ _GEMINI_SKILLS = {
 # adversarial reasoning. The trust gate is the most consequential decision.
 _GEMINI_PRO_SKILLS = {"source-verifier"}
 
-# Tier 2: DeepSeek R1 — reasoning-heavy, no search needed
-_DEEPSEEK_SKILLS = {
-    "pattern-synthesizer",
-    "meta-synthesizer",
-}
+# Everything else routes to Claude (judgment / structured decisions / writing):
+# news-monitor, newsworthiness-gate, topic-intake, pattern-synthesizer,
+# meta-synthesizer, article-writer, editorial-reviewer, source-ingestor.
 
-# Tier 3: Groq/Llama — utility tasks (formatting, extraction, classification)
-_GROQ_SKILLS = {
-    "finance-manager",
-    "publisher",
-    "source-ingestor",
-    "news-monitor",
-}
-
-# Tier 4 (default): Claude — editorial judgment, tone, complex instruction-following
-# editorial-reviewer, article-writer, topic-intake, and any skill not in the above sets
-
-# Claude tools for fallback / Claude-native skills
+# topic-intake gets web search to gauge "already saturated?" at the front gate.
+# (Research skills run only on Gemini and never reach the Claude path, so they
+# need no Claude-side tools.)
 _CLAUDE_SKILL_TOOLS = {
-    "topic-intake":        [WEB_SEARCH_TOOL],
-    "news-investigator":   [WEB_SEARCH_TOOL],
-    "source-verifier":     [WEB_SEARCH_TOOL],
-    "beat-monitor":        [WEB_SEARCH_TOOL],
-    "source-scout":        [WEB_SEARCH_TOOL],
-    "story-scout":         [WEB_SEARCH_TOOL],
-    "story-tracker":       [WEB_SEARCH_TOOL],
-}
-
-# Per-provider cost per 1M tokens (USD) — for spend tracking
-_COSTS = {
-    CLAUDE_MODEL:    {"in": 3.00,  "out": 15.00},
-    GEMINI_MODEL:    {"in": 0.30,  "out": 1.00},
-    GEMINI_PRO_MODEL:{"in": 1.25,  "out": 10.00},
-    GROQ_MODEL:     {"in": 0.00,  "out": 0.00},   # free tier
-    DEEPSEEK_MODEL: {"in": 0.55,  "out": 2.19},
-    MISTRAL_MODEL:  {"in": 0.20,  "out": 0.60},
+    "topic-intake": [WEB_SEARCH_TOOL],
 }
 
 
