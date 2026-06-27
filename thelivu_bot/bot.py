@@ -29,7 +29,7 @@ from shared.config import (
     TELEGRAM_DRAFT_CHAT_ID,
     CONTACT_HANDLE,
 )
-from shared.db import get_run, get_pending_runs, get_cost_report_data, get_queue_state, kv_get, init_db, save_publication, update_run, queue_topic, approve_proposal, skip_proposal, reset_run_for_review
+from shared.db import get_run, get_pending_runs, get_cost_report_data, get_queue_state, kv_get, init_db, save_publication, update_run, queue_topic, approve_proposal, skip_proposal, reset_run_for_review, get_recheckable_runs
 
 logging.basicConfig(
     level=logging.INFO,
@@ -427,6 +427,62 @@ async def cmd_drafts(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(text, reply_markup=keyboard)
 
 
+async def cmd_held(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List held stories the owner can ask to re-develop."""
+    runs = get_recheckable_runs()
+    if not runs:
+        await update.message.reply_text("No held stories right now.")
+        return
+    lines = [f"{len(runs)} held stor(y/ies). Tap to re-investigate fresh, or use /recheck <id>:"]
+    await update.message.reply_text("\n".join(lines))
+    for run in runs:
+        run_id = run["id"]
+        throughline = (run.get("throughline") or "Untitled")[:140]
+        date = str(run.get("created_at", ""))[:10]
+        text = f"#{run_id} — {throughline}\n⏸ held | {date}"
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("🔄 Re-check now", callback_data=f"recheck_{run_id}"),
+            InlineKeyboardButton("✗ Kill",         callback_data=f"kill_{run_id}"),
+        ]])
+        await update.message.reply_text(text, reply_markup=keyboard)
+
+
+async def cmd_recheck(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Flag a held story for a fresh re-investigation (the agent does it next tick)."""
+    if not context.args:
+        await update.message.reply_text(
+            "Usage: /recheck <run_id>\n\n"
+            "Re-investigates a held story from scratch against today's live sources "
+            "and brings back a fuller draft if it has developed enough to publish. "
+            "Use /held to see held stories."
+        )
+        return
+    try:
+        run_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("Usage: /recheck <run_id> — run_id must be a number.")
+        return
+    await _request_recheck(update.message, run_id)
+
+
+async def _request_recheck(message, run_id):
+    run = get_run(run_id)
+    if run is None:
+        await message.reply_text(f"Run #{run_id} not found.")
+        return
+    if run.get("status") not in ("held", "hold"):
+        await message.reply_text(
+            f"Run #{run_id} isn't held (status: {run.get('status')}). Only held stories can be re-checked."
+        )
+        return
+    update_run(run_id, status="recheck_requested")
+    await message.reply_text(
+        f"Re-check queued for #{run_id}. The agent will re-investigate it from scratch "
+        f"on its next tick and send back a fuller draft if it's developed enough to publish."
+    )
+    log.info("Recheck requested for run #%d", run_id)
+
+
 async def cmd_republish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Reset a run that was already published (or wrongly marked published) back
     to review, then re-send the draft with Approve/Kill/Hold buttons.
@@ -513,6 +569,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _handle_addsrc(query, run_id)
     elif action == "skipsrc":
         await _handle_skipsrc(query, run_id)
+    elif action == "recheck":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        await _request_recheck(query.message, run_id)
     else:
         await query.message.reply_text(f"Unknown action: {action}")
 
@@ -628,6 +690,8 @@ async def _post_init(app):
             BotCommand("topic",    "Submit a story to investigate now"),
             BotCommand("track",    "Check status of current or recent story"),
             BotCommand("drafts",   "List all drafts pending your review"),
+            BotCommand("held",     "List held stories you can re-develop"),
+            BotCommand("recheck",  "Re-investigate a held story fresh by id"),
             BotCommand("republish","Reset a published run back to review by id"),
             BotCommand("queue",    "What's running, queued, and when next cycle fires"),
             BotCommand("runnow",   "Trigger an RSS cycle immediately"),
@@ -663,6 +727,8 @@ def main():
     app.add_handler(CommandHandler("topic", cmd_topic))
     app.add_handler(CommandHandler("runnow", cmd_runnow))
     app.add_handler(CommandHandler("republish", cmd_republish))
+    app.add_handler(CommandHandler("held", cmd_held))
+    app.add_handler(CommandHandler("recheck", cmd_recheck))
     app.add_handler(CallbackQueryHandler(button_callback))
 
     log.info("Polling for updates. Human gate active.")

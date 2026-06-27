@@ -1421,42 +1421,72 @@ def send_cost_report():
 
 
 # ---------------------------------------------------------------------------
-# Retry held stories (runs as part of the daily cycle)
+# Re-check held stories — owner-triggered (/recheck), fresh re-investigation
 # ---------------------------------------------------------------------------
 
-def retry_held():
-    held = get_held_runs(older_than_days=3)
-    if not held:
+def recheck_run(run_id):
+    """Re-develop one held story from scratch: re-investigate against today's live
+    sources, re-verify, and — if it now clears the gate — re-write and bring back a
+    FULLER draft for approval. This is how a story 'ripens': held while thin, it
+    comes back once the record has actually moved. Triggered only by the owner."""
+    from shared.db import get_run
+    run = get_run(run_id)
+    if not run:
+        log.warning("recheck_run: #%s not found", run_id)
         return
-    log.info("Retrying %d held story/stories...", len(held))
-    for run in held:
-        log.info("  Retrying run #%d: %s", run["id"], run["throughline"][:60])
-        # Don't re-chew commodity / non-stories every 3 days — drop them for good.
-        pursue, why = _newsworthiness_verdict(run)
-        if not pursue:
-            update_run(run["id"], status="killed", trust_gate="KILL")
-            _notify_card(
-                "❌", f"Killed held run #{run['id']} — stopping the retry loop",
-                body=f"<b>{_esc(run['throughline'][:160])}</b>\n\n"
-                     f"Not our kind of story.\n<b>Reason:</b> {_esc(why)}",
-            )
-            log.info("  Newsworthiness gate killed held run #%d: %s", run["id"], why)
-            continue
-        # Re-verify with fresh sources
+    throughline = run.get("throughline") or ""
+    log.info("Re-checking held run #%s: %s", run_id, throughline[:60])
+
+    brief = (
+        "STORY_BRIEF\n"
+        "Geography: Follow the story — match scope to evidence and impact\n"
+        f"Angle: {throughline[:200]}\n"
+        "Source: previously-held story, re-checked for development\n"
+        "Scope: Re-investigate as reported; expand or narrow on what the evidence now shows\n"
+        "END_STORY_BRIEF"
+    )
+    investigate_input = (
+        "PREVIOUSLY-HELD STORY — re-investigate from scratch against TODAY'S live "
+        "sources and surface anything that has developed since it was held (new "
+        "filings, hearings, data, corroborating reports, official responses).\n\n"
+        f"Throughline: {throughline}\n\n"
+        f"Earlier verification notes (for context only — re-verify fresh):\n"
+        f"{(run.get('verification_report') or 'N/A')[:1500]}"
+    )
+
+    def _on_pause(e):
+        # Provider down — leave it held so it can be re-checked again later.
+        update_run(run_id, status="held")
+        _pause_run(run_id, throughline[:120], e)
+
+    update_run(run_id, status="investigating")
+    result = _run_spine(
+        brief, investigate_input, run_id, throughline[:120],
+        display_label="Re-checked story", display_title=throughline,
+        on_pause=_on_pause,
+    )
+    if result is None:
+        return  # killed / held-again / halted / paused — already handled + notified
+    draft, review, verification, gate = result
+    update_run(run_id, trust_gate=gate, draft_text=draft, review_text=review,
+               verification_report=verification, status="pending_human")
+    _notify_card("🔄", f"Re-checked story now ready — run #{run_id}",
+                 body=f"<b>{_esc(throughline[:160])}</b>\n\nIt developed enough to publish — "
+                      "the fuller draft is below for your decision.")
+    send_for_approval(run_id, draft, verification, review)
+
+
+def process_recheck_requests():
+    """Pick up runs the owner flagged via /recheck (status 'recheck_requested') and
+    re-develop them. Cheap when there's nothing pending (one status query)."""
+    from shared.db import get_runs_by_status
+    pending = get_runs_by_status("recheck_requested", limit=5)
+    for run in pending:
         try:
-            verification = run_skill(
-                "source-verifier",
-                f"RE-VERIFY (previously HOLD):\n\n{run.get('verification_report', 'N/A')}",
-            )
-            gate = _parse_gate(verification)
-            if gate == "READY-FOR-HUMAN":
-                update_run(run["id"], trust_gate=gate, verification_report=verification, status="pending_human")
-                send_for_approval(run["id"], run["draft_text"] or "", verification, run["review_text"] or "")
-            else:
-                update_run(run["id"], trust_gate=gate or "HOLD", verification_report=verification)
-                log.info("  Still %s — keeping on hold.", gate or "HOLD")
+            recheck_run(run["id"])
         except Exception as e:
-            log.error("  Retry failed for run #%d: %s", run["id"], e)
+            log.error("recheck_run #%s failed: %s", run["id"], e, exc_info=True)
+            update_run(run["id"], status="held")  # leave it holdable
 
 
 # ---------------------------------------------------------------------------
@@ -1475,7 +1505,7 @@ if __name__ == "__main__":
     if "--once" in sys.argv:
         log.info("Single-cycle mode (--once)")
         run_daily_cycle()
-        retry_held()
+        process_recheck_requests()
         sys.exit(0)
 
     log.info("Approval mode: %s | Polling every %dh", APPROVAL_MODE, CHECK_INTERVAL_HOURS)
@@ -1509,7 +1539,7 @@ if __name__ == "__main__":
 
         try:
             run_daily_cycle()
-            retry_held()
+            process_recheck_requests()
         except Exception as e:
             log.error("Cycle failed: %s", e, exc_info=True)
 
