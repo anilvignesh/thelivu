@@ -49,10 +49,12 @@ if service == "thelivu-agent":
                 kv_set("last_scout_at", now_utc.isoformat())
                 log.info("Weekly jobs scheduled for 7 days from now.")
             elif (now_utc - datetime.fromisoformat(last_scout)).days >= 7:
+                # Stamp BEFORE running so a mid-way failure can't retry-storm
+                # (re-posting source proposals + re-calling models every 2 min).
+                kv_set("last_scout_at", now_utc.isoformat())
                 run_source_scout()
                 run_story_scout()
                 run_story_tracker()
-                kv_set("last_scout_at", now_utc.isoformat())
         except Exception as e:
             log.error("Weekly jobs failed: %s", e)
 
@@ -62,6 +64,7 @@ if service == "thelivu-agent":
             if not last_meta:
                 kv_set("last_meta_at", now_utc.isoformat())
             elif (now_utc - datetime.fromisoformat(last_meta)).days >= 30:
+                kv_set("last_meta_at", now_utc.isoformat())
                 run_meta_synthesis()
         except Exception as e:
             log.error("Meta-synthesis failed: %s", e)
