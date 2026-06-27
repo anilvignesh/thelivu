@@ -3,7 +3,7 @@ import os
 service = os.environ.get("RAILWAY_SERVICE_NAME", "thelivu")
 
 if service == "thelivu-agent":
-    from engine.agents.orchestrator import run_daily_cycle, retry_held, send_cost_report, run_source_scout, run_story_scout, run_story_tracker, run_meta_synthesis
+    from engine.agents.orchestrator import run_daily_cycle, process_recheck_requests, send_cost_report, run_source_scout, run_story_scout, run_story_tracker, run_meta_synthesis
     import time, logging, sys
     from datetime import datetime, timezone, timedelta
     from shared.config import ANTHROPIC_API_KEY, APPROVAL_MODE, TELEGRAM_BOT_TOKEN, TELEGRAM_DRAFT_CHAT_ID, CHECK_INTERVAL_HOURS
@@ -69,6 +69,12 @@ if service == "thelivu-agent":
         except Exception as e:
             log.error("Meta-synthesis failed: %s", e)
 
+        # Owner /recheck requests — pick up promptly (cheap when none pending).
+        try:
+            process_recheck_requests()
+        except Exception as e:
+            log.error("Recheck processing failed: %s", e, exc_info=True)
+
         # Owner topics — check every 2 minutes, run immediately if queued
         try:
             pending = pop_next_topic()
@@ -85,7 +91,6 @@ if service == "thelivu-agent":
                         kv_set("force_rss_run", "")
                     try:
                         run_daily_cycle()
-                        retry_held()
                         _last_rss_run = now_utc
                     except Exception as e:
                         log.error("RSS cycle failed: %s", e, exc_info=True)

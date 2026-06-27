@@ -392,6 +392,37 @@ def get_held_runs(older_than_days=3):
         conn.close()
 
 
+def get_recheckable_runs(limit=30):
+    """Held stories the owner can ask to re-develop — both human-held ('held') and
+    verifier-held ('hold'), newest first."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, throughline, trust_gate, status, created_at "
+            "FROM pipeline_runs WHERE status IN ('held', 'hold') "
+            "ORDER BY id DESC LIMIT " + ("%s" if _is_postgres() else "?"),
+            (limit,),
+        )
+        return _fetchall(cur)
+    finally:
+        conn.close()
+
+
+def get_runs_by_status(status, limit=20):
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(
+            f"SELECT * FROM pipeline_runs WHERE status = {ph} ORDER BY id LIMIT {ph}",
+            (status, limit),
+        )
+        return _fetchall(cur)
+    finally:
+        conn.close()
+
+
 def queue_topic(topic, source="owner"):
     conn = _conn()
     try:
