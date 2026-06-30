@@ -270,13 +270,18 @@ def init_db():
             for statement in _SCHEMA.strip().split(";"):
                 s = statement.strip()
                 if s:
-                    cur.execute(s)
+                    try:
+                        cur.execute(s)
+                        conn.commit()
+                    except Exception:
+                        conn.rollback()
             # Migrations for existing tables
             for col, defn in [("legal_flag", "BOOLEAN DEFAULT FALSE"), ("legal_reason", "TEXT")]:
                 try:
                     cur.execute(f"ALTER TABLE pipeline_runs ADD COLUMN {col} {defn}")
+                    conn.commit()
                 except Exception:
-                    pass  # column already exists
+                    conn.rollback()  # column already exists
         else:
             cur.executescript(_SCHEMA_SQLITE)
             for col, defn in [("legal_flag", "INTEGER DEFAULT 0"), ("legal_reason", "TEXT")]:
