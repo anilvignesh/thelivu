@@ -248,7 +248,14 @@ def _run_gemini(skill_name, input_text, system_prompt, max_tokens, run_id=None,
                      run_id=run_id)
     except Exception:
         pass
-    return response.text.strip()
+    text = response.text
+    if text is None:
+        raise ValueError(
+            f"Gemini returned no text for skill '{skill_name}' — response may have been "
+            "filtered or blocked (finish_reason: "
+            f"{getattr(response.candidates[0], 'finish_reason', 'unknown') if response.candidates else 'no candidates'})"
+        )
+    return text.strip()
 
 
 def _run_openai_compat(client, model, skill_name, input_text, system_prompt,

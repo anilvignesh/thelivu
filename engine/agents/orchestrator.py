@@ -759,7 +759,11 @@ def _run_spine(brief, investigate_input, run_id, topic_label, display_label,
         _halt_run(run_id, e.skill_name, e.raw)
         return None
     except Exception as e:
-        on_pause(e)
+        if _is_provider_outage(e):
+            on_pause(e)
+        else:
+            log.error("Spine code bug (not a provider outage): %s", e, exc_info=True)
+            _halt_run(run_id, "spine", str(e))
         return None
 
 
