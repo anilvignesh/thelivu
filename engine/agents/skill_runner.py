@@ -101,6 +101,13 @@ def _classify_error(provider, exc):
                     "Check key at console.anthropic.com → API keys\n"
                     "⚠️ No fallback available — pipeline is stopped.")
 
+    # Timeout — provider reached but didn't respond in time
+    if any(k in msg for k in ("timeout", "timed out", "deadline")):
+        provider_label = "Gemini" if provider == "gemini" else "Claude"
+        return ("timeout",
+                f"{provider_label} request timed out.",
+                f"Pipeline paused — work is re-queued. Usually transient; if it keeps happening check {provider_label} status.")
+
     return None  # unclassified / transient
 
 

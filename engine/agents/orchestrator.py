@@ -589,20 +589,31 @@ def _halt_run(run_id, stage, raw):
     log.error("Run #%s halted at %s (no structured output).", run_id, stage)
 
 
+def _provider_from_err(err):
+    """Best-effort guess at which provider caused an outage, from the error text."""
+    m = str(err).lower()
+    if any(k in m for k in ("gemini", "google", "generativelanguage", "resource_exhausted", "aistudio")):
+        return "Gemini"
+    if any(k in m for k in ("anthropic", "claude", "overloaded", "x-api-key")):
+        return "Claude"
+    return "Unknown provider"
+
+
 def _pause_run(run_id, label, err):
     """A provider went down mid-spine. Drop the half-finished run and let the
     caller re-queue the work, so it resumes when credit returns — never lost,
     never run on a substitute engine."""
+    provider = _provider_from_err(err)
     if run_id is not None:
         update_run(run_id, status="dropped", trust_gate="PAUSED")
     _notify_card(
-        "⏸", "Paused — provider unavailable",
-        body=(f"<b>{_esc(label)}</b>\n\nA model is out of credit or unreachable, so "
-              f"the run paused and the work went back in the queue. It resumes "
-              f"automatically when the provider is back — nothing was lost.\n\n"
+        "⏸", f"Paused — {provider} unavailable",
+        body=(f"<b>{_esc(label)}</b>\n\n<b>{provider}</b> is out of credit or unreachable. "
+              f"The run paused and the work went back in the queue. It resumes "
+              f"automatically when {provider} is back — nothing was lost.\n\n"
               f"<i>{_esc(str(err)[:200])}</i>"),
     )
-    log.warning("Paused run #%s (%s): %s", run_id, label, err)
+    log.warning("Paused run #%s — %s (%s): %s", run_id, provider, label, err)
 
 
 def _published_context(days=45, header="RECENTLY PUBLISHED (do not repeat these):"):
