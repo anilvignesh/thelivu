@@ -169,27 +169,76 @@ async def cmd_runnow(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from shared.db import _conn, _is_postgres
+    from datetime import datetime, timezone
     conn = _conn()
     try:
         cur = conn.cursor()
         ph = "%s" if _is_postgres() else "?"
+
         def count(status):
             cur.execute(f"SELECT COUNT(*) FROM pipeline_runs WHERE status = {ph}", (status,))
             return cur.fetchone()[0]
+
         cur.execute("SELECT COUNT(*) FROM publications")
         published = cur.fetchone()[0]
-        pending = count("pending_human")
-        held = count("held")
-        killed = count("killed")
+        pending  = count("pending_human")
+        held     = count("held")
+        killed   = count("killed")
+        writing  = count("writing")
+        investig = count("investigating")
+
+        # Active agents (non-ghost)
+        if _is_postgres():
+            cur.execute("SELECT skill, run_id, started_at FROM active_agents WHERE started_at > NOW() - INTERVAL '30 minutes' ORDER BY started_at")
+        else:
+            cur.execute("SELECT skill, run_id, started_at FROM active_agents WHERE started_at > datetime('now', '-30 minutes') ORDER BY started_at")
+        live_agents = cur.fetchall()
+
+        # Ghost agents (>30 min)
+        if _is_postgres():
+            cur.execute("SELECT COUNT(*) FROM active_agents WHERE started_at < NOW() - INTERVAL '30 minutes'")
+        else:
+            cur.execute("SELECT COUNT(*) FROM active_agents WHERE started_at < datetime('now', '-30 minutes')")
+        ghost_count = cur.fetchone()[0]
+
+        # Stuck topics
+        cur.execute("SELECT COUNT(*) FROM pending_topics WHERE status='running'")
+        stuck_topics = cur.fetchone()[0]
+
+        # Latest run
+        cur.execute("SELECT id, status, LEFT(throughline, 60) FROM pipeline_runs ORDER BY id DESC LIMIT 1")
+        row = cur.fetchone()
+        latest = f"#{row[0]} [{row[1]}] {row[2]}" if row else "none"
+
     finally:
         conn.close()
-    await update.message.reply_text(
-        f"Thelivu status:\n"
-        f"  Pending your review: {pending}\n"
-        f"  Published: {published}\n"
-        f"  Held: {held}\n"
-        f"  Killed: {killed}"
-    )
+
+    lines = [
+        "Thelivu pipeline status:",
+        f"  Pending review: {pending}",
+        f"  Writing: {writing}  |  Investigating: {investig}",
+        f"  Held: {held}  |  Killed: {killed}  |  Published: {published}",
+        "",
+        f"Latest run: {latest}",
+        "",
+    ]
+
+    if live_agents:
+        lines.append(f"Active agents ({len(live_agents)}):")
+        now = datetime.now(timezone.utc)
+        for ag in live_agents:
+            skill, run_id, started = ag
+            elapsed = int((now - started.replace(tzinfo=timezone.utc)).total_seconds() / 60) if started else "?"
+            lines.append(f"  {skill} (run #{run_id}) — {elapsed}m ago")
+    else:
+        lines.append("Active agents: none")
+
+    if ghost_count:
+        lines.append(f"  ⚠️ Ghost agents (>30m): {ghost_count} — run /clearghosts")
+    if stuck_topics:
+        lines.append(f"  ⚠️ Stuck topics (running state): {stuck_topics} — run /clearghosts")
+
+    await update.message.reply_text("\n".join(lines))
 
 
 async def cmd_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
