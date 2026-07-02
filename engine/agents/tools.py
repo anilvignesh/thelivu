@@ -103,7 +103,10 @@ def _brave_search(query, num_results):
 
 def _ddg_search(query):
     try:
-        from duckduckgo_search import DDGS
+        try:
+            from ddgs import DDGS
+        except ImportError:
+            from duckduckgo_search import DDGS
         results = list(DDGS().text(query, max_results=5))
         if not results:
             return "No results found."
