@@ -3,7 +3,7 @@ import os
 service = os.environ.get("RAILWAY_SERVICE_NAME", "thelivu")
 
 if service == "thelivu-agent":
-    from engine.agents.orchestrator import run_daily_cycle, process_recheck_requests, send_cost_report, run_source_scout, run_story_scout, run_story_tracker, run_meta_synthesis
+    from engine.agents.orchestrator import run_daily_cycle, process_recheck_requests, send_cost_report, run_source_scout, run_story_scout, run_story_tracker, run_meta_synthesis, _cost_report_due
     import time, logging, sys
     from datetime import datetime, timezone, timedelta
     from shared.config import ANTHROPIC_API_KEY, APPROVAL_MODE, TELEGRAM_BOT_TOKEN, TELEGRAM_DRAFT_CHAT_ID, CHECK_INTERVAL_HOURS
@@ -37,8 +37,8 @@ if service == "thelivu-agent":
         now_utc = datetime.now(timezone.utc)
         today = now_utc.date()
 
-        # Daily cost report at 8pm IST (14:30 UTC)
-        if now_utc.hour == 14 and now_utc.minute >= 30 and _cost_report_sent_date != today:
+        # Daily cost report — time configurable via /setcost HH:MM (kv: cost_report_utc)
+        if _cost_report_due(now_utc) and _cost_report_sent_date != today:
             try:
                 send_cost_report()
                 _cost_report_sent_date = today

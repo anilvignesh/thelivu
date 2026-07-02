@@ -652,19 +652,68 @@ def get_queue_state():
     conn = _conn()
     try:
         cur = conn.cursor()
-        # Pending/running owner topics
-        cur.execute(
-            "SELECT id, topic, source, status, submitted_at FROM pending_topics "
-            "WHERE status IN ('queued', 'running') ORDER BY id"
-        )
+        # Queued topics only — 'running' ones are either live (agent is on it right
+        # now) or stale (crashed; startup cleanup resets them). Show both but tag
+        # stale ones so the /queue display can warn appropriately.
+        if _is_postgres():
+            cur.execute(
+                "SELECT id, topic, source, status, submitted_at, "
+                "(status='running' AND submitted_at < NOW() - INTERVAL '1 hour') AS stale "
+                "FROM pending_topics WHERE status IN ('queued', 'running') ORDER BY id"
+            )
+        else:
+            cur.execute(
+                "SELECT id, topic, source, status, submitted_at, "
+                "(status='running' AND submitted_at < datetime('now', '-1 hour')) AS stale "
+                "FROM pending_topics WHERE status IN ('queued', 'running') ORDER BY id"
+            )
         topics = _fetchall(cur)
-        # Last 3 pipeline runs
+        # Last 5 pipeline runs
         cur.execute(
             "SELECT id, throughline, source, status, trust_gate, created_at "
-            "FROM pipeline_runs ORDER BY id DESC LIMIT 3"
+            "FROM pipeline_runs ORDER BY id DESC LIMIT 5"
         )
         recent_runs = _fetchall(cur)
         return {"topics": topics, "recent_runs": recent_runs}
+    finally:
+        conn.close()
+
+
+def get_daily_costs(days=7):
+    """Return per-day, per-model token usage for the last N days (for trend chart)."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        if _is_postgres():
+            cur.execute(
+                "SELECT recorded_at::date AS day, model, "
+                "SUM(input_tokens) AS in_tok, SUM(output_tokens) AS out_tok "
+                "FROM token_usage WHERE recorded_at >= NOW() - INTERVAL %s "
+                "GROUP BY recorded_at::date, model ORDER BY day",
+                (f"{days} days",),
+            )
+        else:
+            cur.execute(
+                "SELECT date(recorded_at) AS day, model, "
+                "SUM(input_tokens) AS in_tok, SUM(output_tokens) AS out_tok "
+                "FROM token_usage WHERE recorded_at >= datetime('now', ?) "
+                "GROUP BY date(recorded_at), model ORDER BY day",
+                (f"-{days} days",),
+            )
+        return _fetchall(cur)
+    finally:
+        conn.close()
+
+
+def deactivate_approved_source(source_id):
+    """Mark a DB-approved source as inactive so it stops being ingested."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(f"UPDATE approved_sources SET status='inactive' WHERE id={ph}", (source_id,))
+        conn.commit()
+        return cur.rowcount > 0
     finally:
         conn.close()
 

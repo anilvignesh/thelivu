@@ -45,6 +45,7 @@ from shared.db import (
     update_run_legal_flag,
     get_held_runs,
     get_cost_report_data,
+    get_daily_costs,
     get_approved_sources,
     get_source_reliability,
     get_published_stories,
@@ -1337,22 +1338,24 @@ def run_story_tracker():
         output = run_skill("story-tracker", stories_text)
         log.info("Story tracker complete.")
 
-        # Queue any high/medium priority follow-ups as pending topics
+        # Parse the mandatory FOLLOW_UPS JSON block — structured and unambiguous.
         follow_ups = 0
-        in_brief = False
-        current_brief = []
-        for line in output.splitlines():
-            if line.startswith("- Follow-up brief:") and ("High" in output[max(0, output.find(line)-200):output.find(line)] or
-                                                            "Medium" in output[max(0, output.find(line)-200):output.find(line)]):
-                in_brief = True
-                current_brief = [line.replace("- Follow-up brief:", "").strip()]
-            elif in_brief and line.startswith("-"):
-                in_brief = False
-                if current_brief:
-                    from shared.db import queue_topic
-                    queue_topic("[FOLLOW-UP] " + " ".join(current_brief), source="story-tracker")
-                    follow_ups += 1
-                    current_brief = []
+        m = re.search(r"FOLLOW_UPS\s*(\[.*?\])\s*END_FOLLOW_UPS", output, re.DOTALL)
+        if m:
+            try:
+                fu_list = json.loads(m.group(1))
+                for fu in fu_list:
+                    brief = fu.get("brief", "").strip()
+                    throughline = fu.get("throughline", "").strip()
+                    if brief:
+                        label = f"[FOLLOW-UP] {throughline}: {brief}" if throughline else f"[FOLLOW-UP] {brief}"
+                        from shared.db import queue_topic
+                        queue_topic(label[:1000], source="story-tracker")
+                        follow_ups += 1
+            except (json.JSONDecodeError, TypeError) as e:
+                log.warning("story-tracker FOLLOW_UPS JSON parse failed: %s", e)
+        else:
+            log.info("story-tracker: no FOLLOW_UPS block in output (no new developments)")
 
         tracker_link = _report_link(f"Story tracker — {len(stories)} stories checked", output)
         if follow_ups:
@@ -1475,17 +1478,39 @@ def send_cost_report():
     elif today_usd == 0:
         notes = "No runs today — zero spend."
 
+    # 7-day spend trend — aggregate per day across all models
+    try:
+        daily_rows = get_daily_costs(days=7)
+        by_day = {}
+        for r in daily_rows:
+            d = str(r["day"])
+            by_day[d] = by_day.get(d, 0.0) + _calc_cost(
+                r["model"] or "unknown", r["in_tok"] or 0, r["out_tok"] or 0)
+        if by_day:
+            trend_lines = [f"  {d}: ₹{v*_USD_TO_INR:.0f}" for d, v in sorted(by_day.items())]
+            trend_section = "7-day spend:\n" + "\n".join(trend_lines)
+        else:
+            trend_section = ""
+    except Exception as e:
+        log.warning("7-day trend failed: %s", e)
+        trend_section = ""
+
     breakdown = "\n".join(model_lines) if model_lines else "  (no usage today)"
-    report = (
-        f"Thelivu Cost Report — {today}\n\n"
-        f"Today:      ₹{inr(today_usd):.2f} (~${today_usd:.4f})\n"
-        f"This month: ₹{inr(month_usd):.2f} (~${month_usd:.4f})\n"
-        f"All time:   ₹{inr(total_usd):.2f} (~${total_usd:.4f})\n\n"
-        f"Today by model:\n{breakdown}\n\n"
-        f"Pipeline runs today: {runs_today}\n"
-        f"Notes: {notes}"
-    )
-    _notify(report)
+    parts = [
+        f"Thelivu Cost Report — {today}",
+        "",
+        f"Today:      ₹{inr(today_usd):.2f} (~${today_usd:.4f})",
+        f"This month: ₹{inr(month_usd):.2f} (~${month_usd:.4f})",
+        f"All time:   ₹{inr(total_usd):.2f} (~${total_usd:.4f})",
+        "",
+        f"Today by model:\n{breakdown}",
+        "",
+        f"Pipeline runs today: {runs_today}",
+        f"Notes: {notes}",
+    ]
+    if trend_section:
+        parts += ["", trend_section]
+    _notify("\n".join(parts))
     log.info("Cost report sent.")
 
 
@@ -1558,59 +1583,12 @@ def process_recheck_requests():
             update_run(run["id"], status="held")  # leave it holdable
 
 
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
-
-if __name__ == "__main__":
-    if not ANTHROPIC_API_KEY:
-        log.error("ANTHROPIC_API_KEY not set. Exiting.")
-        sys.exit(1)
-    if APPROVAL_MODE == "telegram" and (not TELEGRAM_BOT_TOKEN or not TELEGRAM_DRAFT_CHAT_ID):
-        log.error("APPROVAL_MODE=telegram but TELEGRAM_BOT_TOKEN or TELEGRAM_DRAFT_CHAT_ID not set.")
-        sys.exit(1)
-
-    # --once: run a single cycle and exit (used by /topic and /runnow triggers)
-    if "--once" in sys.argv:
-        log.info("Single-cycle mode (--once)")
-        run_daily_cycle()
-        process_recheck_requests()
-        sys.exit(0)
-
-    log.info("Approval mode: %s | Polling every %dh", APPROVAL_MODE, CHECK_INTERVAL_HOURS)
-
-    _cost_report_sent_date = None
-
-    while True:
-        now_utc = datetime.now(timezone.utc)
-
-        # Send cost report once per day at 14:30 UTC (8pm IST)
-        today = now_utc.date()
-        if now_utc.hour == 14 and now_utc.minute >= 30 and _cost_report_sent_date != today:
-            try:
-                send_cost_report()
-                _cost_report_sent_date = today
-            except Exception as e:
-                log.error("Cost report failed: %s", e)
-
-        # Run source scout weekly (every 7 days)
-        try:
-            last_scout = kv_get("last_scout_at")
-            if last_scout:
-                from datetime import timedelta
-                last_dt = datetime.fromisoformat(last_scout)
-                if (now_utc - last_dt).days >= 7:
-                    run_source_scout()
-            else:
-                run_source_scout()  # first run
-        except Exception as e:
-            log.error("Source scout failed: %s", e)
-
-        try:
-            run_daily_cycle()
-            process_recheck_requests()
-        except Exception as e:
-            log.error("Cycle failed: %s", e, exc_info=True)
-
-        log.info("Sleeping %dh until next cycle...", CHECK_INTERVAL_HOURS)
-        time.sleep(CHECK_INTERVAL_HOURS * 3600)
+def _cost_report_due(now_utc):
+    """Return True if it's time to send the daily cost report.
+    Time is read from kv_store key 'cost_report_utc' (format HH:MM, default 14:30)."""
+    raw = kv_get("cost_report_utc") or "14:30"
+    try:
+        h, m = (int(x) for x in raw.split(":"))
+    except Exception:
+        h, m = 14, 30
+    return now_utc.hour == h and now_utc.minute >= m

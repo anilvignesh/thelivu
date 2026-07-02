@@ -72,3 +72,24 @@ These are the stories that show the journalism had consequence — or that it ne
 End with a count: N stories checked, X with follow-up warranted, Y still developing, Z closed.
 
 If no developments found for any story, say so clearly — "checked N stories, no significant new developments this week." Do not manufacture leads.
+
+---
+
+## Structured output block (MANDATORY — must appear at the very end)
+
+After the story-by-story entries, output this block containing only High and Medium priority follow-ups. If there are none, output an empty array. The block must be valid JSON.
+
+```
+FOLLOW_UPS
+[
+  {
+    "story_id": <integer — the Story N number from your entries above>,
+    "throughline": "<original throughline, one line>",
+    "priority": "High" | "Medium",
+    "brief": "<2-3 sentences: what changed, what the new angle is, what records to pull>"
+  }
+]
+END_FOLLOW_UPS
+```
+
+Do not include Low or Skip priority stories in this block. Do not add commentary outside the JSON array.
