@@ -29,7 +29,7 @@ from shared.config import (
     TELEGRAM_DRAFT_CHAT_ID,
     CONTACT_HANDLE,
 )
-from shared.db import get_run, get_pending_runs, get_cost_report_data, get_queue_state, kv_get, kv_set, init_db, save_publication, update_run, queue_topic, approve_proposal, skip_proposal, reset_run_for_review, get_recheckable_runs, clear_agents_for_run
+from shared.db import get_run, get_pending_runs, get_cost_report_data, get_queue_state, kv_get, kv_set, init_db, save_publication, update_run, queue_topic, approve_proposal, skip_proposal, reset_run_for_review, get_recheckable_runs, clear_agents_for_run, clear_stale_agents, clear_stale_topics
 
 logging.basicConfig(
     level=logging.INFO,
@@ -539,6 +539,31 @@ async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log.info("Run #%d reset to held (was: %s) via /reset", run_id, old_status)
 
 
+async def cmd_clearghosts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin: clear all stale active_agents (>30min old) and reset stuck 'running' topics."""
+    cleared_agents = 0
+    cleared_topics = 0
+    try:
+        clear_stale_agents()
+        cleared_agents = 1  # clear_stale_agents doesn't return count; just run it
+    except Exception as e:
+        await update.message.reply_text(f"Error clearing agents: {e}")
+        return
+    try:
+        cleared_topics = clear_stale_topics()
+    except Exception as e:
+        await update.message.reply_text(f"Error resetting stuck topics: {e}")
+        return
+
+    await update.message.reply_text(
+        f"🧹 Ghost cleanup done.\n\n"
+        f"Stale active_agents cleared (all >30min old)\n"
+        f"Stuck pending_topics reset to queued: {cleared_topics}\n\n"
+        f"Use /status to check the pipeline state."
+    )
+    log.info("Ghost cleanup done via /clearghosts; %d stuck topics reset", cleared_topics)
+
+
 async def cmd_republish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Reset a run that was already published (or wrongly marked published) back
     to review, then re-send the draft with Approve/Kill/Hold buttons.
@@ -827,6 +852,7 @@ def main():
     app.add_handler(CommandHandler("held", cmd_held))
     app.add_handler(CommandHandler("recheck", cmd_recheck))
     app.add_handler(CommandHandler("reset", cmd_reset))
+    app.add_handler(CommandHandler("clearghosts", cmd_clearghosts))
     app.add_handler(CallbackQueryHandler(button_callback))
 
     log.info("Polling for updates. Human gate active.")
