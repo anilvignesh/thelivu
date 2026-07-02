@@ -29,7 +29,7 @@ from shared.config import (
     TELEGRAM_DRAFT_CHAT_ID,
     CONTACT_HANDLE,
 )
-from shared.db import get_run, get_pending_runs, get_cost_report_data, get_queue_state, kv_get, init_db, save_publication, update_run, queue_topic, approve_proposal, skip_proposal, reset_run_for_review, get_recheckable_runs
+from shared.db import get_run, get_pending_runs, get_cost_report_data, get_queue_state, kv_get, kv_set, init_db, save_publication, update_run, queue_topic, approve_proposal, skip_proposal, reset_run_for_review, get_recheckable_runs, clear_agents_for_run
 
 logging.basicConfig(
     level=logging.INFO,
@@ -278,11 +278,12 @@ async def cmd_feeds(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_scoutnow(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    import subprocess
-    await update.message.reply_text("Running source scout now... I'll send proposals when done.")
-    subprocess.Popen(["python", "-c",
-        "from engine.agents.orchestrator import run_source_scout; run_source_scout()"])
-    log.info("Manual source scout triggered")
+    kv_set("force_scout_run", "1")
+    await update.message.reply_text(
+        "Signalled the agent to run a source scout now.\n"
+        "Proposals will arrive in a few minutes — watch this chat."
+    )
+    log.info("Source scout signalled via /scoutnow")
 
 
 async def cmd_track(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -373,12 +374,16 @@ async def cmd_addfeed(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _CLAUDE_IN  = 3.00;  _CLAUDE_OUT = 15.00
-    _GEMINI_IN  = 0.30;  _GEMINI_OUT = 1.00
+    _FLASH_IN   = 0.30;  _FLASH_OUT  = 1.00
+    _PRO_IN     = 1.25;  _PRO_OUT    = 5.00
     _INR        = 84
 
     def calc(model, i, o):
-        if "gemini" in model.lower():
-            return (i/1e6*_GEMINI_IN) + (o/1e6*_GEMINI_OUT)
+        m = (model or "").lower()
+        if "gemini" in m:
+            if "pro" in m:
+                return (i/1e6*_PRO_IN) + (o/1e6*_PRO_OUT)
+            return (i/1e6*_FLASH_IN) + (o/1e6*_FLASH_OUT)
         return (i/1e6*_CLAUDE_IN) + (o/1e6*_CLAUDE_OUT)
 
     data = get_cost_report_data()
@@ -388,19 +393,20 @@ async def cmd_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
     today_usd = month_usd = total_usd = 0.0
     lines = []
     for row in rows:
-        m = row["model"]
+        m = row["model"] or "unknown"
         c = calc(m, row["today_in"] or 0, row["today_out"] or 0)
         today_usd += c
         month_usd += calc(m, row["month_in"] or 0, row["month_out"] or 0)
         total_usd += calc(m, row["total_in"] or 0, row["total_out"] or 0)
-        lines.append(f"  {m}: ${c:.4f}")
+        if c > 0 or (row["today_in"] or 0) > 0:
+            lines.append(f"  {m}: ${c:.4f}")
 
     await update.message.reply_text(
         f"Thelivu costs:\n\n"
-        f"Today: ₹{today_usd*_INR:.2f} (${today_usd:.4f})\n"
+        f"Today:      ₹{today_usd*_INR:.2f} (${today_usd:.4f})\n"
         f"This month: ₹{month_usd*_INR:.2f} (${month_usd:.4f})\n"
-        f"All time: ₹{total_usd*_INR:.2f} (${total_usd:.4f})\n\n"
-        + "\n".join(lines or ["No usage yet."]) + f"\n\nRuns today: {runs_today}"
+        f"All time:   ₹{total_usd*_INR:.2f} (${total_usd:.4f})\n\n"
+        + "\n".join(lines or ["No usage today."]) + f"\n\nRuns today: {runs_today}"
     )
 
 
@@ -416,9 +422,10 @@ async def cmd_drafts(update: Update, context: ContextTypes.DEFAULT_TYPE):
         run_id = run["id"]
         throughline = (run.get("throughline") or "Untitled")[:120]
         date = str(run.get("created_at", ""))[:10]
-        gate = run.get("trust_gate", "")
+        gate = run.get("trust_gate", "") or "?"
+        legal = " ⚠️ LEGAL" if run.get("legal_flag") else ""
 
-        text = f"#{run_id} — {throughline}\n{gate} | {date}"
+        text = f"#{run_id} — {throughline}\n{gate}{legal} | {date}"
         keyboard = InlineKeyboardMarkup([[
             InlineKeyboardButton("✓ Approve", callback_data=f"approve_{run_id}"),
             InlineKeyboardButton("✗ Kill",    callback_data=f"kill_{run_id}"),
@@ -483,6 +490,55 @@ async def _request_recheck(message, run_id):
     log.info("Recheck requested for run #%d", run_id)
 
 
+async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin: reset a stuck run back to 'held' so it can be /recheck'd or killed.
+
+    Useful when a run is frozen at 'investigating' or 'writing' due to a provider
+    crash — resets it to held and clears any ghost active_agent entries."""
+    if not context.args:
+        await update.message.reply_text(
+            "Usage: /reset <run_id>\n\n"
+            "Resets a run stuck at 'investigating' or 'writing' back to 'held', "
+            "clears ghost agents, and makes it available for /recheck or /kill.\n\n"
+            "Use /track <id> first to check the current status."
+        )
+        return
+    try:
+        run_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("Usage: /reset <run_id> — run_id must be a number.")
+        return
+
+    run = get_run(run_id)
+    if run is None:
+        await update.message.reply_text(f"Run #{run_id} not found.")
+        return
+
+    status = run.get("status", "")
+    if status in ("published",):
+        await update.message.reply_text(
+            f"Run #{run_id} is already published — use /republish if you need to review it again."
+        )
+        return
+    if status in ("killed",):
+        await update.message.reply_text(
+            f"Run #{run_id} is killed. Reset it anyway? Tap to confirm:",
+        )
+
+    old_status = status
+    clear_agents_for_run(run_id)
+    update_run(run_id, status="held")
+
+    throughline = (run.get("throughline") or "N/A")[:120]
+    await update.message.reply_text(
+        f"✅ Run #{run_id} reset.\n\n"
+        f"Story: {throughline}\n"
+        f"Was: {old_status} → now: held\n\n"
+        f"Ghost agents cleared. Use /held to recheck it, or tap Kill if it's not worth retrying."
+    )
+    log.info("Run #%d reset to held (was: %s) via /reset", run_id, old_status)
+
+
 async def cmd_republish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Reset a run that was already published (or wrongly marked published) back
     to review, then re-send the draft with Approve/Kill/Hold buttons.
@@ -541,15 +597,38 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    data = query.data  # e.g. "approve_42"
+    data = query.data  # e.g. "approve_42" or "investigate_scout"
     parts = data.split("_", 1)
     if len(parts) != 2:
         await query.message.reply_text("Unrecognised action.")
         return
 
-    action, run_id_str = parts
+    action, payload = parts
+
+    # Non-run-id actions handled first
+    if action == "investigate" and payload == "scout":
+        await _handle_investigate_scout(query)
+        return
+    if action == "addsrc":
+        try:
+            proposal_id = int(payload)
+        except ValueError:
+            await query.message.reply_text("Bad proposal ID.")
+            return
+        await _handle_addsrc(query, proposal_id)
+        return
+    if action == "skipsrc":
+        try:
+            proposal_id = int(payload)
+        except ValueError:
+            await query.message.reply_text("Bad proposal ID.")
+            return
+        await _handle_skipsrc(query, proposal_id)
+        return
+
+    # All remaining actions operate on a pipeline run
     try:
-        run_id = int(run_id_str)
+        run_id = int(payload)
     except ValueError:
         await query.message.reply_text("Bad run ID.")
         return
@@ -565,10 +644,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _handle_kill(query, run_id)
     elif action == "hold":
         await _handle_hold(query, run_id)
-    elif action == "addsrc":
-        await _handle_addsrc(query, run_id)
-    elif action == "skipsrc":
-        await _handle_skipsrc(query, run_id)
     elif action == "recheck":
         try:
             await query.edit_message_reply_markup(reply_markup=None)
@@ -577,6 +652,27 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _request_recheck(query.message, run_id)
     else:
         await query.message.reply_text(f"Unknown action: {action}")
+
+
+async def _handle_investigate_scout(query):
+    """Queue the latest story-scout brief as a topic for immediate investigation."""
+    brief = kv_get("latest_scout_brief")
+    if not brief:
+        await query.message.reply_text(
+            "No scout brief found in store — the brief may have been overwritten or expired. "
+            "Run /scoutnow to get a fresh one."
+        )
+        return
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    queue_topic(f"[SCOUT DIG] {brief[:800]}", source="story-scout-manual")
+    await query.message.reply_text(
+        "Scout dig queued for investigation. The agent will pick it up within 2 minutes "
+        "and send you the full draft when ready."
+    )
+    log.info("Scout brief queued for investigation via button")
 
 
 async def _handle_addsrc(query, proposal_id):
@@ -692,12 +788,13 @@ async def _post_init(app):
             BotCommand("drafts",   "List all drafts pending your review"),
             BotCommand("held",     "List held stories you can re-develop"),
             BotCommand("recheck",  "Re-investigate a held story fresh by id"),
+            BotCommand("reset",    "Reset a stuck run back to held (admin)"),
             BotCommand("republish","Reset a published run back to review by id"),
             BotCommand("queue",    "What's running, queued, and when next cycle fires"),
             BotCommand("runnow",   "Trigger an RSS cycle immediately"),
             BotCommand("feeds",    "List active RSS sources"),
             BotCommand("addfeed",  "Add a YouTube channel for evaluation"),
-            BotCommand("scoutnow", "Run source scout to find new sources"),
+            BotCommand("scoutnow", "Signal source scout to run now"),
             BotCommand("status",   "Story counts: pending / published / held / killed"),
             BotCommand("cost",     "API spend today / month / all-time in ₹"),
         ])
@@ -729,6 +826,7 @@ def main():
     app.add_handler(CommandHandler("republish", cmd_republish))
     app.add_handler(CommandHandler("held", cmd_held))
     app.add_handler(CommandHandler("recheck", cmd_recheck))
+    app.add_handler(CommandHandler("reset", cmd_reset))
     app.add_handler(CallbackQueryHandler(button_callback))
 
     log.info("Polling for updates. Human gate active.")

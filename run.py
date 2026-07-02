@@ -75,6 +75,15 @@ if service == "thelivu-agent":
         except Exception as e:
             log.error("Recheck processing failed: %s", e, exc_info=True)
 
+        # Manual source scout signal (/scoutnow)
+        try:
+            if kv_get("force_scout_run"):
+                kv_set("force_scout_run", "")
+                log.info("Force scout run signalled — running source scout now")
+                run_source_scout()
+        except Exception as e:
+            log.error("Forced scout run failed: %s", e)
+
         # Owner topics — check every 2 minutes, run immediately if queued
         try:
             pending = pop_next_topic()

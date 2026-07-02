@@ -371,8 +371,19 @@ def _send_via_telegram(run_id, draft_text, verification_report, review_text):
     if legal_flag:
         update_run_legal_flag(run_id, True, legal_reason)
 
-    _lines = (draft_text or "").lstrip("# ").splitlines()
-    title = (_lines[0][:100] if _lines else f"Run #{run_id}")
+    # Strip the writer's review scaffolding before extracting the title so we
+    # get the real article headline, not "DRAFT — for human review".
+    clean = (draft_text or "").strip()
+    # Skip leading blank lines, code fences, and the DRAFT header
+    for line in clean.splitlines():
+        s = line.strip()
+        if s == "" or s.startswith("```") or ("DRAFT" in s.upper() and "HUMAN REVIEW" in s.upper()):
+            continue
+        # Strip leading # markers to get the bare headline
+        title = s.lstrip("# ").strip()[:120]
+        break
+    else:
+        title = f"Run #{run_id}"
 
     parts = [f"📰 <b>New story ready — run #{run_id}</b>", "", f"<b>{_esc(title)}</b>"]
     if legal_flag:
@@ -502,8 +513,9 @@ def _revision_loop(brief, dossier, verification, pattern, draft, run_id, topic_l
             f"REVISION REQUEST FROM EDITORIAL REVIEWER:\n\n{inv_tasks}\n\n"
             f"ORIGINAL DOSSIER:\n\n{dossier}"
         )
-        dossier = run_skill("news-investigator",
-            _with_brief(brief, revision_prompt), run_id=run_id, topic=topic_label)
+        dossier = run_structured_skill(
+            "news-investigator", _with_brief(brief, revision_prompt),
+            marker=_M_DOSSIER, run_id=run_id, topic=topic_label)
 
     if wri_tasks:
         log.info("Re-running writer with revision tasks...")
@@ -995,7 +1007,10 @@ def run_daily_cycle():
             # Parse beat-monitor leads and add to pool as synthetic lead dicts
             for line in beat_output.splitlines():
                 if line.startswith("## Lead"):
-                    throughline = line.replace("## ", "").strip()
+                    # Strip "## Lead N: " prefix to get a clean throughline, e.g.
+                    # "## Lead 1: CAG flags..." → "CAG flags..."
+                    raw = line.lstrip("# ").strip()
+                    throughline = re.sub(r"^Lead\s+\d+\s*:\s*", "", raw).strip() or raw
                     # Content-based id so the SAME beat lead dedups across cycles and
                     # DIFFERENT leads never collide. (A positional f"beat-{len}" id
                     # collided on RSS-volume coincidence and permanently blocked slots.)
@@ -1003,7 +1018,7 @@ def run_daily_cycle():
                     all_leads.append({
                         "video_id": vid,
                         "video_url": "",
-                        "title": line.replace("## Lead", "").strip(),
+                        "title": throughline,
                         "source": "beat-monitor",
                         "source_id": "beat-monitor",
                         "throughline": throughline,
@@ -1186,8 +1201,32 @@ def run_story_scout():
     )
     try:
         brief = run_skill("story-scout", prompt)
-        _notify(f"Story scout — new dig brief:\n\n{brief}")
         log.info("Story scout complete.")
+
+        # Store brief so the "Investigate now" button can queue it
+        kv_set("latest_scout_brief", brief[:2000])
+
+        # Extract the theme line for the card headline
+        theme_line = ""
+        for line in brief.splitlines():
+            if line.strip() and not line.startswith("#"):
+                theme_line = line.strip()[:160]
+                break
+
+        brief_link = _report_link("Story Scout — weekly dig brief", brief)
+        keyboard = {
+            "inline_keyboard": [[
+                {"text": "🔍 Investigate this now", "callback_data": "investigate_scout"},
+            ]]
+        }
+        body = (f"<b>{_esc(theme_line)}</b>\n\n{brief_link}" if theme_line
+                else brief_link or _esc(brief[:400]))
+        _tg_post(
+            TELEGRAM_DRAFT_CHAT_ID,
+            f"🕵️ <b>Weekly story scout — new dig brief</b>\n\n{body}"[:_TG_LIMIT],
+            reply_markup=keyboard,
+            parse_mode="HTML",
+        )
     except Exception as e:
         log.error("Story scout failed: %s", e)
 
@@ -1247,21 +1286,24 @@ def run_source_scout():
             tier=p.get("tier", 3),
             notes=p.get("notes", ""),
         )
+        tier_icon = {1: "🟢", 2: "🟡", 3: "🟠"}.get(p.get("tier", 3), "⚪")
+        notes_text = _esc(p.get("notes", "")[:300])
         text = (
-            f"New source proposal #{proposal_id}\n\n"
-            f"Name: {p.get('name')}\n"
-            f"Platform: {p.get('platform')} | Role: {p.get('role')} | Tier: {p.get('tier')}\n"
-            f"Handle: {p.get('handle')}\n"
-            f"Lean: {p.get('lean')}\n\n"
-            f"{p.get('notes', '')}"
+            f"📡 <b>New source proposal #{proposal_id}</b>\n\n"
+            f"<b>{_esc(p.get('name', 'Unknown'))}</b>\n"
+            f"{tier_icon} Tier {p.get('tier', '?')} · {_esc(p.get('platform', ''))} · {_esc(p.get('role', ''))}\n"
+            f"Handle: <code>{_esc(p.get('handle', '') or '—')}</code>\n"
+            f"Lean: {_esc(p.get('lean', '') or '—')}\n\n"
+            + (f"{notes_text}" if notes_text else "")
         )
         keyboard = {
             "inline_keyboard": [[
-                {"text": "✓ Add",  "callback_data": f"addsrc_{proposal_id}"},
-                {"text": "✗ Skip", "callback_data": f"skipsrc_{proposal_id}"},
+                {"text": "✓ Add to sources",  "callback_data": f"addsrc_{proposal_id}"},
+                {"text": "✗ Skip",            "callback_data": f"skipsrc_{proposal_id}"},
             ]]
         }
-        msg_id = _tg_post(TELEGRAM_DRAFT_CHAT_ID, text, reply_markup=keyboard)
+        msg_id = _tg_post(TELEGRAM_DRAFT_CHAT_ID, text[:_TG_LIMIT], reply_markup=keyboard,
+                          parse_mode="HTML")
         if msg_id:
             set_proposal_msg_id(proposal_id, msg_id)
 
@@ -1312,10 +1354,18 @@ def run_story_tracker():
                     follow_ups += 1
                     current_brief = []
 
+        tracker_link = _report_link(f"Story tracker — {len(stories)} stories checked", output)
         if follow_ups:
-            _notify(f"Story tracker: {follow_ups} follow-up(s) queued from {len(stories)} published stories.")
+            _notify_card(
+                "🔄", f"Story tracker: {follow_ups} follow-up(s) queued",
+                body=(f"Checked {len(stories)} published stories — {follow_ups} developed enough "
+                      f"to re-investigate. They're now in the topic queue.\n\n{tracker_link}"),
+            )
         else:
-            _notify(f"Story tracker: checked {len(stories)} stories — no significant new developments this week.")
+            _notify_card(
+                "📋", f"Story tracker: {len(stories)} stories checked",
+                body=f"No significant new developments this week.\n\n{tracker_link}",
+            )
 
         kv_set("last_tracker_at", datetime.now(timezone.utc).isoformat())
     except Exception as e:
@@ -1370,16 +1420,21 @@ def run_meta_synthesis():
 # Daily cost report (sent at 8pm IST / 14:30 UTC)
 # ---------------------------------------------------------------------------
 
-_CLAUDE_IN_PER_M  = 3.00
-_CLAUDE_OUT_PER_M = 15.00
-_GEMINI_IN_PER_M  = 0.30
-_GEMINI_OUT_PER_M = 1.00
-_USD_TO_INR       = 84
+_CLAUDE_IN_PER_M      = 3.00
+_CLAUDE_OUT_PER_M     = 15.00
+_GEMINI_FLASH_IN      = 0.30   # gemini-2.5-flash
+_GEMINI_FLASH_OUT     = 1.00
+_GEMINI_PRO_IN        = 1.25   # gemini-2.5-pro (verifier only)
+_GEMINI_PRO_OUT       = 5.00
+_USD_TO_INR           = 84
 
 
 def _calc_cost(model, in_tok, out_tok):
-    if "gemini" in model.lower():
-        return (in_tok / 1_000_000 * _GEMINI_IN_PER_M) + (out_tok / 1_000_000 * _GEMINI_OUT_PER_M)
+    m = model.lower()
+    if "gemini" in m:
+        if "pro" in m:
+            return (in_tok / 1_000_000 * _GEMINI_PRO_IN) + (out_tok / 1_000_000 * _GEMINI_PRO_OUT)
+        return (in_tok / 1_000_000 * _GEMINI_FLASH_IN) + (out_tok / 1_000_000 * _GEMINI_FLASH_OUT)
     return (in_tok / 1_000_000 * _CLAUDE_IN_PER_M) + (out_tok / 1_000_000 * _CLAUDE_OUT_PER_M)
 
 
@@ -1390,45 +1445,44 @@ def send_cost_report():
     runs_today = data["runs_today"]
     today = date.today().isoformat()
 
-    # Build raw data for finance-manager skill
-    claude_in = claude_out = gemini_in = gemini_out = 0
-    month_claude_in = month_claude_out = month_gemini_in = month_gemini_out = 0
-    total_claude_in = total_claude_out = total_gemini_in = total_gemini_out = 0
+    # Sum costs per-model so Flash vs Pro are priced correctly
+    today_usd = month_usd = total_usd = 0.0
+    claude_in = claude_out = 0
+    gemini_in = gemini_out = 0
+    model_lines = []
     for row in rows:
-        if "gemini" in (row["model"] or "").lower():
-            gemini_in  += row["today_in"] or 0; gemini_out  += row["today_out"] or 0
-            month_gemini_in  += row["month_in"] or 0; month_gemini_out  += row["month_out"] or 0
-            total_gemini_in  += row["total_in"] or 0; total_gemini_out  += row["total_out"] or 0
+        model = row["model"] or "unknown"
+        ti = row["today_in"] or 0;  to = row["today_out"] or 0
+        mi = row["month_in"] or 0;  mo = row["month_out"] or 0
+        ai = row["total_in"] or 0;  ao = row["total_out"] or 0
+        today_usd += _calc_cost(model, ti, to)
+        month_usd += _calc_cost(model, mi, mo)
+        total_usd += _calc_cost(model, ai, ao)
+        if "gemini" in model.lower():
+            gemini_in += ti; gemini_out += to
         else:
-            claude_in  += row["today_in"] or 0; claude_out  += row["today_out"] or 0
-            month_claude_in  += row["month_in"] or 0; month_claude_out  += row["month_out"] or 0
-            total_claude_in  += row["total_in"] or 0; total_claude_out  += row["total_out"] or 0
+            claude_in += ti; claude_out += to
+        day_cost = _calc_cost(model, ti, to)
+        if day_cost > 0 or ti > 0:
+            model_lines.append(f"  {model}: {ti:,}→{to:,} tok = ${day_cost:.4f}")
 
-    today_usd  = _calc_cost("claude", claude_in, claude_out) + _calc_cost("gemini", gemini_in, gemini_out)
-    month_usd  = _calc_cost("claude", month_claude_in, month_claude_out) + _calc_cost("gemini", month_gemini_in, month_gemini_out)
-    total_usd  = _calc_cost("claude", total_claude_in, total_claude_out) + _calc_cost("gemini", total_gemini_in, total_gemini_out)
-
-    # Pure-Python report — no LLM. All figures are already computed above; the
-    # old finance-manager skill only reformatted them (zero reasoning).
     inr = lambda usd: usd * _USD_TO_INR
-    claude_today = _calc_cost("claude", claude_in, claude_out)
-    gemini_today = _calc_cost("gemini", gemini_in, gemini_out)
+    total_in_today = claude_in + gemini_in + claude_out + gemini_out
 
     notes = "All normal."
-    if runs_today and (claude_in + claude_out + gemini_in + gemini_out) / runs_today > 50_000:
+    if runs_today and total_in_today and total_in_today / runs_today > 50_000:
         notes = "⚠️ High token use per run today — check for a runaway investigation."
     elif today_usd == 0:
         notes = "No runs today — zero spend."
 
+    breakdown = "\n".join(model_lines) if model_lines else "  (no usage today)"
     report = (
         f"Thelivu Cost Report — {today}\n\n"
-        f"Today: ₹{inr(today_usd):.2f} (~${today_usd:.4f})\n"
+        f"Today:      ₹{inr(today_usd):.2f} (~${today_usd:.4f})\n"
         f"This month: ₹{inr(month_usd):.2f} (~${month_usd:.4f})\n"
-        f"All time: ₹{inr(total_usd):.2f} (~${total_usd:.4f})\n\n"
-        f"Today's breakdown:\n"
-        f"  Claude: {claude_in:,} in + {claude_out:,} out = ${claude_today:.4f}\n"
-        f"  Gemini: {gemini_in:,} in + {gemini_out:,} out = ${gemini_today:.4f}\n"
-        f"  Pipeline runs today: {runs_today}\n\n"
+        f"All time:   ₹{inr(total_usd):.2f} (~${total_usd:.4f})\n\n"
+        f"Today by model:\n{breakdown}\n\n"
+        f"Pipeline runs today: {runs_today}\n"
         f"Notes: {notes}"
     )
     _notify(report)

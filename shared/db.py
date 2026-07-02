@@ -862,6 +862,18 @@ def clear_stale_agents():
         conn.close()
 
 
+def clear_agents_for_run(run_id):
+    """Remove active_agent entries for a specific run (manual ghost cleanup)."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(f"DELETE FROM active_agents WHERE run_id = {ph}", (run_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def get_source_reliability():
     """Return per-source trust gate outcomes computed from pipeline_runs."""
     conn = _conn()
