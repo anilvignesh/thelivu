@@ -17,9 +17,12 @@ if service == "thelivu-agent":
     if APPROVAL_MODE == "telegram" and (not TELEGRAM_BOT_TOKEN or not TELEGRAM_DRAFT_CHAT_ID):
         log.error("APPROVAL_MODE=telegram but Telegram vars not set."); sys.exit(1)
 
-    from shared.db import clear_stale_agents
+    from shared.db import clear_stale_agents, clear_stale_topics
     init_db()
     clear_stale_agents()
+    n = clear_stale_topics()
+    if n:
+        log.warning("Startup: reset %d stuck pending_topic(s) to queued", n)
     log.info("Thelivu agent starting | Approval: %s | Interval: %dh", APPROVAL_MODE, CHECK_INTERVAL_HOURS)
 
     _cost_report_sent_date = None

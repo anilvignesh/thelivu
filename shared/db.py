@@ -874,6 +874,32 @@ def clear_agents_for_run(run_id):
         conn.close()
 
 
+def clear_stale_topics():
+    """Reset pending_topics rows stuck in 'running' for more than 1 hour back to 'queued'.
+
+    This happens when the agent crashes between pop_next_topic() and finish_topic(),
+    leaving the row permanently 'running' and invisible to the next pop_next_topic() call.
+    """
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        if _is_postgres():
+            cur.execute(
+                "UPDATE pending_topics SET status='queued' "
+                "WHERE status='running' AND submitted_at < NOW() - INTERVAL '1 hour'"
+            )
+        else:
+            cur.execute(
+                "UPDATE pending_topics SET status='queued' "
+                "WHERE status='running' AND submitted_at < datetime('now', '-1 hour')"
+            )
+        n = cur.rowcount
+        conn.commit()
+        return n
+    finally:
+        conn.close()
+
+
 def get_source_reliability():
     """Return per-source trust gate outcomes computed from pipeline_runs."""
     conn = _conn()
