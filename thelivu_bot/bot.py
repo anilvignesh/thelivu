@@ -740,6 +740,119 @@ async def cmd_setcost(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log.info("Cost report time set to %02d:%02d UTC", h, m)
 
 
+async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show lifetime pipeline statistics."""
+    from shared.db import get_pipeline_stats
+    s = get_pipeline_stats()
+    by_status = s["by_status"]
+    total = s["total"]
+    published = by_status.get("published", 0)
+    killed    = by_status.get("killed", 0)
+    held      = by_status.get("held", 0) + by_status.get("hold", 0)
+    kill_rate = f"{killed/total*100:.0f}%" if total else "n/a"
+    pub_rate  = f"{published/total*100:.0f}%" if total else "n/a"
+
+    lines = [
+        f"Thelivu lifetime stats ({total} runs):\n",
+        f"  Published:  {published}  ({pub_rate})",
+        f"  Killed:     {killed}  ({kill_rate})",
+        f"  Held:       {held}",
+        f"  Avg tokens: {s['avg_tokens']:,} / story",
+        "",
+        "Top sources by publications:",
+    ]
+    for src in s["top_sources"]:
+        t = src["total"]; p = src["published"]; k = src["killed"]
+        pct = f"{p/t*100:.0f}%" if t else "?"
+        lines.append(f"  {src['source']}: {p} pub / {t} total ({pct}), {k} killed")
+
+    await update.message.reply_text("\n".join(lines))
+
+
+async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Search past runs by throughline keyword."""
+    from shared.db import search_runs
+    if not context.args:
+        await update.message.reply_text("Usage: /search <keywords>\n\nSearches past runs by throughline.")
+        return
+    q = " ".join(context.args)
+    results = search_runs(q)
+    if not results:
+        await update.message.reply_text(f"No runs found matching '{q}'.")
+        return
+    lines = [f"Search: '{q}' ({len(results)} found)\n"]
+    for r in results:
+        date = str(r.get("created_at", ""))[:10]
+        gate = r.get("trust_gate") or "?"
+        lines.append(f"#{r['id']} [{r['status']}] {date}\n  {(r['throughline'] or '')[:100]}\n  gate: {gate}")
+    await update.message.reply_text("\n\n".join(lines))
+
+
+async def cmd_watchlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """View or add to the investigative watchlist."""
+    import yaml
+    from shared.config import WATCHLIST_YAML
+
+    if context.args and context.args[0] == "add":
+        theme = " ".join(context.args[1:]).strip()
+        if not theme:
+            await update.message.reply_text("Usage: /watchlist add <question>")
+            return
+        try:
+            data = yaml.safe_load(WATCHLIST_YAML.read_text()) or {}
+            themes = data.get("themes") or []
+            import re as _re
+            slug = _re.sub(r"[^a-z0-9]+", "-", theme.lower())[:40].strip("-")
+            themes.append({"id": slug, "question": theme, "status": "scoping"})
+            data["themes"] = themes
+            WATCHLIST_YAML.write_text(yaml.dump(data, allow_unicode=True, default_flow_style=False))
+            await update.message.reply_text(f"Added to watchlist: {theme}")
+        except Exception as e:
+            await update.message.reply_text(f"Failed to save: {e}")
+        return
+
+    try:
+        data = yaml.safe_load(WATCHLIST_YAML.read_text()) or {}
+    except Exception:
+        await update.message.reply_text("Watchlist not found or unreadable.")
+        return
+
+    themes = data.get("themes") or []
+    if not themes:
+        await update.message.reply_text("Watchlist is empty. Add with /watchlist add <question>")
+        return
+
+    status_icon = {"scoping": "🔍", "records-pending": "📋", "verifying": "🔎",
+                   "ready-to-write": "✅", "parked": "⏸", "killed": "✗"}
+    lines = [f"Watchlist ({len(themes)} themes):\n"]
+    for t in themes:
+        icon = status_icon.get(t.get("status", "scoping"), "•")
+        q = t.get("question", t.get("id", "?"))[:120]
+        lines.append(f"{icon} {q}")
+    lines.append("\nAdd: /watchlist add <question>")
+    await update.message.reply_text("\n".join(lines))
+
+
+async def cmd_setinterval(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Set the RSS cycle interval in hours."""
+    if not context.args:
+        current = kv_get("check_interval_hours") or "6"
+        await update.message.reply_text(
+            f"Current RSS cycle interval: {current}h\n\n"
+            "Usage: /setinterval <hours> (1–24)\nExample: /setinterval 4"
+        )
+        return
+    try:
+        hours = int(context.args[0])
+        assert 1 <= hours <= 24
+    except Exception:
+        await update.message.reply_text("Usage: /setinterval <hours> (1–24)")
+        return
+    kv_set("check_interval_hours", str(hours))
+    await update.message.reply_text(f"RSS cycle interval set to {hours}h. Takes effect next tick.")
+    log.info("Check interval set to %dh via /setinterval", hours)
+
+
 async def cmd_republish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Reset a run that was already published (or wrongly marked published) back
     to review, then re-send the draft with Approve/Kill/Hold buttons.
@@ -970,9 +1083,19 @@ async def _handle_approve(query, run_id, run):
     except Exception:
         pass
 
+    # Build a direct link to the published post
+    channel_link = ""
+    if msg_ids and TELEGRAM_CHANNEL_ID:
+        ch = TELEGRAM_CHANNEL_ID.lstrip("@")
+        try:
+            ch_int = abs(int(ch.lstrip("-100")))
+            channel_link = f"\nt.me/c/{ch_int}/{msg_ids[0]}"
+        except ValueError:
+            channel_link = f"\nt.me/{ch}/{msg_ids[0]}"
+
     await query.message.reply_text(
         f"Published run #{run_id} ✓ ({how})\n"
-        f"{len(msg_ids)} message(s) posted to {TELEGRAM_CHANNEL_ID}."
+        f"{len(msg_ids)} message(s) posted to {TELEGRAM_CHANNEL_ID}.{channel_link}"
     )
     log.info("Published run #%d (%s, %d msgs)", run_id, how, len(msg_ids))
 
@@ -1060,6 +1183,10 @@ def main():
     app.add_handler(CommandHandler("kill", cmd_kill))
     app.add_handler(CommandHandler("sources", cmd_sources))
     app.add_handler(CommandHandler("setcost", cmd_setcost))
+    app.add_handler(CommandHandler("stats", cmd_stats))
+    app.add_handler(CommandHandler("search", cmd_search))
+    app.add_handler(CommandHandler("watchlist", cmd_watchlist))
+    app.add_handler(CommandHandler("setinterval", cmd_setinterval))
     app.add_handler(CallbackQueryHandler(button_callback))
 
     log.info("Polling for updates. Human gate active.")

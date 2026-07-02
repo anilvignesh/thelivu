@@ -984,6 +984,20 @@ def run_daily_cycle():
             items = ingest_source(source)
             all_leads.extend(items)
             log.info("%s: %d new item(s)", source["name"], len(items))
+            # Track consecutive silent cycles — alert at 3, reset on new items
+            sid = str(source.get("id", source.get("name", "?"))).replace(" ", "_")
+            if items:
+                kv_set(f"src_silent_{sid}", "0")
+            else:
+                n = int(kv_get(f"src_silent_{sid}") or 0) + 1
+                kv_set(f"src_silent_{sid}", str(n))
+                if n == 3:
+                    _notify_card(
+                        "📡", f"Source silent for 3+ cycles: {source['name']}",
+                        body=f"No new items from <b>{_esc(source['name'])}</b> for 3 consecutive cycles.\n"
+                             f"Check if the feed URL is still valid: "
+                             f"<code>{_esc(str(source.get('feed', source.get('feed_url', '')))[:100])}</code>",
+                    )
         except Exception as e:
             log.error("Ingest failed for %s: %s", source["name"], e)
 
@@ -1115,11 +1129,31 @@ def run_daily_cycle():
         _notify_card(
             "🗑", "Dropped today's top lead — not our kind of story",
             body=f"<b>{_esc(selected['throughline'][:160])}</b>\n\n"
-                 f"<b>Reason:</b> {_esc(why)}\nNothing was investigated.",
+                 f"<b>Reason:</b> {_esc(why)}\nTrying next-best lead.",
         )
-        log.info("Newsworthiness gate DROPPED lead: %s", why)
-        return
-    log.info("Newsworthiness gate: PURSUE (%s)", why)
+        log.info("Newsworthiness gate DROPPED lead: %s — trying fallback", why)
+        # One fallback: try the next lead in the pool that wasn't the dropped one
+        fallback = next(
+            (l for l in all_leads if l.get("queue_id") != selected.get("queue_id")), None
+        )
+        if not fallback:
+            log.info("No fallback lead available — nothing investigated this cycle.")
+            return
+        log.info("Fallback lead: %s", fallback["throughline"][:80])
+        selected = fallback
+        pursue2, why2 = _newsworthiness_verdict(selected)
+        if not pursue2:
+            mark_lead_processed(selected.get("queue_id"))
+            _notify_card(
+                "🗑", "Fallback lead also dropped",
+                body=f"<b>{_esc(selected['throughline'][:160])}</b>\n\n"
+                     f"<b>Reason:</b> {_esc(why2)}\nNothing investigated this cycle.",
+            )
+            log.info("Fallback also dropped: %s", why2)
+            return
+        log.info("Fallback cleared gate: PURSUE (%s)", why2)
+    else:
+        log.info("Newsworthiness gate: PURSUE (%s)", why)
 
     # Build a story brief from the selected lead for downstream context
     rss_brief = (
