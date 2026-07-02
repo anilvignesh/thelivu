@@ -236,24 +236,33 @@ def _run_gemini(skill_name, input_text, system_prompt, max_tokens, run_id=None,
         tools=[types.Tool(google_search=types.GoogleSearch())],
         max_output_tokens=max_tokens,
     )
-    log.info("Running %s via %s + Google Search", skill_name, model)
+    log.info("Running %s via %s + Google Search (max_tokens=%d)", skill_name, model, max_tokens)
     response = client.models.generate_content(
         model=model, contents=input_text, config=config,
     )
     try:
         u = response.usage_metadata
         record_usage(skill=skill_name, model=model,
-                     input_tokens=getattr(u, "prompt_token_count", 0),
-                     output_tokens=getattr(u, "candidates_token_count", 0),
+                     input_tokens=getattr(u, "prompt_token_count", 0) or 0,
+                     output_tokens=getattr(u, "candidates_token_count", 0) or 0,
                      run_id=run_id)
     except Exception:
         pass
+
     text = response.text
     if text is None:
+        finish_reason = "unknown"
+        if response.candidates:
+            finish_reason = str(getattr(response.candidates[0], "finish_reason", "unknown"))
+        if "MAX_TOKENS" in finish_reason.upper():
+            raise ValueError(
+                f"Gemini response truncated for skill '{skill_name}' (finish_reason=MAX_TOKENS "
+                f"at max_tokens={max_tokens}). The response was cut off before producing usable "
+                f"output — the topic may be too complex or the output budget too tight."
+            )
         raise ValueError(
             f"Gemini returned no text for skill '{skill_name}' — response may have been "
-            "filtered or blocked (finish_reason: "
-            f"{getattr(response.candidates[0], 'finish_reason', 'unknown') if response.candidates else 'no candidates'})"
+            f"filtered or blocked (finish_reason: {finish_reason})"
         )
     return text.strip()
 
@@ -394,8 +403,12 @@ def run_skill(skill_name, input_text, extra_tools=None, max_tokens=4096,
 
     try:
         if preferred == "gemini":
+            # Gemini 2.5 models use thinking tokens from the same output budget, leaving
+            # less room for the actual response at the default 4096. Boost to 8192 minimum
+            # so research skills never silently truncate (which causes text=None crashes).
+            gemini_max = max(max_tokens, 8192)
             try:
-                return _run_gemini(skill_name, input_text, system_prompt, max_tokens, run_id,
+                return _run_gemini(skill_name, input_text, system_prompt, gemini_max, run_id,
                                    model=gemini_model)
             except Exception as e:
                 # No cross-engine fallback for grounded research. Switching the
