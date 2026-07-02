@@ -7,7 +7,7 @@ if service == "thelivu-agent":
     import time, logging, sys
     from datetime import datetime, timezone, timedelta
     from shared.config import ANTHROPIC_API_KEY, APPROVAL_MODE, TELEGRAM_BOT_TOKEN, TELEGRAM_DRAFT_CHAT_ID, CHECK_INTERVAL_HOURS
-    from shared.db import init_db, kv_get, kv_set
+    from shared.db import init_db, kv_get, kv_set, update_run
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", stream=sys.stdout)
     log = logging.getLogger("orchestrator")
@@ -17,7 +17,7 @@ if service == "thelivu-agent":
     if APPROVAL_MODE == "telegram" and (not TELEGRAM_BOT_TOKEN or not TELEGRAM_DRAFT_CHAT_ID):
         log.error("APPROVAL_MODE=telegram but Telegram vars not set."); sys.exit(1)
 
-    from shared.db import clear_stale_agents, clear_stale_topics
+    from shared.db import clear_stale_agents, clear_stale_topics, get_held_runs
     init_db()
     clear_stale_agents()
     n = clear_stale_topics()
@@ -32,6 +32,18 @@ if service == "thelivu-agent":
     _last_rss_run = None
     _cost_report_sent_date = None
     TOPIC_POLL_SECONDS = 120  # check for owner topics every 2 minutes
+
+    def _tg_notify(text):
+        """Send a plain-text notification to the draft chat from run.py."""
+        try:
+            import requests as _req
+            _req.post(
+                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+                json={"chat_id": str(TELEGRAM_DRAFT_CHAT_ID), "text": text[:4096]},
+                timeout=10,
+            )
+        except Exception as e:
+            log.warning("Notification send failed: %s", e)
 
     while True:
         now_utc = datetime.now(timezone.utc)
@@ -78,6 +90,21 @@ if service == "thelivu-agent":
         except Exception as e:
             log.error("Recheck processing failed: %s", e, exc_info=True)
 
+        # Auto-recheck held stories older than 3 days (once per day)
+        try:
+            last_auto = kv_get("last_auto_recheck_at")
+            auto_due = (not last_auto) or (now_utc - datetime.fromisoformat(last_auto)).total_seconds() >= 20 * 3600
+            if auto_due:
+                kv_set("last_auto_recheck_at", now_utc.isoformat())
+                stale = get_held_runs(older_than_days=3)
+                for run in stale:
+                    update_run(run["id"], status="recheck_requested")
+                    log.info("Auto-queued recheck for held run #%d (>3 days held)", run["id"])
+                if stale:
+                    log.info("Auto-recheck: queued %d held story/stories", len(stale))
+        except Exception as e:
+            log.error("Auto-recheck failed: %s", e)
+
         # Manual source scout signal (/scoutnow)
         try:
             if kv_get("force_scout_run"):
@@ -97,7 +124,8 @@ if service == "thelivu-agent":
             else:
                 # RSS cycle — on schedule or when /runnow signals it
                 force = kv_get("force_rss_run")
-                due = _last_rss_run is None or (now_utc - _last_rss_run).total_seconds() >= CHECK_INTERVAL_HOURS * 3600
+                interval_h = int(kv_get("check_interval_hours") or CHECK_INTERVAL_HOURS)
+                due = _last_rss_run is None or (now_utc - _last_rss_run).total_seconds() >= interval_h * 3600
                 if due or force:
                     if force:
                         kv_set("force_rss_run", "")
@@ -108,6 +136,23 @@ if service == "thelivu-agent":
                         log.error("RSS cycle failed: %s", e, exc_info=True)
         except Exception as e:
             log.error("Topic check failed: %s", e, exc_info=True)
+
+        # Idle alert — if no RSS cycle has completed in >8h, ping once per 12h
+        try:
+            last_cycle = kv_get("last_cycle_at")
+            last_alert = kv_get("last_idle_alert_at")
+            if last_cycle:
+                idle_secs = (now_utc - datetime.fromisoformat(last_cycle)).total_seconds()
+                alerted_recently = last_alert and (now_utc - datetime.fromisoformat(last_alert)).total_seconds() < 12 * 3600
+                if idle_secs > 8 * 3600 and not alerted_recently:
+                    kv_set("last_idle_alert_at", now_utc.isoformat())
+                    idle_h = int(idle_secs / 3600)
+                    _tg_notify(
+                        f"⚠️ Thelivu has been idle for {idle_h}h — no cycle completed since "
+                        f"{last_cycle[:16]} UTC.\n\nCheck Railway logs or use /runnow to trigger a cycle."
+                    )
+        except Exception as e:
+            log.error("Idle check failed: %s", e)
 
         log.info("Sleeping %ds...", TOPIC_POLL_SECONDS)
         time.sleep(TOPIC_POLL_SECONDS)

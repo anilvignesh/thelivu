@@ -733,6 +733,72 @@ def record_usage(skill, model, input_tokens, output_tokens, run_id=None):
         conn.close()
 
 
+def get_pipeline_stats():
+    """Lifetime pipeline statistics for /stats command."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT status, COUNT(*) FROM pipeline_runs GROUP BY status")
+        by_status = {r[0]: r[1] for r in cur.fetchall()}
+        cur.execute("""
+            SELECT source,
+                   COUNT(*) AS total,
+                   SUM(CASE WHEN status='published' THEN 1 ELSE 0 END) AS published,
+                   SUM(CASE WHEN status='killed' THEN 1 ELSE 0 END) AS killed
+            FROM pipeline_runs
+            WHERE source IS NOT NULL
+            GROUP BY source ORDER BY published DESC LIMIT 5
+        """)
+        top_sources = _fetchall(cur)
+        if _is_postgres():
+            cur.execute("""
+                SELECT AVG(tok) FROM (
+                    SELECT run_id, SUM(input_tokens + output_tokens) AS tok
+                    FROM token_usage WHERE run_id IS NOT NULL
+                    GROUP BY run_id
+                ) t
+            """)
+        else:
+            cur.execute("""
+                SELECT AVG(tok) FROM (
+                    SELECT run_id, SUM(input_tokens + output_tokens) AS tok
+                    FROM token_usage WHERE run_id IS NOT NULL
+                    GROUP BY run_id
+                )
+            """)
+        avg_tokens = cur.fetchone()[0] or 0
+        cur.execute("SELECT COUNT(*) FROM pipeline_runs")
+        total = cur.fetchone()[0]
+        return {"by_status": by_status, "top_sources": top_sources,
+                "avg_tokens": int(avg_tokens), "total": total}
+    finally:
+        conn.close()
+
+
+def search_runs(query, limit=10):
+    """Search pipeline_runs by throughline keyword."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        if _is_postgres():
+            cur.execute(
+                "SELECT id, throughline, status, trust_gate, created_at "
+                "FROM pipeline_runs WHERE throughline ILIKE %s "
+                "ORDER BY id DESC LIMIT %s",
+                (f"%{query}%", limit),
+            )
+        else:
+            cur.execute(
+                "SELECT id, throughline, status, trust_gate, created_at "
+                "FROM pipeline_runs WHERE throughline LIKE ? "
+                "ORDER BY id DESC LIMIT ?",
+                (f"%{query}%", limit),
+            )
+        return _fetchall(cur)
+    finally:
+        conn.close()
+
+
 def get_cost_report_data():
     """Return token usage aggregated for today, this month, and all time."""
     conn = _conn()
