@@ -8,5 +8,3 @@ google-genai>=1.0
 requests>=2.31
 pyyaml>=6.0
 ddgs>=0.1
-streamlit>=1.30
-pandas>=2.0

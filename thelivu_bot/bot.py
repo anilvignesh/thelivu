@@ -29,7 +29,7 @@ from shared.config import (
     TELEGRAM_DRAFT_CHAT_ID,
     CONTACT_HANDLE,
 )
-from shared.db import get_run, get_pending_runs, get_cost_report_data, get_queue_state, kv_get, kv_set, init_db, save_publication, update_run, queue_topic, approve_proposal, skip_proposal, reset_run_for_review, get_recheckable_runs, clear_agents_for_run, clear_stale_agents, clear_stale_topics
+from shared.db import get_run, get_pending_runs, get_cost_report_data, get_queue_state, kv_get, kv_set, init_db, save_publication, update_run, queue_topic, approve_proposal, skip_proposal, reset_run_for_review, get_recheckable_runs, clear_agents_for_run, clear_stale_agents, clear_stale_topics, deactivate_approved_source, get_approved_sources
 
 logging.basicConfig(
     level=logging.INFO,
@@ -254,7 +254,13 @@ async def cmd_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if topics:
         lines.append(f"Owner topics ({len(topics)}):")
         for t in topics:
-            status = "🔄 running now" if t["status"] == "running" else "⏳ queued"
+            stale = t.get("stale") or t.get("stale", False)
+            if t["status"] == "running" and stale:
+                status = "⚠️ stuck (run /clearghosts)"
+            elif t["status"] == "running":
+                status = "🔄 running now"
+            else:
+                status = "⏳ queued"
             lines.append(f"  #{t['id']} — {t['topic'][:80]} [{status}]")
     else:
         lines.append("Owner topics: none queued")
@@ -489,13 +495,24 @@ async def cmd_held(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not runs:
         await update.message.reply_text("No held stories right now.")
         return
-    lines = [f"{len(runs)} held stor(y/ies). Tap to re-investigate fresh, or use /recheck <id>:"]
-    await update.message.reply_text("\n".join(lines))
+    await update.message.reply_text(
+        f"{len(runs)} held stor(y/ies). Tap to re-investigate fresh, or use /recheck <id>:"
+    )
     for run in runs:
         run_id = run["id"]
-        throughline = (run.get("throughline") or "Untitled")[:140]
+        throughline = (run.get("throughline") or "Untitled")[:120]
         date = str(run.get("created_at", ""))[:10]
-        text = f"#{run_id} — {throughline}\n⏸ held | {date}"
+        gate = run.get("trust_gate") or "held"
+        # Show why it was held: trust gate decision + reason if available
+        gate_label = {
+            "HOLD": "⏸ verifier: needs more sources",
+            "FRAMING-FIX": "🔧 verifier: framing issue",
+            "held": "⏸ held by you",
+            "hold": "⏸ held by verifier",
+            "PAUSED": "⏸ provider was down",
+            "NEEDS-ATTENTION": "⚠️ halted (bad output)",
+        }.get(gate, f"⏸ {gate}")
+        text = f"#{run_id} [{date}] {throughline}\n{gate_label}"
         keyboard = InlineKeyboardMarkup([[
             InlineKeyboardButton("🔄 Re-check now", callback_data=f"recheck_{run_id}"),
             InlineKeyboardButton("✗ Kill",         callback_data=f"kill_{run_id}"),
@@ -613,6 +630,116 @@ async def cmd_clearghosts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log.info("Ghost cleanup done via /clearghosts; %d stuck topics reset", cleared_topics)
 
 
+async def cmd_kill(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Kill a run by ID from text — no need to go through /republish first."""
+    if not context.args:
+        await update.message.reply_text(
+            "Usage: /kill <run_id>\n\nKills a held, stuck, or pending run. "
+            "Use /held or /track <id> first to confirm you have the right one."
+        )
+        return
+    try:
+        run_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("Usage: /kill <run_id> — run_id must be a number.")
+        return
+    run = get_run(run_id)
+    if run is None:
+        await update.message.reply_text(f"Run #{run_id} not found.")
+        return
+    old_status = run.get("status", "")
+    if old_status == "published":
+        await update.message.reply_text(
+            f"Run #{run_id} is already published — can't kill a published story. "
+            "Use /republish if you need to review it."
+        )
+        return
+    if old_status == "killed":
+        await update.message.reply_text(f"Run #{run_id} is already killed.")
+        return
+    update_run(run_id, status="killed")
+    throughline = (run.get("throughline") or "N/A")[:120]
+    await update.message.reply_text(
+        f"✗ Run #{run_id} killed.\n\n{throughline}\n\nWas: {old_status}"
+    )
+    log.info("Run #%d killed (was: %s) via /kill", run_id, old_status)
+
+
+async def cmd_sources(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List all active sources (yaml + DB approved) with tier/lean and a deactivate button for DB ones."""
+    import yaml
+    from shared.config import SOURCES_YAML
+
+    try:
+        yaml_sources = yaml.safe_load(SOURCES_YAML.read_text()).get("sources", [])
+    except Exception:
+        yaml_sources = []
+    db_sources = get_approved_sources()
+
+    active_yaml = [s for s in yaml_sources if s.get("status") == "active"]
+    active_db   = [s for s in db_sources if s.get("status", "active") == "active"]
+
+    if not active_yaml and not active_db:
+        await update.message.reply_text("No active sources found.")
+        return
+
+    tier_icon = lambda t: {1: "🟢", 2: "🟡", 3: "🟠"}.get(int(t or 3), "⚪")
+
+    # YAML sources — static, can't deactivate via bot
+    if active_yaml:
+        lines = [f"Static sources ({len(active_yaml)}) — edit sources.yaml to change:\n"]
+        for s in active_yaml:
+            t = s.get("tier", 3)
+            lines.append(
+                f"{tier_icon(t)} T{t} {s.get('name', '?')} "
+                f"({s.get('platform','?')}) | {s.get('lean','?')} | {s.get('role','?')}"
+            )
+        await update.message.reply_text("\n".join(lines))
+
+    # DB sources — can deactivate inline
+    if active_db:
+        await update.message.reply_text(f"Bot-approved sources ({len(active_db)}):")
+        for s in active_db:
+            src_id = s["id"]
+            t = s.get("tier", 3)
+            text = (
+                f"{tier_icon(t)} T{t} {s.get('name','?')} ({s.get('platform','?')})\n"
+                f"Handle: {s.get('handle','—')} | {s.get('lean','?')} | {s.get('role','?')}"
+            )
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("✗ Deactivate", callback_data=f"deactivatesrc_{src_id}")
+            ]])
+            await update.message.reply_text(text, reply_markup=keyboard)
+
+
+async def cmd_setcost(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Set the daily cost report time (UTC). Usage: /setcost HH:MM"""
+    if not context.args:
+        current = kv_get("cost_report_utc") or "14:30"
+        await update.message.reply_text(
+            f"Current cost report time: {current} UTC\n\n"
+            "Usage: /setcost HH:MM (UTC, 24h)\n"
+            "Example: /setcost 13:00 sends the report at 6:30pm IST"
+        )
+        return
+    raw = context.args[0].strip()
+    try:
+        h, m = (int(x) for x in raw.split(":"))
+        assert 0 <= h <= 23 and 0 <= m <= 59
+    except Exception:
+        await update.message.reply_text("Invalid time. Use HH:MM (24h UTC), e.g. /setcost 14:30")
+        return
+    kv_set("cost_report_utc", f"{h:02d}:{m:02d}")
+    ist_h = (h + 5) % 24
+    ist_m = m + 30
+    if ist_m >= 60:
+        ist_m -= 60; ist_h = (ist_h + 1) % 24
+    await update.message.reply_text(
+        f"Cost report time set to {h:02d}:{m:02d} UTC ({ist_h:02d}:{ist_m:02d} IST)."
+    )
+    log.info("Cost report time set to %02d:%02d UTC", h, m)
+
+
 async def cmd_republish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Reset a run that was already published (or wrongly marked published) back
     to review, then re-send the draft with Approve/Kill/Hold buttons.
@@ -699,6 +826,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         await _handle_skipsrc(query, proposal_id)
         return
+    if action == "deactivatesrc":
+        try:
+            src_id = int(payload)
+        except ValueError:
+            await query.message.reply_text("Bad source ID.")
+            return
+        await _handle_deactivatesrc(query, src_id)
+        return
 
     # All remaining actions operate on a pipeline run
     try:
@@ -775,6 +910,21 @@ async def _handle_skipsrc(query, proposal_id):
     log.info("Source skipped: proposal #%d", proposal_id)
 
 
+async def _handle_deactivatesrc(query, src_id):
+    ok = deactivate_approved_source(src_id)
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    if ok:
+        await query.message.reply_text(
+            f"Source #{src_id} deactivated. It will be skipped from the next RSS cycle."
+        )
+        log.info("Source #%d deactivated via /sources", src_id)
+    else:
+        await query.message.reply_text(f"Source #{src_id} not found.")
+
+
 async def _handle_approve(query, run_id, run):
     if run["status"] == "published":
         await query.message.reply_text(f"Run #{run_id} was already published.")
@@ -843,8 +993,13 @@ async def _handle_hold(query, run_id):
         await query.edit_message_reply_markup(reply_markup=None)
     except Exception:
         pass
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("🔄 Re-check now", callback_data=f"recheck_{run_id}"),
+        InlineKeyboardButton("✗ Kill it",       callback_data=f"kill_{run_id}"),
+    ]])
     await query.message.reply_text(
-        f"Story #{run_id} held. The orchestrator will retry it in 3 days."
+        f"Story #{run_id} held.\n\nRe-check it when there's more to find, or kill it if it's a dead end.",
+        reply_markup=keyboard,
     )
     log.info("Held run #%d", run_id)
 
@@ -902,6 +1057,9 @@ def main():
     app.add_handler(CommandHandler("recheck", cmd_recheck))
     app.add_handler(CommandHandler("reset", cmd_reset))
     app.add_handler(CommandHandler("clearghosts", cmd_clearghosts))
+    app.add_handler(CommandHandler("kill", cmd_kill))
+    app.add_handler(CommandHandler("sources", cmd_sources))
+    app.add_handler(CommandHandler("setcost", cmd_setcost))
     app.add_handler(CallbackQueryHandler(button_callback))
 
     log.info("Polling for updates. Human gate active.")
