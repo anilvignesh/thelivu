@@ -29,7 +29,7 @@ from shared.config import (
     TELEGRAM_DRAFT_CHAT_ID,
     CONTACT_HANDLE,
 )
-from shared.db import get_run, get_pending_runs, get_cost_report_data, get_queue_state, kv_get, kv_set, init_db, save_publication, update_run, queue_topic, approve_proposal, skip_proposal, reset_run_for_review, get_recheckable_runs, clear_agents_for_run, clear_stale_agents, clear_stale_topics, deactivate_approved_source, get_approved_sources
+from shared.db import get_run, get_pending_runs, get_cost_report_data, get_queue_state, kv_get, kv_set, init_db, save_publication, update_run, queue_topic, approve_proposal, skip_proposal, reset_run_for_review, get_recheckable_runs, clear_agents_for_run, clear_stale_agents, clear_stale_topics, deactivate_approved_source, get_approved_sources, queue_slide_run, get_slide_run, update_slide_run
 
 logging.basicConfig(
     level=logging.INFO,
@@ -947,6 +947,21 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         await _handle_deactivatesrc(query, src_id)
         return
+    if action in ("slideapprove", "slidekill"):
+        try:
+            slide_id = int(payload)
+        except ValueError:
+            await query.message.reply_text("Bad slide ID.")
+            return
+        slide = get_slide_run(slide_id)
+        if slide is None:
+            await query.message.reply_text(f"Slide #{slide_id} not found in database.")
+            return
+        if action == "slideapprove":
+            await _handle_slide_approve(query, slide_id, slide)
+        else:
+            await _handle_slide_kill(query, slide_id)
+        return
 
     # All remaining actions operate on a pipeline run
     try:
@@ -1099,6 +1114,15 @@ async def _handle_approve(query, run_id, run):
     )
     log.info("Published run #%d (%s, %d msgs)", run_id, how, len(msg_ids))
 
+    # Queue the Instagram slide for this article. The orchestrator (not this
+    # bot process) does the actual composing/rendering on its next tick and
+    # sends the slide back here for a separate approve/kill.
+    try:
+        slide_id = queue_slide_run(run_id)
+        log.info("Queued slide #%d for run #%d", slide_id, run_id)
+    except Exception as e:
+        log.error("Failed to queue slide for run #%d: %s", run_id, e)
+
 
 async def _handle_kill(query, run_id):
     update_run(run_id, status="killed")
@@ -1125,6 +1149,61 @@ async def _handle_hold(query, run_id):
         reply_markup=keyboard,
     )
     log.info("Held run #%d", run_id)
+
+
+async def _handle_slide_approve(query, slide_id, slide):
+    if slide["status"] == "posted":
+        await query.message.reply_text(f"Slide #{slide_id} was already posted.")
+        return
+    image_path = slide.get("image_path")
+    if not image_path:
+        await query.message.reply_text(f"Slide #{slide_id} has no rendered image yet. Try again shortly.")
+        return
+
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
+    from shared.config import IG_USER_ID, IG_ACCESS_TOKEN
+    if not IG_USER_ID or not IG_ACCESS_TOKEN:
+        update_slide_run(slide_id, status="approved_manual")
+        await query.message.reply_text(
+            f"Slide #{slide_id} approved — but Instagram isn't configured yet "
+            f"(set IG_USER_ID / IG_ACCESS_TOKEN once the Meta app is ready). "
+            f"The image is above in this chat — post it manually for now."
+        )
+        return
+
+    from publishing.telegraph import upload_image
+    try:
+        image_url = upload_image(image_path)
+    except Exception as e:
+        log.error("Image host upload failed for slide #%d: %s", slide_id, e)
+        await query.message.reply_text(f"Couldn't host slide #{slide_id}'s image for Instagram: {e}")
+        return
+
+    from publishing.instagram import publish_photo
+    try:
+        caption = slide.get("headline") or ""
+        media_id, permalink = publish_photo(image_url, caption)
+        update_slide_run(slide_id, status="posted", ig_media_id=media_id, ig_permalink=permalink)
+        link_line = f"\n{permalink}" if permalink else ""
+        await query.message.reply_text(f"Posted slide #{slide_id} to Instagram ✓{link_line}")
+        log.info("Posted slide #%d to Instagram (media %s)", slide_id, media_id)
+    except Exception as e:
+        log.error("Instagram publish failed for slide #%d: %s", slide_id, e)
+        await query.message.reply_text(f"Instagram publish failed for slide #{slide_id}: {e}")
+
+
+async def _handle_slide_kill(query, slide_id):
+    update_slide_run(slide_id, status="killed")
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    await query.message.reply_text(f"Slide #{slide_id} killed.")
+    log.info("Killed slide #%d", slide_id)
 
 
 # ---------------------------------------------------------------------------

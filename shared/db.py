@@ -111,6 +111,22 @@ CREATE TABLE IF NOT EXISTS lead_queue (
     created_at   TIMESTAMP DEFAULT NOW(),
     processed_at TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS slide_runs (
+    id             SERIAL PRIMARY KEY,
+    run_id         INTEGER REFERENCES pipeline_runs(id),
+    headline       TEXT,
+    sub            TEXT,
+    stamp          TEXT,
+    dark           BOOLEAN DEFAULT FALSE,
+    image_path     TEXT,
+    ig_media_id    TEXT,
+    ig_permalink   TEXT,
+    status         TEXT DEFAULT 'queued',
+    tg_msg_id      INTEGER,
+    created_at     TIMESTAMP DEFAULT NOW(),
+    posted_at      TIMESTAMP
+);
 """
 
 # SQLite fallback schema (same structure, SQLite syntax)
@@ -220,6 +236,22 @@ CREATE TABLE IF NOT EXISTS lead_queue (
     status       TEXT DEFAULT 'queued',
     created_at   TEXT DEFAULT (datetime('now')),
     processed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS slide_runs (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id         INTEGER REFERENCES pipeline_runs(id),
+    headline       TEXT,
+    sub            TEXT,
+    stamp          TEXT,
+    dark           INTEGER DEFAULT 0,
+    image_path     TEXT,
+    ig_media_id    TEXT,
+    ig_permalink   TEXT,
+    status         TEXT DEFAULT 'queued',
+    tg_msg_id      INTEGER,
+    created_at     TEXT DEFAULT (datetime('now')),
+    posted_at      TEXT
 );
 """
 
@@ -1138,6 +1170,59 @@ def save_publication(run_id, channel_msg_ids, confidence):
             (run_id, json.dumps(channel_msg_ids), confidence),
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def queue_slide_run(run_id):
+    """Queue slide generation for a just-approved article. The orchestrator
+    picks up 'queued' rows on its next tick; bot.py never does the heavy
+    composer/render work itself. Returns the new slide_runs id."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(f"INSERT INTO slide_runs (run_id, status) VALUES ({ph}, 'queued')", (run_id,))
+        if _is_postgres():
+            cur.execute("SELECT lastval()")
+            slide_id = cur.fetchone()[0]
+        else:
+            slide_id = cur.lastrowid
+        conn.commit()
+        return slide_id
+    finally:
+        conn.close()
+
+
+def get_queued_slide_runs():
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM slide_runs WHERE status = 'queued' ORDER BY id")
+        return _fetchall(cur)
+    finally:
+        conn.close()
+
+
+def update_slide_run(slide_id, **kwargs):
+    ph = "%s" if _is_postgres() else "?"
+    sets = ", ".join(f"{k} = {ph}" for k in kwargs)
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(f"UPDATE slide_runs SET {sets} WHERE id = {ph}", (*kwargs.values(), slide_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_slide_run(slide_id):
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute("SELECT * FROM slide_runs WHERE id = " + ph, (slide_id,))
+        return _fetchone(cur)
     finally:
         conn.close()
 

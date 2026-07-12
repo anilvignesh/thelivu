@@ -25,3 +25,36 @@ mirror there. Fallbacks: `@thelivunews`, `@thelivu_in`.
 "…and we tell you when we're arguing a view" (the transparent-perspective promise)
 and the open-correction line. They are what make the stance honest instead of a
 label.
+
+## Visual identity — "The Dossier"
+
+Locked direction for the Instagram/social slide template (chosen from three
+explored directions — dossier/case-file, kayal/backwater, verdict/newsroom).
+Rationale: Thelivu means *evidence, proof* — the visual should read as "here
+are the receipts," not "here is an opinion." Case-file aesthetic: kraft paper,
+redaction-red stamps, typewriter metadata.
+
+**Colours**
+| Token | Hex | Use |
+|---|---|---|
+| Kraft (light bg) | `#E6DCC3` | slide background, light mode |
+| Ink (dark bg) | `#1B1710` | slide background, dark mode / text on kraft |
+| Redaction red | `#8C2A1B` | stamp border + text (e.g. "VERIFIED"), rule accents |
+| Kraft-dim | `#B3A891` | secondary/muted tone |
+| Dark-mode accent | `#D2AA6D` | stamp colour when slide bg is dark (`#17140D`) |
+
+**Type**
+- Display / headline: Georgia or Times New Roman, **bold**, serif — "case-file" weight
+- Body / metadata: Courier New (or ui-monospace fallback) — typewriter, "typed record" feel
+- Utility (verdict stamps, citations): monospace, uppercase, letter-spaced
+
+**Components**
+- **Stamp**: top-left, border `2px solid #8C2A1B` (or `#D2AA6D` on dark bg), rotated
+  `-3deg`, uppercase, e.g. `VERIFIED`, `FACT vs ALLEGATION`
+- **Headline (`.hl`)**: serif bold, ~21px, tight line-height (1.22)
+- **Sub** (supporting line): monospace, smaller, separated by a dashed top rule in
+  redaction red (`1px dashed #8C2A1B66`)
+- **Footer**: tiny uppercase monospace, ~75% opacity — site/handle + CTA
+
+Full explored-directions artifact (for reference, not the source of truth —
+this section is): https://claude.ai/code/artifact/15020fc7-bfd3-494d-bb21-1bc6333dc35c

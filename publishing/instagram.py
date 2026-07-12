@@ -1,0 +1,107 @@
+"""Thin Instagram API (Content Publishing) client.
+
+Two-step publish: create a media container from a public image_url, then
+publish the container. Instagram's API only accepts a fetchable URL, not a
+file upload — publishing.telegraph.upload_image() is used as the public host
+for the locally-rendered slide PNG.
+
+Uses graph.instagram.com, not graph.facebook.com — the app was set up via
+Meta's newer "Instagram API with Instagram Login" flow (no Facebook Page
+required), which issues tokens scoped to the Instagram-native host. The
+classic Page-linked Graph API (graph.facebook.com) expects a different token
+type and will reject these with "Cannot parse access token".
+
+Requires IG_USER_ID (the professional account's numeric id) and
+IG_ACCESS_TOKEN (long-lived, instagram_business_basic +
+instagram_business_content_publish) in shared/config.py. Both are set once
+the Meta app + IG account are wired up; until then, IGNotConfigured is raised
+so callers can degrade gracefully instead of crashing the approval flow.
+"""
+import time
+
+import requests
+
+from shared.config import IG_USER_ID, IG_ACCESS_TOKEN
+
+_API = "https://graph.instagram.com/v21.0"
+
+
+class IGNotConfigured(RuntimeError):
+    """IG_USER_ID / IG_ACCESS_TOKEN not set yet — Meta app isn't wired up."""
+
+
+class IGPublishError(RuntimeError):
+    pass
+
+
+def _require_config():
+    if not IG_USER_ID or not IG_ACCESS_TOKEN:
+        raise IGNotConfigured(
+            "IG_USER_ID / IG_ACCESS_TOKEN not set — Instagram publishing isn't "
+            "configured yet. The slide is saved; post it manually for now."
+        )
+
+
+def _create_container(image_url, caption):
+    r = requests.post(
+        f"{_API}/{IG_USER_ID}/media",
+        data={"image_url": image_url, "caption": caption, "access_token": IG_ACCESS_TOKEN},
+        timeout=30,
+    )
+    data = r.json()
+    if "id" not in data:
+        raise IGPublishError(f"Container creation failed: {data}")
+    return data["id"]
+
+
+def _wait_until_ready(container_id, attempts=10, delay=2):
+    """Poll the container's status_code until FINISHED (or give up and try
+    publishing anyway — single-image containers are usually ready instantly;
+    this just avoids a race on a slow day)."""
+    for _ in range(attempts):
+        r = requests.get(
+            f"{_API}/{container_id}",
+            params={"fields": "status_code", "access_token": IG_ACCESS_TOKEN},
+            timeout=15,
+        )
+        status = r.json().get("status_code")
+        if status == "FINISHED":
+            return
+        if status == "ERROR":
+            raise IGPublishError(f"Container {container_id} failed processing.")
+        time.sleep(delay)
+
+
+def _publish_container(container_id):
+    r = requests.post(
+        f"{_API}/{IG_USER_ID}/media_publish",
+        data={"creation_id": container_id, "access_token": IG_ACCESS_TOKEN},
+        timeout=30,
+    )
+    data = r.json()
+    if "id" not in data:
+        raise IGPublishError(f"Publish failed: {data}")
+    return data["id"]
+
+
+def _permalink(media_id):
+    try:
+        r = requests.get(
+            f"{_API}/{media_id}",
+            params={"fields": "permalink", "access_token": IG_ACCESS_TOKEN},
+            timeout=15,
+        )
+        return r.json().get("permalink", "")
+    except Exception:
+        return ""
+
+
+def publish_photo(image_url, caption=""):
+    """Publish one image (already at a public image_url) to the configured IG
+    account. Returns (media_id, permalink). Raises IGNotConfigured if the Meta
+    app isn't set up, or IGPublishError on any Graph API failure."""
+    _require_config()
+    container_id = _create_container(image_url, caption)
+    _wait_until_ready(container_id)
+    media_id = _publish_container(container_id)
+    return media_id, _permalink(media_id)

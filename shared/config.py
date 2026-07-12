@@ -5,6 +5,15 @@ from pathlib import Path
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 GEMINI_API_KEY    = os.environ.get("GEMINI_API_KEY", "")
 
+# --- Instagram (graph.instagram.com, Content Publishing) ---
+# IG_USER_ID: the Instagram professional account's numeric id. IG_ACCESS_TOKEN:
+# a token issued via the "Instagram API with Instagram Login" flow, scoped
+# with instagram_business_basic + instagram_business_content_publish. Leave
+# blank until the Meta app is set up — slide approval degrades to "saved,
+# post it yourself" until both are present.
+IG_USER_ID      = os.environ.get("IG_USER_ID", "")
+IG_ACCESS_TOKEN = os.environ.get("IG_ACCESS_TOKEN", "")
+
 # --- Telegram ---
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 # Anil's private chat with the bot (for draft review)

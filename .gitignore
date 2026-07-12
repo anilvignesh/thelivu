@@ -11,6 +11,10 @@ thelivu.db
 # Python
 __pycache__/
 *.pyc
+venv/
+
+# Local render test output
+publishing/slides_out/
 
 # OS
 .DS_Store

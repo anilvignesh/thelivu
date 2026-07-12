@@ -74,6 +74,7 @@ _M_VERDICT  = r"VERDICT:\s*(PURSUE|DROP)"
 # Anchored to a real heading at line start — a conversational "I'm ready to build
 # the Evidence Dossier…" must NOT pass (that was the run #18 poisoning vector).
 _M_DOSSIER  = r"^#{1,3}\s+(Evidence Dossier|Claims|Handoff note)"
+_M_SLIDE    = r"^HEADLINE:\s*.+"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -279,6 +280,28 @@ def _tg_post(chat_id, text, reply_markup=None, parse_mode=None):
             plain = re.sub(r"<[^>]+>", "", text)
             return _tg_post(chat_id, plain, reply_markup=reply_markup, parse_mode=None)
         log.error("Telegram send failed: %s", e)
+        return None
+
+
+def _tg_post_photo(chat_id, photo_path, caption="", reply_markup=None):
+    """Send a local image file as a Telegram photo message. Returns message_id."""
+    payload = {"chat_id": str(chat_id)}
+    if caption:
+        payload["caption"] = caption[:1024]
+    if reply_markup:
+        payload["reply_markup"] = json.dumps(reply_markup)
+    try:
+        with open(photo_path, "rb") as f:
+            r = requests.post(
+                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto",
+                data=payload,
+                files={"photo": f},
+                timeout=30,
+            )
+        r.raise_for_status()
+        return r.json().get("result", {}).get("message_id")
+    except Exception as e:
+        log.error("Telegram photo send failed: %s", e)
         return None
 
 
@@ -1615,6 +1638,68 @@ def process_recheck_requests():
         except Exception as e:
             log.error("recheck_run #%s failed: %s", run["id"], e, exc_info=True)
             update_run(run["id"], status="held")  # leave it holdable
+
+
+def _parse_slide_fields(text):
+    """Pull HEADLINE/SUB/STAMP/DARK out of slide-composer's structured output."""
+    def field(name, default=""):
+        m = re.search(rf"^{name}:\s*(.+)$", text or "", re.IGNORECASE | re.MULTILINE)
+        return m.group(1).strip() if m else default
+
+    headline = field("HEADLINE")
+    sub = field("SUB")
+    if sub.lower() in ("(none)", "none", "-", ""):
+        sub = ""
+    stamp = field("STAMP", "VERIFIED")
+    dark = field("DARK", "false").strip().lower() == "true"
+    return headline, sub, stamp, dark
+
+
+def process_queued_slides():
+    """Pick up slides queued by an article approval (slide_runs status
+    'queued'), compose the on-slide copy via Claude (slide-composer), render
+    the Dossier PNG, and send it to the owner's draft chat for approve/kill.
+    Cheap no-op when nothing's queued. Mirrors process_recheck_requests."""
+    from shared.config import REPO_ROOT
+    from shared.db import get_queued_slide_runs, update_slide_run, get_run
+    from publishing.slides import render_dossier_slide
+
+    for slide in get_queued_slide_runs():
+        slide_id = slide["id"]
+        run = get_run(slide["run_id"])
+        if run is None or not run.get("draft_text"):
+            log.error("Slide #%s: parent run #%s missing draft_text", slide_id, slide["run_id"])
+            update_slide_run(slide_id, status="failed")
+            continue
+
+        update_slide_run(slide_id, status="composing")
+        try:
+            composed = run_structured_skill(
+                "slide-composer", run["draft_text"], marker=_M_SLIDE, run_id=slide["run_id"])
+            headline, sub, stamp, dark = _parse_slide_fields(composed)
+            if not headline:
+                raise ValueError("slide-composer returned no HEADLINE")
+
+            out_dir = REPO_ROOT / "articles" / "slides"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            out_path = str(out_dir / f"slide_{slide_id}.png")
+            render_dossier_slide(headline, sub=sub, stamp=stamp, dark=dark, out=out_path)
+
+            update_slide_run(slide_id, headline=headline, sub=sub, stamp=stamp,
+                             dark=dark, image_path=out_path, status="pending_review")
+
+            keyboard = {"inline_keyboard": [[
+                {"text": "✓ Post to Instagram", "callback_data": f"slideapprove_{slide_id}"},
+                {"text": "✗ Kill",              "callback_data": f"slidekill_{slide_id}"},
+            ]]}
+            caption = f"🖼 Slide for run #{slide['run_id']} — approve to post to Instagram."
+            msg_id = _tg_post_photo(TELEGRAM_DRAFT_CHAT_ID, out_path, caption, keyboard)
+            update_slide_run(slide_id, tg_msg_id=msg_id)
+            log.info("Slide #%s ready for review (run #%s)", slide_id, slide["run_id"])
+        except Exception as e:
+            log.error("Slide composition failed for slide #%s: %s", slide_id, e, exc_info=True)
+            update_slide_run(slide_id, status="failed")
+            _notify(f"⚠️ Slide generation failed for run #{slide['run_id']} (slide #{slide_id}): {e}")
 
 
 def _cost_report_due(now_utc):
