@@ -1155,9 +1155,13 @@ async def _handle_slide_approve(query, slide_id, slide):
     if slide["status"] == "posted":
         await query.message.reply_text(f"Slide #{slide_id} was already posted.")
         return
-    image_path = slide.get("image_path")
-    if not image_path:
-        await query.message.reply_text(f"Slide #{slide_id} has no rendered image yet. Try again shortly.")
+    # image_url is uploaded once by the orchestrator right after rendering —
+    # this bot runs as a separate Railway service with its own filesystem, so
+    # it can't read a local image_path written by that process. See
+    # process_queued_slides() in engine/agents/orchestrator.py.
+    image_url = slide.get("image_url")
+    if not image_url:
+        await query.message.reply_text(f"Slide #{slide_id} has no hosted image yet. Try again shortly.")
         return
 
     try:
@@ -1173,14 +1177,6 @@ async def _handle_slide_approve(query, slide_id, slide):
             f"(set IG_USER_ID / IG_ACCESS_TOKEN once the Meta app is ready). "
             f"The image is above in this chat — post it manually for now."
         )
-        return
-
-    from publishing.telegraph import upload_image
-    try:
-        image_url = upload_image(image_path)
-    except Exception as e:
-        log.error("Image host upload failed for slide #%d: %s", slide_id, e)
-        await query.message.reply_text(f"Couldn't host slide #{slide_id}'s image for Instagram: {e}")
         return
 
     from publishing.instagram import publish_photo
