@@ -1663,6 +1663,7 @@ def process_queued_slides():
     from shared.config import REPO_ROOT
     from shared.db import get_queued_slide_runs, update_slide_run, get_run
     from publishing.slides import render_dossier_slide
+    from publishing.telegraph import upload_image
 
     for slide in get_queued_slide_runs():
         slide_id = slide["id"]
@@ -1685,8 +1686,15 @@ def process_queued_slides():
             out_path = str(out_dir / f"slide_{slide_id}.png")
             render_dossier_slide(headline, sub=sub, stamp=stamp, dark=dark, out=out_path)
 
+            # Upload now, from this process — the bot that handles the approve
+            # tap runs as a SEPARATE Railway service with its own filesystem
+            # and can't see a local path written here. The bot only ever needs
+            # a URL it can hand straight to Instagram's image_url parameter.
+            image_url = upload_image(out_path)
+
             update_slide_run(slide_id, headline=headline, sub=sub, stamp=stamp,
-                             dark=dark, image_path=out_path, status="pending_review")
+                             dark=dark, image_path=out_path, image_url=image_url,
+                             status="pending_review")
 
             keyboard = {"inline_keyboard": [[
                 {"text": "✓ Post to Instagram", "callback_data": f"slideapprove_{slide_id}"},

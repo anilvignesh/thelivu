@@ -120,6 +120,7 @@ CREATE TABLE IF NOT EXISTS slide_runs (
     stamp          TEXT,
     dark           BOOLEAN DEFAULT FALSE,
     image_path     TEXT,
+    image_url      TEXT,
     ig_media_id    TEXT,
     ig_permalink   TEXT,
     status         TEXT DEFAULT 'queued',
@@ -246,6 +247,7 @@ CREATE TABLE IF NOT EXISTS slide_runs (
     stamp          TEXT,
     dark           INTEGER DEFAULT 0,
     image_path     TEXT,
+    image_url      TEXT,
     ig_media_id    TEXT,
     ig_permalink   TEXT,
     status         TEXT DEFAULT 'queued',
@@ -314,6 +316,11 @@ def init_db():
                     conn.commit()
                 except Exception:
                     conn.rollback()  # column already exists
+            try:
+                cur.execute("ALTER TABLE slide_runs ADD COLUMN image_url TEXT")
+                conn.commit()
+            except Exception:
+                conn.rollback()  # column already exists
         else:
             cur.executescript(_SCHEMA_SQLITE)
             for col, defn in [("legal_flag", "INTEGER DEFAULT 0"), ("legal_reason", "TEXT")]:
@@ -321,6 +328,10 @@ def init_db():
                     cur.execute(f"ALTER TABLE pipeline_runs ADD COLUMN {col} {defn}")
                 except Exception:
                     pass
+            try:
+                cur.execute("ALTER TABLE slide_runs ADD COLUMN image_url TEXT")
+            except Exception:
+                pass
         conn.commit()
     finally:
         conn.close()
