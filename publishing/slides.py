@@ -32,10 +32,10 @@ WIDTH, HEIGHT = 1080, 1350
 PAD_X, PAD_TOP, PAD_BOTTOM = 90, 100, 90
 
 FONT_DIR = Path(__file__).parent / "fonts"
-SERIF_BOLD = FONT_DIR / "LiberationSerif-Bold.ttf"
-# DejaVu Sans Mono, not Liberation Mono — Liberation Mono is missing ₹ (U+20B9)
-# and other currency/Indic-adjacent glyphs, which given this is Kerala/India
-# financial reporting shows up constantly (rendered as a tofu box otherwise).
+# Noto Serif/Sans Mono, not Liberation — Liberation is missing ₹ (U+20B9) and
+# other currency/symbol glyphs, which given this is Kerala/India financial
+# reporting shows up constantly (rendered as a tofu box otherwise).
+SERIF_BOLD = FONT_DIR / "NotoSerif-Bold.ttf"
 MONO       = FONT_DIR / "DejaVuSansMono.ttf"
 MONO_BOLD  = FONT_DIR / "DejaVuSansMono-Bold.ttf"
 

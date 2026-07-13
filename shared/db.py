@@ -112,21 +112,26 @@ CREATE TABLE IF NOT EXISTS lead_queue (
     processed_at TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS slide_runs (
+CREATE TABLE IF NOT EXISTS carousel_runs (
     id             SERIAL PRIMARY KEY,
     run_id         INTEGER REFERENCES pipeline_runs(id),
-    headline       TEXT,
-    sub            TEXT,
-    stamp          TEXT,
-    dark           BOOLEAN DEFAULT FALSE,
-    image_path     TEXT,
-    image_url      TEXT,
-    ig_media_id    TEXT,
-    ig_permalink   TEXT,
+    article_url    TEXT,
+    caption        TEXT,
     status         TEXT DEFAULT 'queued',
     tg_msg_id      INTEGER,
+    ig_media_id    TEXT,
+    ig_permalink   TEXT,
     created_at     TIMESTAMP DEFAULT NOW(),
     posted_at      TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS carousel_slides (
+    id             SERIAL PRIMARY KEY,
+    carousel_id    INTEGER REFERENCES carousel_runs(id),
+    position       INTEGER,
+    headline       TEXT,
+    image_path     TEXT,
+    image_url      TEXT
 );
 """
 
@@ -239,21 +244,26 @@ CREATE TABLE IF NOT EXISTS lead_queue (
     processed_at TEXT
 );
 
-CREATE TABLE IF NOT EXISTS slide_runs (
+CREATE TABLE IF NOT EXISTS carousel_runs (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id         INTEGER REFERENCES pipeline_runs(id),
-    headline       TEXT,
-    sub            TEXT,
-    stamp          TEXT,
-    dark           INTEGER DEFAULT 0,
-    image_path     TEXT,
-    image_url      TEXT,
-    ig_media_id    TEXT,
-    ig_permalink   TEXT,
+    article_url    TEXT,
+    caption        TEXT,
     status         TEXT DEFAULT 'queued',
     tg_msg_id      INTEGER,
+    ig_media_id    TEXT,
+    ig_permalink   TEXT,
     created_at     TEXT DEFAULT (datetime('now')),
     posted_at      TEXT
+);
+
+CREATE TABLE IF NOT EXISTS carousel_slides (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    carousel_id    INTEGER REFERENCES carousel_runs(id),
+    position       INTEGER,
+    headline       TEXT,
+    image_path     TEXT,
+    image_url      TEXT
 );
 """
 
@@ -316,11 +326,6 @@ def init_db():
                     conn.commit()
                 except Exception:
                     conn.rollback()  # column already exists
-            try:
-                cur.execute("ALTER TABLE slide_runs ADD COLUMN image_url TEXT")
-                conn.commit()
-            except Exception:
-                conn.rollback()  # column already exists
         else:
             cur.executescript(_SCHEMA_SQLITE)
             for col, defn in [("legal_flag", "INTEGER DEFAULT 0"), ("legal_reason", "TEXT")]:
@@ -328,10 +333,6 @@ def init_db():
                     cur.execute(f"ALTER TABLE pipeline_runs ADD COLUMN {col} {defn}")
                 except Exception:
                     pass
-            try:
-                cur.execute("ALTER TABLE slide_runs ADD COLUMN image_url TEXT")
-            except Exception:
-                pass
         conn.commit()
     finally:
         conn.close()
@@ -1185,55 +1186,86 @@ def save_publication(run_id, channel_msg_ids, confidence):
         conn.close()
 
 
-def queue_slide_run(run_id):
-    """Queue slide generation for a just-approved article. The orchestrator
+def queue_carousel_run(run_id, article_url=""):
+    """Queue carousel generation for a just-approved article. The orchestrator
     picks up 'queued' rows on its next tick; bot.py never does the heavy
-    composer/render work itself. Returns the new slide_runs id."""
+    composer/render work itself. Returns the new carousel_runs id."""
     conn = _conn()
     try:
         cur = conn.cursor()
         ph = "%s" if _is_postgres() else "?"
-        cur.execute(f"INSERT INTO slide_runs (run_id, status) VALUES ({ph}, 'queued')", (run_id,))
+        cur.execute(
+            f"INSERT INTO carousel_runs (run_id, article_url, status) VALUES ({ph}, {ph}, 'queued')",
+            (run_id, article_url),
+        )
         if _is_postgres():
             cur.execute("SELECT lastval()")
-            slide_id = cur.fetchone()[0]
+            carousel_id = cur.fetchone()[0]
         else:
-            slide_id = cur.lastrowid
+            carousel_id = cur.lastrowid
         conn.commit()
-        return slide_id
+        return carousel_id
     finally:
         conn.close()
 
 
-def get_queued_slide_runs():
+def get_queued_carousel_runs():
     conn = _conn()
     try:
         cur = conn.cursor()
-        cur.execute("SELECT * FROM slide_runs WHERE status = 'queued' ORDER BY id")
+        cur.execute("SELECT * FROM carousel_runs WHERE status = 'queued' ORDER BY id")
         return _fetchall(cur)
     finally:
         conn.close()
 
 
-def update_slide_run(slide_id, **kwargs):
+def update_carousel_run(carousel_id, **kwargs):
     ph = "%s" if _is_postgres() else "?"
     sets = ", ".join(f"{k} = {ph}" for k in kwargs)
     conn = _conn()
     try:
         cur = conn.cursor()
-        cur.execute(f"UPDATE slide_runs SET {sets} WHERE id = {ph}", (*kwargs.values(), slide_id))
+        cur.execute(f"UPDATE carousel_runs SET {sets} WHERE id = {ph}", (*kwargs.values(), carousel_id))
         conn.commit()
     finally:
         conn.close()
 
 
-def get_slide_run(slide_id):
+def get_carousel_run(carousel_id):
     conn = _conn()
     try:
         cur = conn.cursor()
         ph = "%s" if _is_postgres() else "?"
-        cur.execute("SELECT * FROM slide_runs WHERE id = " + ph, (slide_id,))
+        cur.execute("SELECT * FROM carousel_runs WHERE id = " + ph, (carousel_id,))
         return _fetchone(cur)
+    finally:
+        conn.close()
+
+
+def add_carousel_slide(carousel_id, position, headline, image_path="", image_url=""):
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(
+            f"""INSERT INTO carousel_slides (carousel_id, position, headline, image_path, image_url)
+               VALUES ({ph},{ph},{ph},{ph},{ph})""",
+            (carousel_id, position, headline, image_path, image_url),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_carousel_slides(carousel_id):
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(
+            f"SELECT * FROM carousel_slides WHERE carousel_id = {ph} ORDER BY position", (carousel_id,)
+        )
+        return _fetchall(cur)
     finally:
         conn.close()
 
