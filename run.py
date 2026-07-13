@@ -3,7 +3,7 @@ import os
 service = os.environ.get("RAILWAY_SERVICE_NAME", "thelivu")
 
 if service == "thelivu-agent":
-    from engine.agents.orchestrator import run_daily_cycle, process_recheck_requests, process_queued_slides, send_cost_report, run_source_scout, run_story_scout, run_story_tracker, run_meta_synthesis, _cost_report_due
+    from engine.agents.orchestrator import run_daily_cycle, process_recheck_requests, process_queued_carousels, send_cost_report, run_source_scout, run_story_scout, run_story_tracker, run_meta_synthesis, _cost_report_due
     import time, logging, sys
     from datetime import datetime, timezone, timedelta
     from shared.config import ANTHROPIC_API_KEY, APPROVAL_MODE, TELEGRAM_BOT_TOKEN, TELEGRAM_DRAFT_CHAT_ID, CHECK_INTERVAL_HOURS, REPO_ROOT, SLIDE_SERVER_BASE_URL, SLIDE_SERVER_PORT
@@ -96,11 +96,11 @@ if service == "thelivu-agent":
         except Exception as e:
             log.error("Recheck processing failed: %s", e, exc_info=True)
 
-        # Slides queued by an article approval — compose + render + send for review.
+        # Carousels queued by an article approval — compose + render + send for review.
         try:
-            process_queued_slides()
+            process_queued_carousels()
         except Exception as e:
-            log.error("Slide processing failed: %s", e, exc_info=True)
+            log.error("Carousel processing failed: %s", e, exc_info=True)
 
         # Auto-recheck held stories older than 3 days (once per day)
         try:

@@ -6,7 +6,7 @@ articles/slides/*.png over plain HTTP. Exists so Instagram's Graph API
 our own infrastructure — no third-party image host, no bot token embedded in
 a URL handed to Meta. The bot service that handles the approve tap runs as a
 separate Railway service with its own filesystem, so it needs a URL, not a
-local path — see process_queued_slides() in engine/agents/orchestrator.py.
+local path — see process_queued_carousels() in engine/agents/orchestrator.py.
 """
 import http.server
 import logging
