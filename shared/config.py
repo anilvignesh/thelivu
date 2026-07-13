@@ -14,6 +14,15 @@ GEMINI_API_KEY    = os.environ.get("GEMINI_API_KEY", "")
 IG_USER_ID      = os.environ.get("IG_USER_ID", "")
 IG_ACCESS_TOKEN = os.environ.get("IG_ACCESS_TOKEN", "")
 
+# --- Slide file server (thelivu-agent only) ---
+# Public base URL the thelivu-agent service is reachable at (Railway →
+# thelivu-agent → Settings → Networking → Generate Domain). Rendered slide
+# PNGs are served from here so Instagram's image_url fetch never needs a
+# third-party host or an embedded secret. Port defaults to Railway's
+# convention of injecting PORT for services with public networking enabled.
+SLIDE_SERVER_BASE_URL = os.environ.get("SLIDE_SERVER_BASE_URL", "")
+SLIDE_SERVER_PORT = int(os.environ.get("PORT", "8080"))
+
 # --- Telegram ---
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 # Anil's private chat with the bot (for draft review)

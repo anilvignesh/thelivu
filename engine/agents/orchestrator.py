@@ -1682,7 +1682,7 @@ def process_queued_slides():
     'queued'), compose the on-slide copy via Claude (slide-composer), render
     the Dossier PNG, and send it to the owner's draft chat for approve/kill.
     Cheap no-op when nothing's queued. Mirrors process_recheck_requests."""
-    from shared.config import REPO_ROOT
+    from shared.config import REPO_ROOT, SLIDE_SERVER_BASE_URL
     from shared.db import get_queued_slide_runs, update_slide_run, get_run
     from publishing.slides import render_dossier_slide
 
@@ -1715,11 +1715,17 @@ def process_queued_slides():
                 {"text": "✗ Kill",              "callback_data": f"slidekill_{slide_id}"},
             ]]}
             caption = f"🖼 Slide for run #{slide['run_id']} — approve to post to Instagram."
-            # Sending to Telegram also gives us a public CDN URL for the same
-            # image (see _tg_post_photo) — this process and the bot that
-            # handles the approve tap are separate Railway services with
-            # separate filesystems, so a local path alone wouldn't cross over.
-            msg_id, image_url = _tg_post_photo(TELEGRAM_DRAFT_CHAT_ID, out_path, caption, keyboard)
+            # This process and the bot that handles the approve tap are
+            # separate Railway services with separate filesystems, so the bot
+            # needs a URL, not this local path. Prefer our own file server
+            # (publishing/fileserver.py, no third party involved) once
+            # SLIDE_SERVER_BASE_URL is set; until then fall back to Telegram's
+            # own CDN link for the same photo, so this never hard-blocks.
+            msg_id, tg_image_url = _tg_post_photo(TELEGRAM_DRAFT_CHAT_ID, out_path, caption, keyboard)
+            if SLIDE_SERVER_BASE_URL:
+                image_url = f"{SLIDE_SERVER_BASE_URL.rstrip('/')}/slide_{slide_id}.png"
+            else:
+                image_url = tg_image_url
             update_slide_run(slide_id, tg_msg_id=msg_id, image_url=image_url)
             log.info("Slide #%s ready for review (run #%s)", slide_id, slide["run_id"])
         except Exception as e:
