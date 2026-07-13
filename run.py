@@ -6,7 +6,7 @@ if service == "thelivu-agent":
     from engine.agents.orchestrator import run_daily_cycle, process_recheck_requests, process_queued_slides, send_cost_report, run_source_scout, run_story_scout, run_story_tracker, run_meta_synthesis, _cost_report_due
     import time, logging, sys
     from datetime import datetime, timezone, timedelta
-    from shared.config import ANTHROPIC_API_KEY, APPROVAL_MODE, TELEGRAM_BOT_TOKEN, TELEGRAM_DRAFT_CHAT_ID, CHECK_INTERVAL_HOURS
+    from shared.config import ANTHROPIC_API_KEY, APPROVAL_MODE, TELEGRAM_BOT_TOKEN, TELEGRAM_DRAFT_CHAT_ID, CHECK_INTERVAL_HOURS, REPO_ROOT, SLIDE_SERVER_BASE_URL, SLIDE_SERVER_PORT
     from shared.db import init_db, kv_get, kv_set, update_run
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", stream=sys.stdout)
@@ -16,6 +16,12 @@ if service == "thelivu-agent":
         log.error("ANTHROPIC_API_KEY not set."); sys.exit(1)
     if APPROVAL_MODE == "telegram" and (not TELEGRAM_BOT_TOKEN or not TELEGRAM_DRAFT_CHAT_ID):
         log.error("APPROVAL_MODE=telegram but Telegram vars not set."); sys.exit(1)
+
+    if SLIDE_SERVER_BASE_URL:
+        from publishing.fileserver import start as start_fileserver
+        start_fileserver(REPO_ROOT / "articles" / "slides", SLIDE_SERVER_PORT)
+    else:
+        log.info("SLIDE_SERVER_BASE_URL not set — slide images will fall back to Telegram's CDN URL.")
 
     from shared.db import clear_stale_agents, clear_stale_topics, get_held_runs
     init_db()
