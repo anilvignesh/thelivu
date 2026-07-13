@@ -5,9 +5,10 @@ Pure Pillow (no browser). This runs unattended on the orchestrator's Railway
 service on every article approval, so it deliberately avoids Playwright/
 Chromium — a headless-browser dependency would mean apt-level system packages
 in the build and a real chance of a broken deploy that's hard to debug
-remotely. Pillow is pure Python; fonts are bundled in publishing/fonts/ (SIL
-OFL-licensed Liberation family) so rendering never depends on what fonts (if
-any) happen to be installed in the container.
+remotely. Pillow is pure Python; fonts are bundled in publishing/fonts/
+(Liberation Serif for headlines, DejaVu Sans Mono for body/stamp/footer — both
+permissively licensed, see publishing/fonts/*.txt) so rendering never depends
+on what fonts (if any) happen to be installed in the container.
 
 Headline and sub-line are pulled from an approved article draft via
 publishing.parser (same parser telegram.py uses) so a slide always says the
@@ -32,8 +33,11 @@ PAD_X, PAD_TOP, PAD_BOTTOM = 90, 100, 90
 
 FONT_DIR = Path(__file__).parent / "fonts"
 SERIF_BOLD = FONT_DIR / "LiberationSerif-Bold.ttf"
-MONO       = FONT_DIR / "LiberationMono-Regular.ttf"
-MONO_BOLD  = FONT_DIR / "LiberationMono-Bold.ttf"
+# DejaVu Sans Mono, not Liberation Mono — Liberation Mono is missing ₹ (U+20B9)
+# and other currency/Indic-adjacent glyphs, which given this is Kerala/India
+# financial reporting shows up constantly (rendered as a tofu box otherwise).
+MONO       = FONT_DIR / "DejaVuSansMono.ttf"
+MONO_BOLD  = FONT_DIR / "DejaVuSansMono-Bold.ttf"
 
 PALETTE = {
     "light": {"bg": (230, 220, 195), "fg": (27, 23, 16),  "accent": (140, 42, 27)},
