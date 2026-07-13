@@ -54,6 +54,35 @@ def _create_container(image_url, caption):
     return data["id"]
 
 
+def _create_carousel_item(image_url):
+    r = requests.post(
+        f"{_API}/{IG_USER_ID}/media",
+        data={"image_url": image_url, "is_carousel_item": "true", "access_token": IG_ACCESS_TOKEN},
+        timeout=30,
+    )
+    data = r.json()
+    if "id" not in data:
+        raise IGPublishError(f"Carousel item creation failed: {data}")
+    return data["id"]
+
+
+def _create_carousel_container(child_ids, caption):
+    r = requests.post(
+        f"{_API}/{IG_USER_ID}/media",
+        data={
+            "media_type": "CAROUSEL",
+            "children": ",".join(child_ids),
+            "caption": caption,
+            "access_token": IG_ACCESS_TOKEN,
+        },
+        timeout=30,
+    )
+    data = r.json()
+    if "id" not in data:
+        raise IGPublishError(f"Carousel container creation failed: {data}")
+    return data["id"]
+
+
 def _wait_until_ready(container_id, attempts=10, delay=2):
     """Poll the container's status_code until FINISHED (or give up and try
     publishing anyway — single-image containers are usually ready instantly;
@@ -102,6 +131,24 @@ def publish_photo(image_url, caption=""):
     app isn't set up, or IGPublishError on any Graph API failure."""
     _require_config()
     container_id = _create_container(image_url, caption)
+    _wait_until_ready(container_id)
+    media_id = _publish_container(container_id)
+    return media_id, _permalink(media_id)
+
+
+def publish_carousel(image_urls, caption=""):
+    """Publish up to 10 images (already at public image_urls) as one
+    Instagram carousel post. Returns (media_id, permalink). Raises
+    IGNotConfigured if the Meta app isn't set up, or IGPublishError on any
+    Graph API failure (including a single bad child — the whole carousel is
+    one post, so a partial publish isn't meaningful)."""
+    _require_config()
+    if not 2 <= len(image_urls) <= 10:
+        raise IGPublishError(f"Carousel needs 2-10 images, got {len(image_urls)}")
+    child_ids = [_create_carousel_item(url) for url in image_urls]
+    for child_id in child_ids:
+        _wait_until_ready(child_id)
+    container_id = _create_carousel_container(child_ids, caption)
     _wait_until_ready(container_id)
     media_id = _publish_container(container_id)
     return media_id, _permalink(media_id)

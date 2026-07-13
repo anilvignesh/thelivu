@@ -29,7 +29,7 @@ from shared.config import (
     TELEGRAM_DRAFT_CHAT_ID,
     CONTACT_HANDLE,
 )
-from shared.db import get_run, get_pending_runs, get_cost_report_data, get_queue_state, kv_get, kv_set, init_db, save_publication, update_run, queue_topic, approve_proposal, skip_proposal, reset_run_for_review, get_recheckable_runs, clear_agents_for_run, clear_stale_agents, clear_stale_topics, deactivate_approved_source, get_approved_sources, queue_slide_run, get_slide_run, update_slide_run
+from shared.db import get_run, get_pending_runs, get_cost_report_data, get_queue_state, kv_get, kv_set, init_db, save_publication, update_run, queue_topic, approve_proposal, skip_proposal, reset_run_for_review, get_recheckable_runs, clear_agents_for_run, clear_stale_agents, clear_stale_topics, deactivate_approved_source, get_approved_sources, queue_carousel_run, get_carousel_run, update_carousel_run, get_carousel_slides
 
 logging.basicConfig(
     level=logging.INFO,
@@ -947,20 +947,20 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         await _handle_deactivatesrc(query, src_id)
         return
-    if action in ("slideapprove", "slidekill"):
+    if action in ("carouselapprove", "carouselkill"):
         try:
-            slide_id = int(payload)
+            carousel_id = int(payload)
         except ValueError:
-            await query.message.reply_text("Bad slide ID.")
+            await query.message.reply_text("Bad carousel ID.")
             return
-        slide = get_slide_run(slide_id)
-        if slide is None:
-            await query.message.reply_text(f"Slide #{slide_id} not found in database.")
+        carousel = get_carousel_run(carousel_id)
+        if carousel is None:
+            await query.message.reply_text(f"Carousel #{carousel_id} not found in database.")
             return
-        if action == "slideapprove":
-            await _handle_slide_approve(query, slide_id, slide)
+        if action == "carouselapprove":
+            await _handle_carousel_approve(query, carousel_id, carousel)
         else:
-            await _handle_slide_kill(query, slide_id)
+            await _handle_carousel_kill(query, carousel_id)
         return
 
     # All remaining actions operate on a pipeline run
@@ -1074,11 +1074,12 @@ async def _handle_approve(query, run_id, run):
     # chunked plain-text post — approval must never hard-fail.
     prepared = _prepare_for_publish(draft)
     how = "teaser"
+    article_url = ""
     try:
         import publishing.telegram as tg_render
-        teaser, url = tg_render.render(prepared, CONTACT_HANDLE)
+        teaser, article_url = tg_render.render(prepared, CONTACT_HANDLE)
         msg_ids = _post_html_to_channel(teaser)
-        log.info("Published run #%d via Telegraph: %s", run_id, url)
+        log.info("Published run #%d via Telegraph: %s", run_id, article_url)
     except Exception as e:
         log.warning("Telegraph path failed for run #%d (%s) — falling back to plain text", run_id, e)
         how = "plain-text"
@@ -1114,14 +1115,16 @@ async def _handle_approve(query, run_id, run):
     )
     log.info("Published run #%d (%s, %d msgs)", run_id, how, len(msg_ids))
 
-    # Queue the Instagram slide for this article. The orchestrator (not this
-    # bot process) does the actual composing/rendering on its next tick and
-    # sends the slide back here for a separate approve/kill.
+    # Queue the Instagram carousel for this article. The orchestrator (not
+    # this bot process) does the actual composing/rendering on its next tick
+    # and sends the carousel back here for a separate approve/kill. article_url
+    # (the Telegraph page, if that path succeeded) rides along so the final IG
+    # caption can point back to the full story.
     try:
-        slide_id = queue_slide_run(run_id)
-        log.info("Queued slide #%d for run #%d", slide_id, run_id)
+        carousel_id = queue_carousel_run(run_id, article_url=article_url)
+        log.info("Queued carousel #%d for run #%d", carousel_id, run_id)
     except Exception as e:
-        log.error("Failed to queue slide for run #%d: %s", run_id, e)
+        log.error("Failed to queue carousel for run #%d: %s", run_id, e)
 
 
 async def _handle_kill(query, run_id):
@@ -1151,17 +1154,22 @@ async def _handle_hold(query, run_id):
     log.info("Held run #%d", run_id)
 
 
-async def _handle_slide_approve(query, slide_id, slide):
-    if slide["status"] == "posted":
-        await query.message.reply_text(f"Slide #{slide_id} was already posted.")
+async def _handle_carousel_approve(query, carousel_id, carousel):
+    if carousel["status"] == "posted":
+        await query.message.reply_text(f"Carousel #{carousel_id} was already posted.")
         return
-    # image_url is uploaded once by the orchestrator right after rendering —
-    # this bot runs as a separate Railway service with its own filesystem, so
-    # it can't read a local image_path written by that process. See
-    # process_queued_slides() in engine/agents/orchestrator.py.
-    image_url = slide.get("image_url")
-    if not image_url:
-        await query.message.reply_text(f"Slide #{slide_id} has no hosted image yet. Try again shortly.")
+
+    # image_url per slide is hosted by the orchestrator right after rendering
+    # (self-hosted file server) — this bot runs as a separate Railway service
+    # with its own filesystem, so it can't read local image_paths written by
+    # that process. See process_queued_carousels() in engine/agents/orchestrator.py.
+    slides = get_carousel_slides(carousel_id)
+    image_urls = [s["image_url"] for s in slides if s.get("image_url")]
+    if len(image_urls) != len(slides) or not image_urls:
+        await query.message.reply_text(
+            f"Carousel #{carousel_id} has {len(slides)} slides but only {len(image_urls)} hosted "
+            f"images. Try again shortly, or check SLIDE_SERVER_BASE_URL is set."
+        )
         return
 
     try:
@@ -1171,35 +1179,35 @@ async def _handle_slide_approve(query, slide_id, slide):
 
     from shared.config import IG_USER_ID, IG_ACCESS_TOKEN
     if not IG_USER_ID or not IG_ACCESS_TOKEN:
-        update_slide_run(slide_id, status="approved_manual")
+        update_carousel_run(carousel_id, status="approved_manual")
         await query.message.reply_text(
-            f"Slide #{slide_id} approved — but Instagram isn't configured yet "
+            f"Carousel #{carousel_id} approved — but Instagram isn't configured yet "
             f"(set IG_USER_ID / IG_ACCESS_TOKEN once the Meta app is ready). "
-            f"The image is above in this chat — post it manually for now."
+            f"The slides are above in this chat — post them manually for now."
         )
         return
 
-    from publishing.instagram import publish_photo
+    from publishing.instagram import publish_carousel
     try:
-        caption = slide.get("headline") or ""
-        media_id, permalink = publish_photo(image_url, caption)
-        update_slide_run(slide_id, status="posted", ig_media_id=media_id, ig_permalink=permalink)
+        caption = carousel.get("caption") or ""
+        media_id, permalink = publish_carousel(image_urls, caption)
+        update_carousel_run(carousel_id, status="posted", ig_media_id=media_id, ig_permalink=permalink)
         link_line = f"\n{permalink}" if permalink else ""
-        await query.message.reply_text(f"Posted slide #{slide_id} to Instagram ✓{link_line}")
-        log.info("Posted slide #%d to Instagram (media %s)", slide_id, media_id)
+        await query.message.reply_text(f"Posted {len(image_urls)}-slide carousel #{carousel_id} to Instagram ✓{link_line}")
+        log.info("Posted carousel #%d to Instagram (media %s)", carousel_id, media_id)
     except Exception as e:
-        log.error("Instagram publish failed for slide #%d: %s", slide_id, e)
-        await query.message.reply_text(f"Instagram publish failed for slide #{slide_id}: {e}")
+        log.error("Instagram publish failed for carousel #%d: %s", carousel_id, e)
+        await query.message.reply_text(f"Instagram publish failed for carousel #{carousel_id}: {e}")
 
 
-async def _handle_slide_kill(query, slide_id):
-    update_slide_run(slide_id, status="killed")
+async def _handle_carousel_kill(query, carousel_id):
+    update_carousel_run(carousel_id, status="killed")
     try:
         await query.edit_message_reply_markup(reply_markup=None)
     except Exception:
         pass
-    await query.message.reply_text(f"Slide #{slide_id} killed.")
-    log.info("Killed slide #%d", slide_id)
+    await query.message.reply_text(f"Carousel #{carousel_id} killed.")
+    log.info("Killed carousel #%d", carousel_id)
 
 
 # ---------------------------------------------------------------------------

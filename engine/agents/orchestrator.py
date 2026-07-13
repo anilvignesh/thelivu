@@ -74,7 +74,7 @@ _M_VERDICT  = r"VERDICT:\s*(PURSUE|DROP)"
 # Anchored to a real heading at line start — a conversational "I'm ready to build
 # the Evidence Dossier…" must NOT pass (that was the run #18 poisoning vector).
 _M_DOSSIER  = r"^#{1,3}\s+(Evidence Dossier|Claims|Handoff note)"
-_M_SLIDE    = r"^HEADLINE:\s*.+"
+_M_CAROUSEL = r"^SLIDE\s+1:\s*.+"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -325,6 +325,40 @@ def _tg_file_url(file_id):
     r.raise_for_status()
     file_path = r.json()["result"]["file_path"]
     return f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_path}"
+
+
+def _tg_post_media_group(chat_id, photo_paths, caption, reply_markup):
+    """Send up to 10 local images as one Telegram album (sendMediaGroup), then
+    a separate follow-up text message carrying the Approve/Kill buttons —
+    Telegram's API doesn't allow reply_markup on sendMediaGroup itself.
+    Returns the button message's id (that's the one the callback handler
+    needs to clear after a tap)."""
+    photo_paths = photo_paths[:10]
+    files = {}
+    media = []
+    opened = []
+    try:
+        for i, path in enumerate(photo_paths):
+            f = open(path, "rb")
+            opened.append(f)
+            key = f"photo{i}"
+            files[key] = f
+            media.append({"type": "photo", "media": f"attach://{key}"})
+        r = requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMediaGroup",
+            data={"chat_id": str(chat_id), "media": json.dumps(media)},
+            files=files,
+            timeout=60,
+        )
+        r.raise_for_status()
+    except Exception as e:
+        log.error("Telegram media group send failed: %s", e)
+        return None
+    finally:
+        for f in opened:
+            f.close()
+
+    return _tg_post(chat_id, caption, reply_markup=reply_markup)
 
 
 def _tg_send_long(chat_id, text):
@@ -1662,76 +1696,84 @@ def process_recheck_requests():
             update_run(run["id"], status="held")  # leave it holdable
 
 
-def _parse_slide_fields(text):
-    """Pull HEADLINE/SUB/STAMP/DARK out of slide-composer's structured output."""
+def _parse_carousel_fields(text):
+    """Pull DARK/STAMP/SLIDE 1..N out of carousel-composer's structured output."""
     def field(name, default=""):
         m = re.search(rf"^{name}:\s*(.+)$", text or "", re.IGNORECASE | re.MULTILINE)
         return m.group(1).strip() if m else default
 
-    headline = field("HEADLINE")
-    sub = field("SUB")
-    if sub.lower() in ("(none)", "none", "-", ""):
-        sub = ""
-    stamp = field("STAMP", "VERIFIED")
     dark = field("DARK", "false").strip().lower() == "true"
-    return headline, sub, stamp, dark
+    stamp = field("STAMP", "VERIFIED")
+    slides = []
+    for m in re.finditer(r"^SLIDE\s+(\d+):\s*(.+)$", text or "", re.IGNORECASE | re.MULTILINE):
+        slides.append((int(m.group(1)), m.group(2).strip()))
+    slides.sort(key=lambda s: s[0])
+    return dark, stamp, [text for _, text in slides]
 
 
-def process_queued_slides():
-    """Pick up slides queued by an article approval (slide_runs status
-    'queued'), compose the on-slide copy via Claude (slide-composer), render
-    the Dossier PNG, and send it to the owner's draft chat for approve/kill.
-    Cheap no-op when nothing's queued. Mirrors process_recheck_requests."""
+def process_queued_carousels():
+    """Pick up carousels queued by an article approval (carousel_runs status
+    'queued'), compose the slide breakdown via Claude (carousel-composer),
+    render each slide, send the set to the owner's draft chat as one Telegram
+    album plus an Approve/Kill message. Cheap no-op when nothing's queued.
+    Mirrors process_recheck_requests."""
     from shared.config import REPO_ROOT, SLIDE_SERVER_BASE_URL
-    from shared.db import get_queued_slide_runs, update_slide_run, get_run
+    from shared.db import (
+        get_queued_carousel_runs, update_carousel_run, add_carousel_slide, get_run,
+    )
     from publishing.slides import render_dossier_slide
 
-    for slide in get_queued_slide_runs():
-        slide_id = slide["id"]
-        run = get_run(slide["run_id"])
+    for carousel in get_queued_carousel_runs():
+        carousel_id = carousel["id"]
+        run = get_run(carousel["run_id"])
         if run is None or not run.get("draft_text"):
-            log.error("Slide #%s: parent run #%s missing draft_text", slide_id, slide["run_id"])
-            update_slide_run(slide_id, status="failed")
+            log.error("Carousel #%s: parent run #%s missing draft_text", carousel_id, carousel["run_id"])
+            update_carousel_run(carousel_id, status="failed")
             continue
 
-        update_slide_run(slide_id, status="composing")
+        update_carousel_run(carousel_id, status="composing")
         try:
             composed = run_structured_skill(
-                "slide-composer", run["draft_text"], marker=_M_SLIDE, run_id=slide["run_id"])
-            headline, sub, stamp, dark = _parse_slide_fields(composed)
-            if not headline:
-                raise ValueError("slide-composer returned no HEADLINE")
+                "carousel-composer", run["draft_text"], marker=_M_CAROUSEL, run_id=carousel["run_id"])
+            dark, stamp, slide_texts = _parse_carousel_fields(composed)
+            if not slide_texts:
+                raise ValueError("carousel-composer returned no SLIDE lines")
 
             out_dir = REPO_ROOT / "articles" / "slides"
             out_dir.mkdir(parents=True, exist_ok=True)
-            out_path = str(out_dir / f"slide_{slide_id}.png")
-            render_dossier_slide(headline, sub=sub, stamp=stamp, dark=dark, out=out_path)
+            n = len(slide_texts)
+            image_urls = []
+            for i, headline in enumerate(slide_texts, start=1):
+                slide_stamp = stamp if i == 1 else f"{i}/{n}"
+                out_path = str(out_dir / f"carousel_{carousel_id}_{i}.png")
+                render_dossier_slide(headline, stamp=slide_stamp, dark=dark, out=out_path)
+                image_url = (
+                    f"{SLIDE_SERVER_BASE_URL.rstrip('/')}/carousel_{carousel_id}_{i}.png"
+                    if SLIDE_SERVER_BASE_URL else ""
+                )
+                add_carousel_slide(carousel_id, i, headline, image_path=out_path, image_url=image_url)
+                image_urls.append((out_path, image_url))
 
-            update_slide_run(slide_id, headline=headline, sub=sub, stamp=stamp,
-                             dark=dark, image_path=out_path, status="pending_review")
+            article_url = carousel.get("article_url") or ""
+            caption_bits = [run.get("throughline") or ""]
+            if article_url:
+                caption_bits.append(f"Full story & sources: {article_url}")
+            caption = "\n\n".join(b for b in caption_bits if b)[:2200]
+            update_carousel_run(carousel_id, caption=caption, status="pending_review")
 
             keyboard = {"inline_keyboard": [[
-                {"text": "✓ Post to Instagram", "callback_data": f"slideapprove_{slide_id}"},
-                {"text": "✗ Kill",              "callback_data": f"slidekill_{slide_id}"},
+                {"text": "✓ Post carousel to Instagram", "callback_data": f"carouselapprove_{carousel_id}"},
+                {"text": "✗ Kill",                        "callback_data": f"carouselkill_{carousel_id}"},
             ]]}
-            caption = f"🖼 Slide for run #{slide['run_id']} — approve to post to Instagram."
-            # This process and the bot that handles the approve tap are
-            # separate Railway services with separate filesystems, so the bot
-            # needs a URL, not this local path. Prefer our own file server
-            # (publishing/fileserver.py, no third party involved) once
-            # SLIDE_SERVER_BASE_URL is set; until then fall back to Telegram's
-            # own CDN link for the same photo, so this never hard-blocks.
-            msg_id, tg_image_url = _tg_post_photo(TELEGRAM_DRAFT_CHAT_ID, out_path, caption, keyboard)
-            if SLIDE_SERVER_BASE_URL:
-                image_url = f"{SLIDE_SERVER_BASE_URL.rstrip('/')}/slide_{slide_id}.png"
-            else:
-                image_url = tg_image_url
-            update_slide_run(slide_id, tg_msg_id=msg_id, image_url=image_url)
-            log.info("Slide #%s ready for review (run #%s)", slide_id, slide["run_id"])
+            album_caption = f"🖼 {n}-slide carousel for run #{carousel['run_id']} — approve to post to Instagram."
+            msg_id = _tg_post_media_group(
+                TELEGRAM_DRAFT_CHAT_ID, [p for p, _ in image_urls], album_caption, keyboard)
+            update_carousel_run(carousel_id, tg_msg_id=msg_id)
+            log.info("Carousel #%s ready for review (run #%s, %d slides)", carousel_id, carousel["run_id"], n)
         except Exception as e:
-            log.error("Slide composition failed for slide #%s: %s", slide_id, e, exc_info=True)
-            update_slide_run(slide_id, status="failed")
-            _notify(f"⚠️ Slide generation failed for run #{slide['run_id']} (slide #{slide_id}): {e}")
+            log.error("Carousel composition failed for #%s: %s", carousel_id, e, exc_info=True)
+            update_carousel_run(carousel_id, status="failed")
+            _notify(f"⚠️ Carousel generation failed for run #{carousel['run_id']} (carousel #{carousel_id}): {e}")
 
 
 def _cost_report_due(now_utc):
