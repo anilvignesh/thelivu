@@ -284,7 +284,12 @@ def _tg_post(chat_id, text, reply_markup=None, parse_mode=None):
 
 
 def _tg_post_photo(chat_id, photo_path, caption="", reply_markup=None):
-    """Send a local image file as a Telegram photo message. Returns message_id."""
+    """Send a local image file as a Telegram photo message. Returns
+    (message_id, file_url) — file_url is Telegram's own CDN link for the
+    largest photo size Telegram generated, reusable as a public image_url
+    elsewhere (Instagram's Graph API needs one). Telegraph's unofficial
+    upload endpoint proved too unreliable ("Unknown error" on valid images)
+    to depend on for this."""
     payload = {"chat_id": str(chat_id)}
     if caption:
         payload["caption"] = caption[:1024]
@@ -299,10 +304,27 @@ def _tg_post_photo(chat_id, photo_path, caption="", reply_markup=None):
                 timeout=30,
             )
         r.raise_for_status()
-        return r.json().get("result", {}).get("message_id")
+        result = r.json().get("result", {})
+        message_id = result.get("message_id")
+        photos = result.get("photo") or []
+        file_id = photos[-1]["file_id"] if photos else None
+        file_url = _tg_file_url(file_id) if file_id else None
+        return message_id, file_url
     except Exception as e:
         log.error("Telegram photo send failed: %s", e)
-        return None
+        return None, None
+
+
+def _tg_file_url(file_id):
+    """Resolve a Telegram file_id to its public CDN URL."""
+    r = requests.get(
+        f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getFile",
+        params={"file_id": file_id},
+        timeout=15,
+    )
+    r.raise_for_status()
+    file_path = r.json()["result"]["file_path"]
+    return f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_path}"
 
 
 def _tg_send_long(chat_id, text):
@@ -1663,7 +1685,6 @@ def process_queued_slides():
     from shared.config import REPO_ROOT
     from shared.db import get_queued_slide_runs, update_slide_run, get_run
     from publishing.slides import render_dossier_slide
-    from publishing.telegraph import upload_image
 
     for slide in get_queued_slide_runs():
         slide_id = slide["id"]
@@ -1686,23 +1707,20 @@ def process_queued_slides():
             out_path = str(out_dir / f"slide_{slide_id}.png")
             render_dossier_slide(headline, sub=sub, stamp=stamp, dark=dark, out=out_path)
 
-            # Upload now, from this process — the bot that handles the approve
-            # tap runs as a SEPARATE Railway service with its own filesystem
-            # and can't see a local path written here. The bot only ever needs
-            # a URL it can hand straight to Instagram's image_url parameter.
-            image_url = upload_image(out_path)
-
             update_slide_run(slide_id, headline=headline, sub=sub, stamp=stamp,
-                             dark=dark, image_path=out_path, image_url=image_url,
-                             status="pending_review")
+                             dark=dark, image_path=out_path, status="pending_review")
 
             keyboard = {"inline_keyboard": [[
                 {"text": "✓ Post to Instagram", "callback_data": f"slideapprove_{slide_id}"},
                 {"text": "✗ Kill",              "callback_data": f"slidekill_{slide_id}"},
             ]]}
             caption = f"🖼 Slide for run #{slide['run_id']} — approve to post to Instagram."
-            msg_id = _tg_post_photo(TELEGRAM_DRAFT_CHAT_ID, out_path, caption, keyboard)
-            update_slide_run(slide_id, tg_msg_id=msg_id)
+            # Sending to Telegram also gives us a public CDN URL for the same
+            # image (see _tg_post_photo) — this process and the bot that
+            # handles the approve tap are separate Railway services with
+            # separate filesystems, so a local path alone wouldn't cross over.
+            msg_id, image_url = _tg_post_photo(TELEGRAM_DRAFT_CHAT_ID, out_path, caption, keyboard)
+            update_slide_run(slide_id, tg_msg_id=msg_id, image_url=image_url)
             log.info("Slide #%s ready for review (run #%s)", slide_id, slide["run_id"])
         except Exception as e:
             log.error("Slide composition failed for slide #%s: %s", slide_id, e, exc_info=True)
