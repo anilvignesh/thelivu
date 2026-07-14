@@ -85,6 +85,10 @@ def parse_article(md):
     The H1 title is pulled out (it becomes the page title, not body content). The
     first H2 is the hook; it stays in the body too. Confidence is read from the
     '*Confidence: X — …*' line, defaulting to Developing.
+
+    If the draft has no H1 at all (the writer sometimes headlines with '##' —
+    run #53 shipped to Telegraph titled just 'Thelivu' that way), the first
+    heading of any level is promoted to the title and removed from the body.
     """
     title = ""
     hook = ""
@@ -104,6 +108,15 @@ def parse_article(md):
                 conf_emoji = _CONF_EMOJI.get(conf_label.lower(), _DEFAULT_CONF[1])
         out_blocks.append(b)
 
+    if not title:
+        for b in out_blocks:
+            if b.type == "heading":
+                title = strip_inline(b.text)
+                out_blocks.remove(b)  # promoted to title; not body content
+                if hook == title:
+                    hook = ""  # was the same heading; recompute below
+                break
+
     if not hook:
         for b in out_blocks:
             if b.type == "paragraph" and not b.text.lstrip().startswith("*"):
@@ -111,3 +124,26 @@ def parse_article(md):
                 break
 
     return Article(title, hook, conf_label, conf_emoji, out_blocks)
+
+
+def strip_scaffolding(md):
+    """Drop the writer's review-only header ('# DRAFT — for human review',
+    sometimes inside a code fence, plus leading blanks) so it never becomes a
+    title or reaches a reader. The single shared implementation — the bot's
+    publish path and the orchestrator's preview path both go through this."""
+    lines = (md or "").strip().splitlines()
+    i = 0
+    while i < len(lines):
+        s = lines[i].strip()
+        if s == "" or s.startswith("```") or ("DRAFT" in s.upper() and "HUMAN REVIEW" in s.upper()):
+            i += 1
+            continue
+        break
+    return "\n".join(lines[i:]).strip()
+
+
+def extract_headline(raw_md):
+    """The article's real headline from a raw (unstripped) draft — never the
+    scaffolding header or the italic 'From Thelivu' preamble. '' if the draft
+    has no heading at all."""
+    return parse_article(strip_scaffolding(raw_md)).title
