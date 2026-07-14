@@ -70,17 +70,25 @@ _PAGE = """<!DOCTYPE html>
 """
 
 
-def render(links):
-    """links: rows from shared.db.list_bio_links() (already in page order)."""
-    if not links:
+def render(links, channel_url=""):
+    """links: rows from shared.db.list_bio_links() (already in page order).
+    channel_url: the channel's public join link (config.CHANNEL_PUBLIC_URL) —
+    part of the page template rather than a bio_links row, so the one permanent
+    brand link can't be /dellink'ed or unpinned by accident."""
+    items = []
+    if channel_url:
+        items.append(
+            f'<li class="pinned"><a class="link" href="{html.escape(channel_url, quote=True)}">'
+            f'Join the Telegram channel</a></li>'
+        )
+    for link in links:
+        cls = ' class="pinned"' if link.get("pinned") else ""
+        items.append(
+            f'<li{cls}><a class="link" href="{html.escape(link["url"], quote=True)}">'
+            f'{html.escape(link["title"] or link["url"])}</a></li>'
+        )
+    if not items:
         body = '<p class="empty">First stories coming soon.</p>'
     else:
-        items = []
-        for link in links:
-            cls = ' class="pinned"' if link.get("pinned") else ""
-            items.append(
-                f'<li{cls}><a class="link" href="{html.escape(link["url"], quote=True)}">'
-                f'{html.escape(link["title"] or link["url"])}</a></li>'
-            )
         body = "<ul>\n" + "\n".join(items) + "\n</ul>"
     return _PAGE.format(body=body)

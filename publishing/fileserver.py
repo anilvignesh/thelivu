@@ -27,8 +27,9 @@ def _make_handler(slides_dir):
             if name in ("", "bio"):
                 try:
                     from publishing.biopage import render
+                    from shared.config import CHANNEL_PUBLIC_URL
                     from shared.db import list_bio_links
-                    page = render(list_bio_links()).encode("utf-8")
+                    page = render(list_bio_links(), CHANNEL_PUBLIC_URL).encode("utf-8")
                 except Exception as e:
                     log.error("Bio page render failed: %s", e)
                     self.send_response(500)

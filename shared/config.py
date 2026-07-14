@@ -32,6 +32,10 @@ TELEGRAM_CHANNEL_ID = os.environ.get("TELEGRAM_CHANNEL_ID", "")
 # Contact handle that fills the "[contact]" placeholder in the published footer
 # (corrections / grievances). Override via env; defaults to the owner's handle.
 CONTACT_HANDLE = os.environ.get("CONTACT_HANDLE", "@Blazedddddd")
+# Public join link for the channel (https://t.me/<handle>), shown as a permanent
+# button at the top of the bio page. Blank until the channel has a public
+# @username — the numeric TELEGRAM_CHANNEL_ID is not a linkable URL.
+CHANNEL_PUBLIC_URL = os.environ.get("CHANNEL_PUBLIC_URL", "")
 
 # --- Optional web search ---
 # Leave blank to use DuckDuckGo (free, no key). Set to use Brave Search.
