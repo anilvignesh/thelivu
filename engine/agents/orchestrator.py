@@ -907,8 +907,16 @@ def _newsworthiness_verdict(selected):
         f"Source: {selected.get('source', '')}\n"
         "Claims: " + "; ".join(c.get("text", "")[:120] for c in selected.get("claims", [])[:5])
     )
+    priors_block = ""
     try:
-        out = run_skill("newsworthiness-gate", f"SELECTED LEAD:\n\n{lead}", max_tokens=200)
+        from engine.agents.learning import format_priors_block
+        priors_block = format_priors_block()
+        if priors_block:
+            priors_block = "\n\n" + priors_block
+    except Exception as e:
+        log.warning("Learned priors unavailable for gate: %s", e)
+    try:
+        out = run_skill("newsworthiness-gate", f"SELECTED LEAD:\n\n{lead}{priors_block}", max_tokens=200)
     except Exception as e:
         log.warning("Newsworthiness gate failed (%s) — defaulting to PURSUE", e)
         return True, "gate error — defaulted to pursue"
@@ -1183,6 +1191,16 @@ def run_daily_cycle():
             lines.append(f"  {r['source']}: {r['total']} stories, {pct}% verified, {r['killed']} killed")
         reliability_ctx = "\n".join(lines) + "\n\nUse this to weight leads — prefer sources with higher verified rates.\n\n"
 
+    # Learned priors: the engine's own outcome history as an advisory signal
+    # (docs/learning-loop.md). Selection bias only — never verification.
+    try:
+        from engine.agents.learning import format_priors_block
+        priors_block = format_priors_block()
+        if priors_block:
+            reliability_ctx += priors_block + "\n\n"
+    except Exception as e:
+        log.warning("Learned priors unavailable: %s", e)
+
     # Archive context so the monitor doesn't re-select a story we've already run.
     published_ctx = _published_context(
         header="ALREADY PUBLISHED — do not pick a lead that merely repeats one of these:")
@@ -1320,21 +1338,34 @@ def run_daily_cycle():
 # Source scout (runs weekly, proposes new sources via Telegram)
 # ---------------------------------------------------------------------------
 
-def run_story_scout():
-    """Weekly dig: pick one watchlist theme and produce a dig brief via story-scout."""
-    log.info("Running story-scout on watchlist...")
+def run_story_scout(theme_hint=None):
+    """Dig brief via story-scout. Weekly it picks the ripest watchlist theme
+    itself; with theme_hint (the owner's /dig command) it targets that theme."""
+    log.info("Running story-scout on watchlist%s...",
+             f" (targeted: {theme_hint})" if theme_hint else "")
     try:
         watchlist_text = WATCHLIST_YAML.read_text() if WATCHLIST_YAML.exists() else "(no watchlist yet)"
     except Exception:
         watchlist_text = "(watchlist unreadable)"
 
-    prompt = (
-        "Run the weekly story scout. Pick the highest-priority theme from the "
-        "watchlist below that doesn't already have a story in progress, form a "
-        "sharp falsifiable question, identify the primary records to pull, and "
-        "output a dig brief.\n\n"
-        f"WATCHLIST:\n{watchlist_text}"
-    )
+    if theme_hint:
+        prompt = (
+            f"Run a TARGETED dig on this specific theme: {theme_hint}\n\n"
+            "Use the matching watchlist entry below (kerala_anchor, primary_records, "
+            "discipline_note) if one exists. Form a sharp falsifiable question, "
+            "identify the primary records to pull, and output a dig brief. Respect "
+            "the discipline note exactly — documented facts and contested processes, "
+            "never asserted wrongdoing.\n\n"
+            f"WATCHLIST:\n{watchlist_text}"
+        )
+    else:
+        prompt = (
+            "Run the weekly story scout. Pick the highest-priority theme from the "
+            "watchlist below that doesn't already have a story in progress, form a "
+            "sharp falsifiable question, identify the primary records to pull, and "
+            "output a dig brief.\n\n"
+            f"WATCHLIST:\n{watchlist_text}"
+        )
     try:
         brief = run_skill("story-scout", prompt)
         log.info("Story scout complete.")

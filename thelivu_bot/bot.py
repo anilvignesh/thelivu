@@ -323,6 +323,34 @@ async def cmd_scoutnow(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log.info("Source scout signalled via /scoutnow")
 
 
+async def cmd_dig(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Signal a targeted story-scout dig on a watchlist theme (or free text).
+    No argument = the ripe default: Adani infrastructure concentration,
+    anchored on Vizhinjam."""
+    theme = " ".join(context.args).strip() if context.args else ""
+    if not theme:
+        theme = "infrastructure-concentration — Adani infrastructure footprint, anchored on Vizhinjam International Seaport"
+    kv_set("dig_request", theme)
+    await update.message.reply_text(
+        f"Dig signalled: {theme}\n\n"
+        "The agent will produce a dig brief within ~2 minutes — it arrives here "
+        "with an 'Investigate this now' button. Tapping that runs the full "
+        "verification pipeline; the draft still ends at your approve/kill gate."
+    )
+    log.info("Targeted dig signalled via /dig: %s", theme)
+
+
+async def cmd_priors(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show what the learning loop currently believes (docs/learning-loop.md)."""
+    from engine.agents.learning import format_priors_block
+    block = format_priors_block()
+    await update.message.reply_text(
+        block if block else
+        "Not enough outcome history yet for any learned signal (features need "
+        "an effective n ≥ 1.5). This fills in as stories get published/killed."
+    )
+
+
 async def cmd_track(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show live status of the most recent pipeline run or a specific run ID."""
     from shared.db import _conn, _is_postgres
@@ -462,6 +490,8 @@ KEY COMMANDS:
 /pending — everything waiting on you, one card
 /drafts /held /queue /status — what's in the pipeline
 /topic [text] — submit a story idea
+/dig [theme] — targeted watchlist dig (default: Vizhinjam/Adani)
+/priors — what the learning loop currently believes
 /links /addlink /dellink /pinlink — manage the bio page
 /cost /stats — spend and lifetime numbers
 Full manual: MANUAL.md in the repo."""
@@ -1385,6 +1415,8 @@ def main():
     app.add_handler(CommandHandler("track", cmd_track))
     app.add_handler(CommandHandler("feeds", cmd_feeds))
     app.add_handler(CommandHandler("addfeed", cmd_addfeed))
+    app.add_handler(CommandHandler("dig", cmd_dig))
+    app.add_handler(CommandHandler("priors", cmd_priors))
     app.add_handler(CommandHandler("pending", cmd_pending))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("links", cmd_links))
