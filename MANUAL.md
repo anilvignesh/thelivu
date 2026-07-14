@@ -126,6 +126,8 @@ for the design.
 
 | Command | What it does |
 |---------|-------------|
+| `/pending` | Everything waiting on your decision (drafts, carousels, held, proposals) in one card |
+| `/help` | Legend: what each card type means + key commands |
 | `/status` | Pipeline health: active agents, ghost count, stuck topics, latest run |
 | `/queue` | What's queued: owner topics + last 5 pipeline runs + next cycle timing |
 | `/leads` | Peek at the current lead queue (up to 10 leads) |
