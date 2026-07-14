@@ -1335,6 +1335,28 @@ def mark_carousel_cleaned(carousel_id):
         conn.close()
 
 
+def get_pending_carousels():
+    """Carousels rendered and waiting for the owner's post/kill tap."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM carousel_runs WHERE status = 'pending_review' ORDER BY id")
+        return _fetchall(cur)
+    finally:
+        conn.close()
+
+
+def get_pending_proposals():
+    """Source-scout proposals the owner hasn't approved/skipped yet."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM source_proposals WHERE status = 'pending' ORDER BY id")
+        return _fetchall(cur)
+    finally:
+        conn.close()
+
+
 def set_run_slug(run_id, slug):
     conn = _conn()
     try:

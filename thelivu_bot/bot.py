@@ -409,6 +409,68 @@ async def cmd_addfeed(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log.info("Source evaluation queued: %s", url)
 
 
+async def cmd_pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Everything currently waiting on the owner's decision, in one card —
+    the antidote to decisions drowning in the FYI stream."""
+    from shared.db import get_pending_carousels, get_pending_proposals
+    drafts = get_pending_runs()
+    held = get_recheckable_runs()
+    carousels = get_pending_carousels()
+    proposals = get_pending_proposals()
+
+    if not (drafts or held or carousels or proposals):
+        await update.message.reply_text("Nothing is waiting on you. ✓")
+        return
+
+    lines = ["⏳ Waiting on your decision:", ""]
+    if drafts:
+        lines.append(f"📰 Drafts to review — {len(drafts)} (tap buttons on their cards, or /drafts to resend):")
+        lines += [f"  #{r['id']} {(r.get('throughline') or 'Untitled')[:70]}" for r in drafts]
+        lines.append("")
+    if carousels:
+        lines.append(f"🖼 Carousels to post/kill — {len(carousels)} (buttons are under each album):")
+        lines += [f"  carousel #{c['id']} for run #{c['run_id']}" for c in carousels]
+        lines.append("")
+    if held:
+        lines.append(f"⏸ Held stories — {len(held)} (auto-recheck after 3 days, or /recheck [id]):")
+        lines += [f"  #{r['id']} {(r.get('throughline') or 'Untitled')[:70]}" for r in held[:10]]
+        lines.append("")
+    if proposals:
+        lines.append(f"📡 Source proposals — {len(proposals)} (buttons on their cards):")
+        lines += [f"  #{p['id']} {p.get('name') or '?'}" for p in proposals]
+    await update.message.reply_text("\n".join(lines).strip())
+
+
+_HELP_TEXT = """What this chat sends you, and what to do with it.
+
+NEEDS YOUR TAP (buttons on the card):
+📰 New story ready — the draft card. Read the draft link, then Approve (posts to channel + bio page + queues a carousel), Kill (discard), or Hold (retry in 3 days).
+🔄 Re-checked story — a held story re-investigated; same three buttons.
+🖼 Carousel — the slide album; approve posts it to Instagram.
+📡 Source proposal — the scout suggests a feed; approve or skip.
+
+FYI ONLY (the engine explaining itself, no action needed):
+❌ Killed / ⏸ Held — the trust gate stopped a story; reason on the card, full report linked.
+🗑 Dropped / 🚫 Declined — intake or the newsworthiness gate rejected a lead or topic.
+⚠️ Halted — a pipeline stage failed loud rather than ship garbage.
+⏸ Paused — an AI provider was unavailable; work re-queued automatically.
+📡 Source silent — a feed has gone quiet for 3+ cycles.
+📋 Story tracker / 🧭 Meta-synthesis — periodic reviews of published work.
+💰 Cost report — daily spend summary (change time with /setcost).
+
+KEY COMMANDS:
+/pending — everything waiting on you, one card
+/drafts /held /queue /status — what's in the pipeline
+/topic [text] — submit a story idea
+/links /addlink /dellink /pinlink — manage the bio page
+/cost /stats — spend and lifetime numbers
+Full manual: MANUAL.md in the repo."""
+
+
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(_HELP_TEXT)
+
+
 async def cmd_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """List the bio-page links, ids first so /dellink and /pinlink can target them."""
     links = list_bio_links()
@@ -1296,6 +1358,8 @@ async def _post_init(app):
             BotCommand("runnow",   "Trigger an RSS cycle immediately"),
             BotCommand("feeds",    "List active RSS sources"),
             BotCommand("addfeed",  "Add a YouTube channel for evaluation"),
+            BotCommand("pending",  "Everything waiting on your decision"),
+            BotCommand("help",     "What each card means + command list"),
             BotCommand("links",    "Manage the link-in-bio page"),
             BotCommand("scoutnow", "Signal source scout to run now"),
             BotCommand("status",   "Story counts: pending / published / held / killed"),
@@ -1321,6 +1385,8 @@ def main():
     app.add_handler(CommandHandler("track", cmd_track))
     app.add_handler(CommandHandler("feeds", cmd_feeds))
     app.add_handler(CommandHandler("addfeed", cmd_addfeed))
+    app.add_handler(CommandHandler("pending", cmd_pending))
+    app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("links", cmd_links))
     app.add_handler(CommandHandler("addlink", cmd_addlink))
     app.add_handler(CommandHandler("dellink", cmd_dellink))
