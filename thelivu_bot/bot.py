@@ -28,8 +28,9 @@ from shared.config import (
     TELEGRAM_CHANNEL_ID,
     TELEGRAM_DRAFT_CHAT_ID,
     CONTACT_HANDLE,
+    SLIDE_SERVER_BASE_URL,
 )
-from shared.db import get_run, get_pending_runs, get_cost_report_data, get_queue_state, kv_get, kv_set, init_db, save_publication, update_run, queue_topic, approve_proposal, skip_proposal, reset_run_for_review, get_recheckable_runs, clear_agents_for_run, clear_stale_agents, clear_stale_topics, deactivate_approved_source, get_approved_sources, queue_carousel_run, get_carousel_run, update_carousel_run, get_carousel_slides
+from shared.db import get_run, get_pending_runs, get_cost_report_data, get_queue_state, kv_get, kv_set, init_db, save_publication, update_run, queue_topic, approve_proposal, skip_proposal, reset_run_for_review, get_recheckable_runs, clear_agents_for_run, clear_stale_agents, clear_stale_topics, deactivate_approved_source, get_approved_sources, queue_carousel_run, get_carousel_run, update_carousel_run, get_carousel_slides, add_bio_link, list_bio_links, delete_bio_link, set_bio_link_pinned
 
 logging.basicConfig(
     level=logging.INFO,
@@ -425,6 +426,73 @@ async def cmd_addfeed(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"I'll report back when done."
     )
     log.info("Source evaluation queued: %s", url)
+
+
+async def cmd_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List the bio-page links, ids first so /dellink and /pinlink can target them."""
+    links = list_bio_links()
+    page_url = SLIDE_SERVER_BASE_URL or "(SLIDE_SERVER_BASE_URL not set)"
+    if not links:
+        await update.message.reply_text(
+            f"Bio page is empty.\n\nPage: {page_url}\n"
+            "Add one: /addlink [url] | [title]"
+        )
+        return
+    lines = [f"Bio page — {len(links)} link(s):", ""]
+    for l in links:
+        pin = "📌 " if l.get("pinned") else ""
+        lines.append(f"#{l['id']} {pin}{l['title'] or '(untitled)'}\n{l['url']}")
+    lines += ["", f"Page: {page_url}", "Manage: /addlink /dellink /pinlink"]
+    await update.message.reply_text("\n".join(lines), disable_web_page_preview=True)
+
+
+async def cmd_addlink(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Manually add a link to the bio page. Published articles are added
+    automatically on approval — this is for evergreen links (channel, about)."""
+    raw = " ".join(context.args).strip() if context.args else ""
+    if "|" in raw:
+        url, title = (part.strip() for part in raw.split("|", 1))
+    else:
+        url, title = raw, ""
+    if not url.startswith(("http://", "https://")):
+        await update.message.reply_text(
+            "Usage: /addlink [url] | [title]\n\n"
+            "Example: /addlink https://t.me/thelivu | Telegram channel"
+        )
+        return
+    link_id = add_bio_link(title or url, url)
+    await update.message.reply_text(f"Added to bio page as #{link_id}: {title or url}")
+    log.info("Bio link #%s added via /addlink: %s", link_id, url)
+
+
+async def cmd_dellink(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        link_id = int(context.args[0])
+    except (IndexError, ValueError):
+        await update.message.reply_text("Usage: /dellink [id] — ids are in /links")
+        return
+    if delete_bio_link(link_id):
+        await update.message.reply_text(f"Removed bio link #{link_id}.")
+        log.info("Bio link #%d deleted", link_id)
+    else:
+        await update.message.reply_text(f"No bio link #{link_id}. See /links.")
+
+
+async def cmd_pinlink(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Toggle pinned: pinned links stay above the (newest-first) article links."""
+    try:
+        link_id = int(context.args[0])
+    except (IndexError, ValueError):
+        await update.message.reply_text("Usage: /pinlink [id] — ids are in /links")
+        return
+    current = next((l for l in list_bio_links() if l["id"] == link_id), None)
+    if not current:
+        await update.message.reply_text(f"No bio link #{link_id}. See /links.")
+        return
+    now_pinned = not current.get("pinned")
+    set_bio_link_pinned(link_id, now_pinned)
+    verb = "Pinned" if now_pinned else "Unpinned"
+    await update.message.reply_text(f"{verb} #{link_id}: {current['title']}")
 
 
 async def cmd_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1080,6 +1148,15 @@ async def _handle_approve(query, run_id, run):
         teaser, article_url = tg_render.render(prepared, CONTACT_HANDLE)
         msg_ids = _post_html_to_channel(teaser)
         log.info("Published run #%d via Telegraph: %s", run_id, article_url)
+        # Every published article lands on the bio page automatically (the
+        # slides' "link in bio" promise). Deduped by URL, so re-approving a
+        # run can't double-list it. Never let this block the publish itself.
+        try:
+            from publishing.parser import parse_article
+            add_bio_link(parse_article(prepared).title, article_url)
+            log.info("Bio page updated with run #%d", run_id)
+        except Exception as e:
+            log.warning("Could not add run #%d to bio page: %s", run_id, e)
     except Exception as e:
         log.warning("Telegraph path failed for run #%d (%s) — falling back to plain text", run_id, e)
         how = "plain-text"
@@ -1229,6 +1306,7 @@ async def _post_init(app):
             BotCommand("runnow",   "Trigger an RSS cycle immediately"),
             BotCommand("feeds",    "List active RSS sources"),
             BotCommand("addfeed",  "Add a YouTube channel for evaluation"),
+            BotCommand("links",    "Manage the link-in-bio page"),
             BotCommand("scoutnow", "Signal source scout to run now"),
             BotCommand("status",   "Story counts: pending / published / held / killed"),
             BotCommand("cost",     "API spend today / month / all-time in ₹"),
@@ -1253,6 +1331,10 @@ def main():
     app.add_handler(CommandHandler("track", cmd_track))
     app.add_handler(CommandHandler("feeds", cmd_feeds))
     app.add_handler(CommandHandler("addfeed", cmd_addfeed))
+    app.add_handler(CommandHandler("links", cmd_links))
+    app.add_handler(CommandHandler("addlink", cmd_addlink))
+    app.add_handler(CommandHandler("dellink", cmd_dellink))
+    app.add_handler(CommandHandler("pinlink", cmd_pinlink))
     app.add_handler(CommandHandler("scoutnow", cmd_scoutnow))
     app.add_handler(CommandHandler("drafts", cmd_drafts))
     app.add_handler(CommandHandler("cost", cmd_cost))
