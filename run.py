@@ -133,6 +133,16 @@ if service == "thelivu-agent":
         except Exception as e:
             log.error("Forced scout run failed: %s", e)
 
+        # Targeted dig signal (/dig [theme]) — story-scout on that theme now
+        try:
+            dig_theme = kv_get("dig_request")
+            if dig_theme:
+                kv_set("dig_request", "")
+                log.info("Dig signalled — running targeted story scout: %s", dig_theme)
+                run_story_scout(theme_hint=dig_theme)
+        except Exception as e:
+            log.error("Targeted dig failed: %s", e)
+
         # Owner topics — check every 2 minutes, run immediately if queued
         try:
             pending = pop_next_topic()
