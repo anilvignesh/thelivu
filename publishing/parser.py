@@ -147,3 +147,24 @@ def extract_headline(raw_md):
     scaffolding header or the italic 'From Thelivu' preamble. '' if the draft
     has no heading at all."""
     return parse_article(strip_scaffolding(raw_md)).title
+
+
+FOOTER = (
+    "\n\n—\n"
+    "Sources above. Drafted with AI assistance, reviewed by a human editor "
+    "before publishing. Spotted an error? We correct openly — [contact]."
+)
+
+
+def prepare_for_publish(md, contact):
+    """Turn an approved draft into exactly what a reader sees: strip the review
+    scaffolding, ensure the standing footer is present exactly once, fill the
+    [contact] placeholder. Substance is never touched. Shared by the bot's
+    channel publish and the self-hosted /a/ article pages, so both always show
+    the identical text."""
+    text = strip_scaffolding(md)
+    # The writer's sources block already carries the standing footer text; only
+    # append the standalone footer when it is genuinely absent (avoid doubling).
+    if "Drafted with AI assistance" not in text:
+        text += FOOTER
+    return text.replace("[contact]", contact)
