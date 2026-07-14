@@ -384,6 +384,35 @@ def _esc(s):
     return _html.escape(str(s), quote=False)
 
 
+def _md_to_tg_html(s, limit=1000):
+    """LLM output arrives as Markdown, but owner cards send as Telegram HTML —
+    without this the chat shows literal **asterisks** and ### hashes (Anil's
+    'rendering issue', 2026-07-14). Escapes first, then converts the handful of
+    Markdown forms the skills actually emit. Truncates the RAW text at a line
+    boundary before converting, so a cut can never split an HTML tag (which
+    would make Telegram reject the whole message)."""
+    s = (s or "").strip()
+    if len(s) > limit:
+        s = s[:limit].rsplit("\n", 1)[0] or s[:limit]
+        s += " …"
+    lines = []
+    for line in _esc(s).splitlines():
+        l = line.rstrip()
+        m = re.match(r"^\s*#{1,6}\s+(.*)$", l)
+        if m:
+            lines.append(f"<b>{m.group(1)}</b>")
+            continue
+        lines.append(re.sub(r"^(\s*)[-*]\s+", r"\1• ", l))
+    s = "\n".join(lines)
+    s = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", s)
+    s = re.sub(r"__(.+?)__", r"<b>\1</b>", s)
+    s = re.sub(r"(?<![\w*])\*([^*\n]+)\*(?![\w*])", r"<i>\1</i>", s)
+    s = re.sub(r"`([^`\n]+)`", r"<code>\1</code>", s)
+    # href is already entity-escaped (&amp; is valid inside an attribute)
+    s = re.sub(r"\[([^\]\n]+)\]\((https?://[^)\s]+)\)", r'<a href="\2">\1</a>', s)
+    return s
+
+
 def _report_link(title, markdown):
     """Publish a long report to Telegraph; return an HTML link, or '' on failure."""
     if not markdown:
@@ -395,7 +424,7 @@ def _report_link(title, markdown):
         return f'▸ <a href="{_html.escape(url, quote=True)}">Full report</a>'
     except Exception as e:
         log.warning("Telegraph report failed (%s) — trimming inline", e)
-        return _esc(markdown[:1200])
+        return _md_to_tg_html(markdown, limit=1200)
 
 
 def _reason_from_report(report):
@@ -808,7 +837,7 @@ def _run_spine(brief, investigate_input, run_id, topic_label, display_label,
             _notify_card(
                 "❌" if gate == "KILL" else "⏸",
                 f"{display_label} {verb} — run #{run_id}",
-                body=f"<b>{_esc(display_title[:160])}</b>" + (f"\n\n{_esc(reason)}" if reason else ""),
+                body=f"<b>{_esc(display_title[:160])}</b>" + (f"\n\n{_md_to_tg_html(reason, limit=300)}" if reason else ""),
                 report_title=f"Verification — run #{run_id}", report_md=verification,
             )
             return None
@@ -976,7 +1005,7 @@ def _run_topic_intake(pending):
         finish_topic(topic_id)
         _notify_card(
             "🗑", "Topic dropped — not our kind of story",
-            body=f"<b>Topic:</b> {_esc(topic_text[:200])}\n<b>Reason:</b> {_esc(why)}",
+            body=f"<b>Topic:</b> {_esc(topic_text[:200])}\n<b>Reason:</b> {_md_to_tg_html(why, limit=300)}",
         )
         log.info("Owner topic dropped by newsworthiness gate: %s", why)
         return
@@ -1201,7 +1230,7 @@ def run_daily_cycle():
         _notify_card(
             "🗑", "Dropped today's top lead — not our kind of story",
             body=f"<b>{_esc(selected['throughline'][:160])}</b>\n\n"
-                 f"<b>Reason:</b> {_esc(why)}\nTrying next-best lead.",
+                 f"<b>Reason:</b> {_md_to_tg_html(why, limit=300)}\nTrying next-best lead.",
         )
         log.info("Newsworthiness gate DROPPED lead: %s — trying fallback", why)
         # One fallback: try the next lead in the pool that wasn't the dropped one
@@ -1219,7 +1248,7 @@ def run_daily_cycle():
             _notify_card(
                 "🗑", "Fallback lead also dropped",
                 body=f"<b>{_esc(selected['throughline'][:160])}</b>\n\n"
-                     f"<b>Reason:</b> {_esc(why2)}\nNothing investigated this cycle.",
+                     f"<b>Reason:</b> {_md_to_tg_html(why2, limit=300)}\nNothing investigated this cycle.",
             )
             log.info("Fallback also dropped: %s", why2)
             return
@@ -1366,14 +1395,14 @@ def run_source_scout():
     match = _re.search(r"PROPOSALS\s*(\[.*?\])\s*END_PROPOSALS", output, _re.DOTALL)
     if not match:
         log.info("Source scout: no proposals block found.")
-        _notify(f"Source scout ran but found no new proposals this week.\n\n{output[:600]}")
+        _notify_card("📡", "Source scout: no new proposals this week", body=_md_to_tg_html(output, limit=600))
         return
 
     try:
         proposals = json.loads(match.group(1))
     except json.JSONDecodeError as e:
         log.error("Source scout: failed to parse proposals JSON: %s", e)
-        _notify(f"Source scout ran but proposals JSON was malformed.\n\n{output[:600]}")
+        _notify_card("⚠️", "Source scout output was malformed", body=_md_to_tg_html(output, limit=600))
         return
 
     if not proposals:
