@@ -29,7 +29,12 @@ tool to manage the links at all.
   automatically (deduped by URL). The plain-text fallback path adds nothing —
   there is no page URL to link.
 - **Ordering:** pinned first, then newest first. No manual reordering — pin
-  covers the real need (channel link / about on top).
+  covers the real need (about page etc. on top).
+- **The channel button is template, not data.** "Join the Telegram channel" is
+  baked into the page (shown when `CHANNEL_PUBLIC_URL` is set), always first —
+  a permanent brand link shouldn't be deletable/unpinnable via bot commands.
+  The env var stays blank until the channel has a public @username; the
+  numeric TELEGRAM_CHANNEL_ID is not a linkable URL.
 
 ## Pieces
 

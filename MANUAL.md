@@ -110,8 +110,10 @@ If the draft has a legal flag (LEGAL-FLAG: YES in the reviewer's output), the ca
 
 The public page the Instagram bio points at — served by the agent service at
 `SLIDE_SERVER_BASE_URL` (also `/bio`). Published articles are added
-automatically on approval; these commands manage the rest. See
-`docs/bio-page.md` for the design.
+automatically on approval; a "Join the Telegram channel" button is part of the
+page itself once `CHANNEL_PUBLIC_URL` is set (needs the channel to have a
+public @username). These commands manage the rest. See `docs/bio-page.md`
+for the design.
 
 | Command | What it does |
 |---------|-------------|
