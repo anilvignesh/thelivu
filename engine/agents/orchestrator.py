@@ -1776,6 +1776,31 @@ def process_queued_carousels():
             _notify(f"⚠️ Carousel generation failed for run #{carousel['run_id']} (carousel #{carousel_id}): {e}")
 
 
+def cleanup_finished_carousels():
+    """Delete rendered slide PNGs for carousels that reached a terminal state
+    (posted/killed/approved_manual/failed) — Instagram already has its own copy
+    once posted, and the file server has no reason to keep serving them. Runs
+    every cycle; a no-op when nothing's finished yet. This is the automatic
+    counterpart to the one-off manual cleanup done after the first carousel
+    test — the pattern going forward instead of a repeated ask."""
+    from shared.db import get_unclean_finished_carousels, get_carousel_slides, mark_carousel_cleaned
+
+    for carousel in get_unclean_finished_carousels():
+        carousel_id = carousel["id"]
+        removed = 0
+        for slide in get_carousel_slides(carousel_id):
+            path = slide.get("image_path")
+            if path and Path(path).is_file():
+                try:
+                    Path(path).unlink()
+                    removed += 1
+                except OSError as e:
+                    log.warning("Could not delete slide file %s for carousel #%s: %s", path, carousel_id, e)
+        mark_carousel_cleaned(carousel_id)
+        if removed:
+            log.info("Cleaned up %d slide file(s) for carousel #%s (status=%s)", removed, carousel_id, carousel["status"])
+
+
 def _cost_report_due(now_utc):
     """Return True if it's time to send the daily cost report.
     Time is read from kv_store key 'cost_report_utc' (format HH:MM, default 14:30)."""

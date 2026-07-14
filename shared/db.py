@@ -122,7 +122,8 @@ CREATE TABLE IF NOT EXISTS carousel_runs (
     ig_media_id    TEXT,
     ig_permalink   TEXT,
     created_at     TIMESTAMP DEFAULT NOW(),
-    posted_at      TIMESTAMP
+    posted_at      TIMESTAMP,
+    files_cleaned_at TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS carousel_slides (
@@ -254,7 +255,8 @@ CREATE TABLE IF NOT EXISTS carousel_runs (
     ig_media_id    TEXT,
     ig_permalink   TEXT,
     created_at     TEXT DEFAULT (datetime('now')),
-    posted_at      TEXT
+    posted_at      TEXT,
+    files_cleaned_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS carousel_slides (
@@ -326,11 +328,22 @@ def init_db():
                     conn.commit()
                 except Exception:
                     conn.rollback()  # column already exists
+            for col, defn in [("files_cleaned_at", "TIMESTAMP")]:
+                try:
+                    cur.execute(f"ALTER TABLE carousel_runs ADD COLUMN {col} {defn}")
+                    conn.commit()
+                except Exception:
+                    conn.rollback()  # column already exists
         else:
             cur.executescript(_SCHEMA_SQLITE)
             for col, defn in [("legal_flag", "INTEGER DEFAULT 0"), ("legal_reason", "TEXT")]:
                 try:
                     cur.execute(f"ALTER TABLE pipeline_runs ADD COLUMN {col} {defn}")
+                except Exception:
+                    pass
+            for col, defn in [("files_cleaned_at", "TEXT")]:
+                try:
+                    cur.execute(f"ALTER TABLE carousel_runs ADD COLUMN {col} {defn}")
                 except Exception:
                     pass
         conn.commit()
@@ -1266,6 +1279,40 @@ def get_carousel_slides(carousel_id):
             f"SELECT * FROM carousel_slides WHERE carousel_id = {ph} ORDER BY position", (carousel_id,)
         )
         return _fetchall(cur)
+    finally:
+        conn.close()
+
+
+_CAROUSEL_TERMINAL_STATUSES = ("posted", "killed", "approved_manual", "failed")
+
+
+def get_unclean_finished_carousels():
+    """Carousels in a terminal state whose rendered slide files haven't been
+    deleted from disk yet. Drives the orchestrator's automatic cleanup pass —
+    see cleanup_finished_carousels() in engine/agents/orchestrator.py."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        placeholders = ", ".join(ph for _ in _CAROUSEL_TERMINAL_STATUSES)
+        cur.execute(
+            f"SELECT * FROM carousel_runs WHERE status IN ({placeholders}) "
+            f"AND files_cleaned_at IS NULL ORDER BY id",
+            _CAROUSEL_TERMINAL_STATUSES,
+        )
+        return _fetchall(cur)
+    finally:
+        conn.close()
+
+
+def mark_carousel_cleaned(carousel_id):
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        now = "NOW()" if _is_postgres() else "datetime('now')"
+        cur.execute(f"UPDATE carousel_runs SET files_cleaned_at = {now} WHERE id = {ph}", (carousel_id,))
+        conn.commit()
     finally:
         conn.close()
 
