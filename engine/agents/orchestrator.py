@@ -451,19 +451,12 @@ def _send_via_telegram(run_id, draft_text, verification_report, review_text):
     if legal_flag:
         update_run_legal_flag(run_id, True, legal_reason)
 
-    # Strip the writer's review scaffolding before extracting the title so we
-    # get the real article headline, not "DRAFT — for human review".
-    clean = (draft_text or "").strip()
-    # Skip leading blank lines, code fences, and the DRAFT header
-    for line in clean.splitlines():
-        s = line.strip()
-        if s == "" or s.startswith("```") or ("DRAFT" in s.upper() and "HUMAN REVIEW" in s.upper()):
-            continue
-        # Strip leading # markers to get the bare headline
-        title = s.lstrip("# ").strip()[:120]
-        break
-    else:
-        title = f"Run #{run_id}"
+    # The real headline, not the scaffolding header or the italic preamble —
+    # this title also names the draft-preview Telegraph page, and the ad-hoc
+    # first-line scan this replaces shipped a dozen preview pages titled
+    # "*From Thelivu — explanatory journalism…".
+    from publishing.parser import extract_headline
+    title = extract_headline(draft_text)[:120] or f"Run #{run_id}"
 
     parts = [f"📰 <b>New story ready — run #{run_id}</b>", "", f"<b>{_esc(title)}</b>"]
     if legal_flag:

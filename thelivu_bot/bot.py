@@ -71,19 +71,10 @@ def _split_chunks(text):
 
 def _strip_draft_scaffolding(text):
     """Drop the writer's review-only header so it never reaches the channel.
-
-    article-writer prepends '# DRAFT — for human review' (sometimes inside a code
-    fence). Skip leading blank lines, code fences, and that marker until the first
-    line of real content (the standfirst)."""
-    lines = text.splitlines()
-    i = 0
-    while i < len(lines):
-        s = lines[i].strip()
-        if s == "" or s.startswith("```") or ("DRAFT" in s.upper() and "HUMAN REVIEW" in s.upper()):
-            i += 1
-            continue
-        break
-    return "\n".join(lines[i:]).strip()
+    Shared implementation lives in publishing.parser (the orchestrator's
+    preview path uses the same one)."""
+    from publishing.parser import strip_scaffolding
+    return strip_scaffolding(text)
 
 
 def _prepare_for_publish(text):
