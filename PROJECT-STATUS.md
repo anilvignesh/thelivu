@@ -81,6 +81,9 @@ Each was downgraded, attributed, or dropped. **Preserve this reflex above all el
   investigation from primary records, to *unearth* stories rather than wait.
 - Public-tips discipline in `topic-intake` (tips are leads; protect sources; guard
   against weaponisation) — for when a public tip line opens (Phase 2).
+- **Bio page** (the "link in bio" the slides promise): self-hosted at the slide
+  server's `/` and `/bio`, auto-updated on every publish, managed via
+  `/links`, `/addlink`, `/dellink`, `/pinlink` in the bot. See `docs/bio-page.md`.
 
 ---
 

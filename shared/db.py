@@ -134,6 +134,14 @@ CREATE TABLE IF NOT EXISTS carousel_slides (
     image_path     TEXT,
     image_url      TEXT
 );
+
+CREATE TABLE IF NOT EXISTS bio_links (
+    id          SERIAL PRIMARY KEY,
+    title       TEXT,
+    url         TEXT,
+    pinned      BOOLEAN DEFAULT FALSE,
+    created_at  TIMESTAMP DEFAULT NOW()
+);
 """
 
 # SQLite fallback schema (same structure, SQLite syntax)
@@ -266,6 +274,14 @@ CREATE TABLE IF NOT EXISTS carousel_slides (
     headline       TEXT,
     image_path     TEXT,
     image_url      TEXT
+);
+
+CREATE TABLE IF NOT EXISTS bio_links (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    title       TEXT,
+    url         TEXT,
+    pinned      INTEGER DEFAULT 0,
+    created_at  TEXT DEFAULT (datetime('now'))
 );
 """
 
@@ -1313,6 +1329,71 @@ def mark_carousel_cleaned(carousel_id):
         now = "NOW()" if _is_postgres() else "datetime('now')"
         cur.execute(f"UPDATE carousel_runs SET files_cleaned_at = {now} WHERE id = {ph}", (carousel_id,))
         conn.commit()
+    finally:
+        conn.close()
+
+
+def add_bio_link(title, url, pinned=False):
+    """Add a link to the public bio page. Deduped by URL: re-adding an existing
+    URL updates its title instead of creating a second row (republishing a run
+    must not double-list it). Returns the link id."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(f"SELECT id FROM bio_links WHERE url = {ph}", (url,))
+        row = _fetchone(cur)
+        if row:
+            cur.execute(f"UPDATE bio_links SET title = {ph} WHERE id = {ph}", (title, row["id"]))
+            conn.commit()
+            return row["id"]
+        cur.execute(
+            f"INSERT INTO bio_links (title, url, pinned) VALUES ({ph}, {ph}, {ph})",
+            (title, url, pinned if _is_postgres() else int(pinned)),
+        )
+        conn.commit()
+        if _is_postgres():
+            cur.execute("SELECT id FROM bio_links WHERE url = %s", (url,))
+            return _fetchone(cur)["id"]
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def list_bio_links():
+    """All bio links in page order: pinned first, then newest first."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM bio_links ORDER BY pinned DESC, id DESC")
+        return _fetchall(cur)
+    finally:
+        conn.close()
+
+
+def delete_bio_link(link_id):
+    """Remove a bio link. Returns True if a row was deleted."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(f"DELETE FROM bio_links WHERE id = {ph}", (link_id,))
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def set_bio_link_pinned(link_id, pinned):
+    """Pin/unpin a bio link. Returns True if the row exists."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        val = bool(pinned) if _is_postgres() else int(bool(pinned))
+        cur.execute(f"UPDATE bio_links SET pinned = {ph} WHERE id = {ph}", (val, link_id))
+        conn.commit()
+        return cur.rowcount > 0
     finally:
         conn.close()
 

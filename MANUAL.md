@@ -106,6 +106,20 @@ If the draft has a legal flag (LEGAL-FLAG: YES in the reviewer's output), the ca
 | `/watchlist` | View all watchlist themes |
 | `/watchlist add <question>` | Add a new theme to the watchlist |
 
+### Bio page (link in bio)
+
+The public page the Instagram bio points at — served by the agent service at
+`SLIDE_SERVER_BASE_URL` (also `/bio`). Published articles are added
+automatically on approval; these commands manage the rest. See
+`docs/bio-page.md` for the design.
+
+| Command | What it does |
+|---------|-------------|
+| `/links` | List bio-page links with ids + the public page URL |
+| `/addlink <url> \| <title>` | Add an evergreen link (channel, about) |
+| `/dellink <id>` | Remove a link |
+| `/pinlink <id>` | Toggle pin — pinned links stay above the articles |
+
 ### Status & monitoring
 
 | Command | What it does |
