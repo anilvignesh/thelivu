@@ -14,6 +14,8 @@ chat. To bootstrap it:
 
 1. In Claude Code: open this repo and copy `engine/START-HERE.md` to **`CLAUDE.md`**
    at the repo root, so Claude Code auto-loads it. (Or just tell it to read the file.)
+   Then read **`docs/HANDOFF.md`** — the operational layer: deployed topology,
+   Railway/DB access, and the gotchas that cost real debugging time.
 2. Say: *"You are continuing Thelivu. Read CLAUDE.md (START-HERE),
    engine/CONTEXT-AND-HISTORY.md, and PROJECT-STATUS.md, then [your task]."*
 3. It now has the charter, the method, the history, and the state below. The only
