@@ -44,6 +44,35 @@ def _make_handler(slides_dir):
                 self.end_headers()
                 self.wfile.write(page)
                 return
+            # Self-hosted article pages: /a/<run_id>-<kebab-headline>. Rendered
+            # per request from the approved draft in the DB — the human gate
+            # holds because anything not status='published' 404s.
+            if name.startswith("a/"):
+                try:
+                    from publishing.articlepage import render_article, render_not_found
+                    from publishing.parser import parse_article, prepare_for_publish
+                    from shared.config import CONTACT_HANDLE
+                    from shared.db import get_run_by_slug
+                    run = get_run_by_slug(name[2:])
+                    if run and run.get("status") == "published" and run.get("draft_text"):
+                        article = parse_article(prepare_for_publish(run["draft_text"], CONTACT_HANDLE))
+                        page, code = render_article(article, run.get("updated_at")).encode("utf-8"), 200
+                    else:
+                        page, code = render_not_found().encode("utf-8"), 404
+                except Exception as e:
+                    log.error("Article page render failed for %r: %s", name, e)
+                    self.send_response(500)
+                    self.end_headers()
+                    return
+                self.send_response(code)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(page)))
+                # Corrections must show immediately — we correct openly, and a
+                # cached wrong version defeats that.
+                self.send_header("Cache-Control", "no-cache")
+                self.end_headers()
+                self.wfile.write(page)
+                return
             # Bare filename only, inside slides_dir — no path traversal, no
             # directory listing, nothing else on disk is reachable.
             if "/" in name or ".." in name or not name.endswith(".png"):

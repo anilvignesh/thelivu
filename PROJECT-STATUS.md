@@ -84,6 +84,12 @@ Each was downgraded, attributed, or dropped. **Preserve this reflex above all el
 - **Bio page** (the "link in bio" the slides promise): self-hosted at the slide
   server's `/` and `/bio`, auto-updated on every publish, managed via
   `/links`, `/addlink`, `/dellink`, `/pinlink` in the bot. See `docs/bio-page.md`.
+- **Self-hosted article pages** at `/a/<run_id>-<headline-slug>` on the same
+  domain — Telegraph is out of the article publish path (Telegram-owned domains
+  are blocked/flaky on Indian ISPs; t.me doesn't even resolve on Anil's
+  connection). Rendered per request from `pipeline_runs.draft_text`; only
+  `status='published'` is served, so the human gate holds in the web path too.
+  See `docs/article-hosting.md`.
 
 ---
 

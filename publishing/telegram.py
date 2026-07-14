@@ -8,7 +8,6 @@ deterministically — no LLM in the publish path.
 import html
 import re
 
-from publishing.parser import parse_article
 from publishing import telegraph
 
 # bold | italic | [text](url)
@@ -56,22 +55,18 @@ def _esc(s):
     return html.escape(s, quote=False)
 
 
-def _build_teaser(article, url, contact):
+def build_teaser(article, url, contact):
+    """The short HTML channel post pointing at the article's canonical URL —
+    since 2026-07-14 that's the self-hosted /a/ page, not Telegraph (Telegram-
+    owned domains are blocked or flaky on Indian ISPs; see
+    docs/article-hosting.md)."""
     parts = [f"<b>{_esc(article.title)}</b>"]
     if article.hook:
         parts += ["", _esc(article.hook)]
-    parts += ["", f'▸ <a href="{html.escape(url, quote=True)}">Full piece (Instant View)</a>']
+    parts += ["", f'▸ <a href="{html.escape(url, quote=True)}">Read the full story</a>']
     parts += ["", f"{article.confidence_emoji} {_esc(article.confidence_label)}"]
     parts.append(f"Spotted an error? We correct openly — {_esc(contact)}")
     return "\n".join(parts)
-
-
-def render(markdown, contact):
-    """Publish the article to Telegraph and return (teaser_html, page_url)."""
-    article = parse_article(markdown)
-    nodes = _blocks_to_nodes(article.blocks)
-    url = telegraph.create_page(article.title, nodes)
-    return _build_teaser(article, url, contact), url
 
 
 def report_to_telegraph(title, markdown):

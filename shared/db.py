@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
     tg_msg_id           INTEGER,
     legal_flag          BOOLEAN DEFAULT FALSE,
     legal_reason        TEXT,
+    slug                TEXT,
     created_at          TIMESTAMP DEFAULT NOW(),
     updated_at          TIMESTAMP DEFAULT NOW()
 );
@@ -218,6 +219,7 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
     tg_msg_id           INTEGER,
     legal_flag          INTEGER DEFAULT 0,
     legal_reason        TEXT,
+    slug                TEXT,
     created_at          TEXT DEFAULT (datetime('now')),
     updated_at          TEXT DEFAULT (datetime('now'))
 );
@@ -338,7 +340,7 @@ def init_db():
                     except Exception:
                         conn.rollback()
             # Migrations for existing tables
-            for col, defn in [("legal_flag", "BOOLEAN DEFAULT FALSE"), ("legal_reason", "TEXT")]:
+            for col, defn in [("legal_flag", "BOOLEAN DEFAULT FALSE"), ("legal_reason", "TEXT"), ("slug", "TEXT")]:
                 try:
                     cur.execute(f"ALTER TABLE pipeline_runs ADD COLUMN {col} {defn}")
                     conn.commit()
@@ -352,7 +354,7 @@ def init_db():
                     conn.rollback()  # column already exists
         else:
             cur.executescript(_SCHEMA_SQLITE)
-            for col, defn in [("legal_flag", "INTEGER DEFAULT 0"), ("legal_reason", "TEXT")]:
+            for col, defn in [("legal_flag", "INTEGER DEFAULT 0"), ("legal_reason", "TEXT"), ("slug", "TEXT")]:
                 try:
                     cur.execute(f"ALTER TABLE pipeline_runs ADD COLUMN {col} {defn}")
                 except Exception:
@@ -1329,6 +1331,36 @@ def mark_carousel_cleaned(carousel_id):
         now = "NOW()" if _is_postgres() else "datetime('now')"
         cur.execute(f"UPDATE carousel_runs SET files_cleaned_at = {now} WHERE id = {ph}", (carousel_id,))
         conn.commit()
+    finally:
+        conn.close()
+
+
+def set_run_slug(run_id, slug):
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(f"UPDATE pipeline_runs SET slug = {ph} WHERE id = {ph}", (slug, run_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_run_by_slug(slug):
+    """The pipeline run a public article URL points at, or None.
+
+    Slugs are '<run_id>-<kebab-headline>'; only the run-id prefix is matched,
+    so a link keeps working even if the article is later retitled and gets a
+    fresh slug. The caller (the /a/ route) checks status — this just resolves."""
+    m = str(slug).split("-", 1)[0]
+    if not m.isdigit():
+        return None
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(f"SELECT * FROM pipeline_runs WHERE id = {ph}", (int(m),))
+        return _fetchone(cur)
     finally:
         conn.close()
 

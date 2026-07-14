@@ -30,7 +30,7 @@ from shared.config import (
     CONTACT_HANDLE,
     SLIDE_SERVER_BASE_URL,
 )
-from shared.db import get_run, get_pending_runs, get_cost_report_data, get_queue_state, kv_get, kv_set, init_db, save_publication, update_run, queue_topic, approve_proposal, skip_proposal, reset_run_for_review, get_recheckable_runs, clear_agents_for_run, clear_stale_agents, clear_stale_topics, deactivate_approved_source, get_approved_sources, queue_carousel_run, get_carousel_run, update_carousel_run, get_carousel_slides, add_bio_link, list_bio_links, delete_bio_link, set_bio_link_pinned
+from shared.db import get_run, get_pending_runs, get_cost_report_data, get_queue_state, kv_get, kv_set, init_db, save_publication, update_run, queue_topic, approve_proposal, skip_proposal, reset_run_for_review, get_recheckable_runs, clear_agents_for_run, clear_stale_agents, clear_stale_topics, deactivate_approved_source, get_approved_sources, queue_carousel_run, get_carousel_run, update_carousel_run, get_carousel_slides, add_bio_link, list_bio_links, delete_bio_link, set_bio_link_pinned, set_run_slug
 
 logging.basicConfig(
     level=logging.INFO,
@@ -40,11 +40,6 @@ logging.basicConfig(
 log = logging.getLogger("thelivu_bot")
 
 _TG_LIMIT = 4096
-_FOOTER = (
-    "\n\n—\n"
-    "Sources above. Drafted with AI assistance, reviewed by a human editor "
-    "before publishing. Spotted an error? We correct openly — [contact]."
-)
 
 
 # ---------------------------------------------------------------------------
@@ -78,16 +73,11 @@ def _strip_draft_scaffolding(text):
 
 
 def _prepare_for_publish(text):
-    """Turn an approved draft into exactly what goes to the channel: strip the
-    review scaffolding, ensure the standing footer is present exactly once, and
-    fill the [contact] placeholder. Substance is never touched."""
-    text = _strip_draft_scaffolding(text.strip())
-    # The writer's sources block already carries the standing footer text; only
-    # append the standalone footer when it is genuinely absent (avoid doubling).
-    if "Drafted with AI assistance" not in text:
-        text += _FOOTER
-    text = text.replace("[contact]", CONTACT_HANDLE)
-    return text
+    """Turn an approved draft into exactly what goes to the channel. Shared
+    implementation in publishing.parser — the /a/ article pages use the same
+    one, so channel and web always show identical text."""
+    from publishing.parser import prepare_for_publish
+    return prepare_for_publish(text, CONTACT_HANDLE)
 
 
 def _post_html_to_channel(html_text):
@@ -1128,28 +1118,37 @@ async def _handle_approve(query, run_id, run):
     # do NOT run a free-form LLM over an approved article (that risks rewriting
     # it, and once posted a conversational meta-message instead of the article).
     #
-    # Preferred presentation: a clean Telegraph Instant-View page + a short HTML
-    # teaser in the channel. If anything in that path fails, fall back to the
-    # chunked plain-text post — approval must never hard-fail.
+    # Preferred presentation: the self-hosted article page (/a/<slug> on our
+    # own domain — Telegraph is out of the article path, see
+    # docs/article-hosting.md) + a short HTML teaser in the channel. If
+    # anything in that path fails, fall back to the chunked plain-text post —
+    # approval must never hard-fail.
     prepared = _prepare_for_publish(draft)
     how = "teaser"
     article_url = ""
     try:
-        import publishing.telegram as tg_render
-        teaser, article_url = tg_render.render(prepared, CONTACT_HANDLE)
-        msg_ids = _post_html_to_channel(teaser)
-        log.info("Published run #%d via Telegraph: %s", run_id, article_url)
+        if not SLIDE_SERVER_BASE_URL:
+            raise RuntimeError("SLIDE_SERVER_BASE_URL not set — no public domain to host the article on")
+        from publishing.articlepage import make_slug
+        from publishing.parser import parse_article
+        from publishing.telegram import build_teaser
+        article = parse_article(prepared)
+        slug = make_slug(run_id, article.title)
+        set_run_slug(run_id, slug)
+        article_url = f"{SLIDE_SERVER_BASE_URL}/a/{slug}"
+        msg_ids = _post_html_to_channel(build_teaser(article, article_url, CONTACT_HANDLE))
+        log.info("Published run #%d at %s", run_id, article_url)
         # Every published article lands on the bio page automatically (the
-        # slides' "link in bio" promise). Deduped by URL, so re-approving a
-        # run can't double-list it. Never let this block the publish itself.
+        # slides' "link in bio" promise). Relative URL — same host as the bio
+        # page, survives a domain change. Deduped, so re-approving a run can't
+        # double-list it. Never let this block the publish itself.
         try:
-            from publishing.parser import parse_article
-            add_bio_link(parse_article(prepared).title, article_url)
+            add_bio_link(article.title, f"/a/{slug}")
             log.info("Bio page updated with run #%d", run_id)
         except Exception as e:
             log.warning("Could not add run #%d to bio page: %s", run_id, e)
     except Exception as e:
-        log.warning("Telegraph path failed for run #%d (%s) — falling back to plain text", run_id, e)
+        log.warning("Article-page path failed for run #%d (%s) — falling back to plain text", run_id, e)
         how = "plain-text"
         try:
             msg_ids = _post_to_channel(draft)
