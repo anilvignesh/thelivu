@@ -38,6 +38,9 @@ def _make_handler(slides_dir):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(page)))
+                # The page changes with every publish; without this, in-app
+                # browsers (Instagram especially) show stale copies for hours.
+                self.send_header("Cache-Control", "no-cache")
                 self.end_headers()
                 self.wfile.write(page)
                 return
