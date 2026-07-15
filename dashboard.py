@@ -716,8 +716,9 @@ with t_followups:
     hc1, hc2 = st.columns([4,1])
     with hc1:
         st.subheader("🧑‍💼 Chief of staff")
-        st.caption("Proactive sweep of the neglected backlog — held stories, drafts "
-                   "going stale, dropped/parked digs — plus new threads worth opening.")
+        st.caption("Works the neglected backlog on its own — held stories, drafts going "
+                   "stale, dropped digs — rerunning, reviving, opening new threads, and "
+                   "clearing dead ones. Autonomous; only your review gate is reserved.")
     with hc2:
         st.write("")
         if st.button("▶ Run sweep now", use_container_width=True, type="primary"):
@@ -729,47 +730,42 @@ with t_followups:
 
     brief = kv_get("latest_cos_brief")
     if not brief:
-        st.info("No sweep has run yet. Hit **Run sweep now** to have the chief of staff "
-                "work the backlog.")
+        empty_state("🧑‍💼", "No sweep has run yet",
+                    "Hit ‘Run sweep now’ — the chief of staff will work the backlog and act.")
     else:
-        # Prose (before the machine blocks)
-        prose = re.split(r"RECOMMENDATIONS\s*\[", brief)[0].strip()
-        if prose:
-            st.markdown(prose)
+        # What it DID this sweep (executed autonomously)
+        try:
+            acted = json.loads(kv_get("latest_cos_actions") or "[]")
+        except Exception:
+            acted = []
+        eyebrow("Acted autonomously")
+        if acted:
+            for a in acted:
+                st.markdown(
+                    f"<div style='padding:8px 12px;border:1px solid {LINE};border-left:3px solid {GOLD};"
+                    f"border-radius:8px;background:{SURFACE};margin-bottom:6px;font-size:13px;color:{KRAFT}'>"
+                    f"{a}</div>", unsafe_allow_html=True)
+            st.caption("Done automatically — review results in Drafts / Digs. Nothing was published.")
+        else:
+            st.caption("No backlog actions needed this sweep.")
 
-        # Parse RECOMMENDATIONS → actionable rows
+        st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+
+        # The reasoning (rationale for each recommendation the sweep acted on)
         m = re.search(r"RECOMMENDATIONS\s*(\[.*?\])\s*END_RECOMMENDATIONS", brief, re.DOTALL)
         recs = []
         if m:
             try: recs = json.loads(m.group(1))
             except Exception: recs = []
         if recs:
-            st.subheader(f"Recommended actions ({len(recs)})")
-            for i, rec in enumerate(recs):
-                ref = str(rec.get("ref",""))
-                action = rec.get("action","")
-                why = rec.get("why","")
-                with st.container(border=True):
-                    st.markdown(f"**{ref}** → `{action}` — {why}")
-                    kind, _, rid = ref.partition("-")
-                    cc1, cc2, cc3 = st.columns(3)
-                    if kind == "run" and rid.isdigit():
-                        rid = int(rid)
-                        if action in ("recheck",) and cc1.button("Recheck", key=f"cosr_{i}", use_container_width=True):
-                            execute("UPDATE pipeline_runs SET status='recheck_requested', updated_at=NOW() WHERE id=%s", (rid,))
-                            st.success(f"Run #{rid} queued for recheck."); st.cache_data.clear()
-                        if action in ("requeue","nudge") and cc2.button("Requeue", key=f"cosq_{i}", use_container_width=True):
-                            execute("UPDATE pipeline_runs SET status='pending_human', updated_at=NOW() WHERE id=%s", (rid,))
-                            st.success(f"Run #{rid} back at the gate."); st.cache_data.clear()
-                        if action == "kill" and cc3.button("Kill", key=f"cosk_{i}", use_container_width=True):
-                            execute("UPDATE pipeline_runs SET status='killed', updated_at=NOW() WHERE id=%s", (rid,))
-                            st.success(f"Run #{rid} killed."); st.cache_data.clear()
-                    elif kind == "dig" and rid.isdigit():
-                        rid = int(rid)
-                        if cc1.button("Advance dig", key=f"cosda_{i}", use_container_width=True):
-                            signal("advance_dig_id", str(rid)); st.success(f"Dig #{rid} advancing."); st.cache_data.clear()
-                        if action == "kill" and cc2.button("Kill dig", key=f"cosdk_{i}", use_container_width=True):
-                            update_dig(rid, status="killed", next_action_at=None); st.success(f"Dig #{rid} killed."); st.cache_data.clear()
+            with st.expander(f"Why — reasoning for {len(recs)} call(s)"):
+                for rec in recs:
+                    st.markdown(f"**{rec.get('ref','')}** → `{rec.get('action','')}` — {rec.get('why','')}")
+
+        prose = re.split(r"RECOMMENDATIONS\s*\[", brief)[0].strip()
+        if prose:
+            with st.expander("Full sweep brief"):
+                st.markdown(prose)
 
         # New digs the sweep opened
         mnd = re.search(r"NEW_DIGS\s*(\[.*?\])\s*END_NEW_DIGS", brief, re.DOTALL)
