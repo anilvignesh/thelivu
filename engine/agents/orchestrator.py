@@ -62,6 +62,14 @@ from shared.db import (
     expire_old_leads,
     kv_set,
     kv_get,
+    queue_topic,
+    create_dig,
+    add_dig_update,
+    update_dig,
+    get_dig,
+    list_digs,
+    get_dig_updates,
+    get_due_digs,
 )
 from engine.agents.skill_runner import run_skill, run_structured_skill, StructuredOutputError
 
@@ -91,6 +99,47 @@ log = logging.getLogger("orchestrator")
 def _video_id(url):
     m = re.search(r"(?:v=|youtu\.be/)([A-Za-z0-9_-]{11})", url)
     return m.group(1) if m else url
+
+
+def _enrich_topic_with_link(topic_text):
+    """If a submitted topic contains a URL, fetch its content and fold it into
+    the topic text so topic-intake triages against the real material, not just a
+    bare link. Handles both the [LINK] ingest marker and a URL pasted as a topic.
+
+    YouTube → transcript (+ source-ingestor claims). Article → readable text.
+    Fetch failures degrade gracefully: the link stays in the topic and the open
+    web verifies. Never raises."""
+    try:
+        from ingestion.fetch import find_url, classify, fetch_article
+    except Exception:
+        return topic_text
+    url = find_url(topic_text)
+    if not url:
+        return topic_text
+    try:
+        if classify(url) == "youtube":
+            vid = _video_id(url)
+            transcript = _get_transcript(vid)
+            block = f"\n\n--- INGESTED VIDEO ({url}) ---\n"
+            if transcript:
+                block += f"TRANSCRIPT (one source's claims — verify):\n{transcript[:6000]}"
+            else:
+                block += "(No transcript available; treat the link as a lead and verify on the open web.)"
+            log.info("Enriched topic with YouTube transcript: %s", url)
+            return topic_text + block
+        # Web article
+        art = fetch_article(url)
+        if art.get("text"):
+            log.info("Enriched topic with article text (%d chars): %s", len(art["text"]), url)
+            return (topic_text +
+                    f"\n\n--- INGESTED ARTICLE ({url}) ---\n"
+                    f"Title: {art.get('title','')}\n\n{art['text']}\n"
+                    "(One source's reporting — a lead, not a finding. Verify independently.)")
+        log.warning("Article fetch returned no text: %s", url)
+        return topic_text
+    except Exception as e:
+        log.warning("Link enrichment failed for %s: %s — passing bare link", url, e)
+        return topic_text
 
 
 def _get_transcript(video_id):
@@ -956,7 +1005,12 @@ def _run_topic_intake(pending):
     topic_text = pending["topic"]
     topic_label = topic_text[:120]
 
-    log.info("Running topic-intake on: %s", topic_text[:80])
+    # If the topic is (or contains) a pasted link, fetch its content first so
+    # intake triages the real material. [LINK] topics come from queue_ingest.
+    if "[LINK]" in topic_text or "http://" in topic_text or "https://" in topic_text:
+        topic_text = _enrich_topic_with_link(topic_text)
+
+    log.info("Running topic-intake on: %s", topic_label[:80])
     try:
         intake_output = run_structured_skill(
             "topic-intake",
@@ -1396,6 +1450,257 @@ def run_story_scout(theme_hint=None):
         )
     except Exception as e:
         log.error("Story scout failed: %s", e)
+
+
+# ---------------------------------------------------------------------------
+# Persistent digs — a thread worked over multiple days (docs/command-center.md)
+# ---------------------------------------------------------------------------
+
+# next_action_at gap by status: how long before a live dig is auto-advanced again.
+_DIG_CADENCE_DAYS = {"scoping": 1, "records-pending": 2, "verifying": 1}
+
+
+def _dig_history_text(dig, updates):
+    """Render a dig + its full log as context for the next story-scout step."""
+    lines = [
+        f"DIG #{dig['id']}: {dig['title']}",
+        f"Question (falsifiable): {dig.get('question') or '(not yet framed)'}",
+        f"Kerala anchor: {dig.get('kerala_anchor') or '(none)'}",
+        f"Working hypothesis: {dig.get('hypothesis') or '(none)'}",
+        f"Status: {dig.get('status')}",
+    ]
+    if dig.get("owner_note"):
+        lines.append(f"Owner's note / angle: {dig['owner_note']}")
+    lines.append("\nINVESTIGATION LOG SO FAR (oldest first):")
+    if updates:
+        for u in updates:
+            lines.append(f"\n[{u['created_at']}] ({u['kind']})\n{u['body']}")
+    else:
+        lines.append("(empty — this is the first step; produce the scoping brief.)")
+    return "\n".join(lines)
+
+
+def run_dig_advance(dig_id):
+    """Take one investigative step on a persistent dig.
+
+    Loads the dig and its full log, hands both to story-scout with instructions
+    to do the NEXT thing (pull the next primary records, try to disprove, report
+    what's newly established / still open), appends the result to the dig log,
+    and schedules the next auto-advance. Never publishes — a dig only reaches the
+    pipeline via promote_dig(), which still ends at the human gate."""
+    dig = get_dig(dig_id)
+    if not dig:
+        log.warning("Dig advance: no dig #%s", dig_id)
+        return
+    log.info("Advancing dig #%s: %s", dig_id, dig["title"][:70])
+    updates = get_dig_updates(dig_id)
+    try:
+        watchlist_text = WATCHLIST_YAML.read_text() if WATCHLIST_YAML.exists() else "(no watchlist)"
+    except Exception:
+        watchlist_text = "(watchlist unreadable)"
+
+    first_step = not updates
+    prompt = (
+        f"You are continuing a MULTI-DAY dig. {'This is the FIRST step — produce the scoping dig brief.' if first_step else 'Take the NEXT investigative step, building on the log below — do not repeat work already done.'}\n\n"
+        "Your job this step:\n"
+        "1. Go to the next PRIMARY records the question needs (filings, court/CAG/audit "
+        "records, budget/tender/land/environmental docs, official datasets). Use web tools "
+        "to actually pull and read what you can now.\n"
+        "2. Try to DISPROVE the hypothesis — what's the boring explanation, what would a "
+        "fair critic say. A step that only confirms the hunch is not progress.\n"
+        "3. Report: what is now DOCUMENTED, what is still OPEN, what to pull next, any RTI "
+        "worth filing, and whether this is getting stronger or should be parked/killed.\n"
+        "4. End with exactly one line: 'DIG_STATUS: <scoping|records-pending|verifying|ready-to-write|parked|killed>'\n"
+        "   Use 'ready-to-write' ONLY when the core is established from records and holds.\n\n"
+        "Discipline: documented facts and contested processes, never asserted wrongdoing. "
+        "Verify every fact; name the weakest link; downgrade by default.\n\n"
+        f"{_dig_history_text(dig, updates)}\n\n"
+        f"WATCHLIST (for records/anchor hints):\n{watchlist_text}"
+    )
+    try:
+        result = run_skill("story-scout", prompt, topic=f"dig #{dig_id}: {dig['title'][:50]}")
+    except Exception as e:
+        log.error("Dig #%s advance failed: %s", dig_id, e)
+        return
+
+    # Parse the status line the skill emits.
+    new_status = dig["status"]
+    m = re.search(r"DIG_STATUS:\s*(scoping|records-pending|verifying|ready-to-write|parked|killed)", result)
+    if m:
+        new_status = m.group(1)
+
+    kind = "brief" if first_step else "finding"
+    add_dig_update(dig_id, result, kind=kind)
+
+    # Schedule the next auto-advance (or stop, if terminal / ready).
+    from datetime import timedelta
+    patch = {"status": new_status}
+    if new_status in _DIG_CADENCE_DAYS:
+        nxt = datetime.now(timezone.utc) + timedelta(days=_DIG_CADENCE_DAYS[new_status])
+        patch["next_action_at"] = nxt.isoformat()
+    else:
+        patch["next_action_at"] = None  # ready-to-write / parked / killed → stop auto-advancing
+    update_dig(dig_id, **patch)
+
+    # Notify the owner with the step result + one-tap actions.
+    report_link = _report_link(f"Dig #{dig_id} — {dig['title'][:60]}", result)
+    status_emoji = {"scoping": "🔦", "records-pending": "📂", "verifying": "🔬",
+                    "ready-to-write": "✅", "parked": "🅿️", "killed": "❌"}.get(new_status, "🕳️")
+    buttons = [[{"text": "⏭️ Advance again", "callback_data": f"digadv_{dig_id}"}]]
+    if new_status == "ready-to-write":
+        buttons = [[{"text": "📝 Promote to draft", "callback_data": f"digpromote_{dig_id}"}]]
+    _tg_post(
+        TELEGRAM_DRAFT_CHAT_ID,
+        f"{status_emoji} <b>Dig #{dig_id} advanced</b> — now <b>{_esc(new_status)}</b>\n"
+        f"<i>{_esc(dig['title'][:100])}</i>\n\n{report_link}"[:_TG_LIMIT],
+        reply_markup={"inline_keyboard": buttons},
+        parse_mode="HTML",
+    )
+    log.info("Dig #%s advanced → %s", dig_id, new_status)
+    return new_status
+
+
+def promote_dig(dig_id):
+    """Push a dig into the normal pipeline as a topic (source='dig').
+
+    Bundles the dig's accumulated findings so topic-intake → investigate → verify
+    → write runs with the record already gathered. The resulting draft still lands
+    at the human gate — promotion is not publishing."""
+    dig = get_dig(dig_id)
+    if not dig:
+        return None
+    updates = get_dig_updates(dig_id)
+    # Prefer the latest substantive findings for the hand-off.
+    findings = "\n\n".join(u["body"] for u in updates[-3:]) if updates else ""
+    label = (
+        f"[DIG] {dig['title']}\n"
+        f"Question: {dig.get('question') or ''}\n"
+        f"Kerala anchor: {dig.get('kerala_anchor') or ''}\n\n"
+        f"Findings gathered so far:\n{findings}"
+    )
+    queue_topic(label[:2000], source="dig")
+    add_dig_update(dig_id, "Promoted to the pipeline as a topic (source='dig'). "
+                           "Draft will arrive at the human gate.", kind="promoted")
+    update_dig(dig_id, status="ready-to-write", next_action_at=None)
+    log.info("Dig #%s promoted to pipeline", dig_id)
+    _tg_post(
+        TELEGRAM_DRAFT_CHAT_ID,
+        f"📝 <b>Dig #{dig_id} promoted to the pipeline.</b>\n"
+        f"<i>{_esc(dig['title'][:100])}</i>\n\nThe agent will investigate + write it, "
+        "then send the draft here for your approve/kill.",
+        parse_mode="HTML",
+    )
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Chief of staff — proactive follow-up sweep of the backlog (command-center.md)
+# ---------------------------------------------------------------------------
+
+def _days_ago(ts):
+    """Whole days since an ISO/date value; 0 on any parse failure."""
+    if not ts:
+        return 0
+    try:
+        s = str(ts)
+        dt = datetime.fromisoformat(s) if "T" in s or " " in s else datetime.fromisoformat(s + "T00:00:00")
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return max(0, (datetime.now(timezone.utc) - dt).days)
+    except Exception:
+        return 0
+
+
+def _build_cos_snapshot():
+    """Gather the neglected backlog for the chief-of-staff sweep."""
+    runs = get_all_runs_summary(limit=80)
+    held = [r for r in runs if (r.get("status") in ("held", "hold"))]
+    stale_gate = [r for r in runs if r.get("status") == "pending_human" and _days_ago(r.get("date")) >= 2]
+    killed = [r for r in runs if r.get("status") in ("killed", "kill")][:10]
+    digs = list_digs(include_closed=True)
+    dropped_digs = [d for d in digs if d.get("status") in ("parked", "killed")]
+
+    def _run_line(r):
+        return (f"- run-{r['id']} [{r.get('status')}] gate={r.get('trust_gate') or '—'} "
+                f"age={_days_ago(r.get('date'))}d :: {(r.get('throughline') or 'untitled')[:120]}")
+
+    parts = ["HELD STORIES (paused by the editor):"]
+    parts += [_run_line(r) for r in held] or ["  (none)"]
+    parts.append("\nAT THE GATE, GOING STALE (>=2 days in pending_human):")
+    parts += [_run_line(r) for r in stale_gate] or ["  (none)"]
+    parts.append("\nDROPPED / PARKED DIGS:")
+    parts += [f"- dig-{d['id']} [{d.get('status')}] :: {(d.get('title') or '')[:120]} — "
+              f"{(d.get('question') or '')[:100]}" for d in dropped_digs] or ["  (none)"]
+    parts.append("\nRECENTLY KILLED RUNS (revive only if something genuinely changed):")
+    parts += [_run_line(r) for r in killed] or ["  (none)"]
+    counts = {"held": len(held), "stale_gate": len(stale_gate),
+              "dropped_digs": len(dropped_digs), "killed": len(killed)}
+    return "\n".join(parts), counts
+
+
+def run_chief_of_staff():
+    """Proactive follow-up sweep: work held/stale/dropped threads, check what moved
+    on the open web, recommend recheck/requeue/kill/revive, and open new digs from
+    patterns. Recommends and opens threads — never publishes."""
+    log.info("Running chief-of-staff backlog sweep...")
+    snapshot, counts = _build_cos_snapshot()
+    if not any(counts.values()):
+        log.info("Chief of staff: backlog empty — nothing to sweep.")
+        kv_set("last_cos_at", datetime.now(timezone.utc).isoformat())
+        return
+    try:
+        output = run_skill("chief-of-staff", f"BACKLOG SNAPSHOT:\n\n{snapshot}",
+                           topic="backlog sweep")
+    except Exception as e:
+        log.error("Chief of staff skill failed: %s", e)
+        return
+
+    # Auto-open the new investigation threads it proposes (a dig never publishes,
+    # so opening one is within the follow-up brain's remit).
+    opened = 0
+    m = re.search(r"NEW_DIGS\s*(\[.*?\])\s*END_NEW_DIGS", output, re.DOTALL)
+    if m:
+        try:
+            for nd in json.loads(m.group(1)):
+                title = (nd.get("title") or "").strip()
+                if not title:
+                    continue
+                from datetime import timedelta
+                did = create_dig(
+                    title=title[:200], question=(nd.get("question") or "").strip(),
+                    kerala_anchor=(nd.get("kerala_anchor") or "").strip(),
+                    hypothesis=(nd.get("hypothesis") or "").strip(),
+                    owner_note="opened by chief-of-staff", priority=2, status="scoping",
+                )
+                # Make it due soon so the daily auto-advance picks it up.
+                update_dig(did, next_action_at=datetime.now(timezone.utc).isoformat())
+                add_dig_update(did, "Thread opened by the chief-of-staff sweep from a "
+                                    "backlog/watchlist pattern. First advance pending.", kind="note")
+                opened += 1
+        except (json.JSONDecodeError, TypeError) as e:
+            log.warning("chief-of-staff NEW_DIGS parse failed: %s", e)
+
+    # Count recommendations for the card headline (execution stays owner-driven via
+    # the dashboard Follow-ups tab — recheck/requeue/kill are one-tap there).
+    recs = 0
+    mr = re.search(r"RECOMMENDATIONS\s*(\[.*?\])\s*END_RECOMMENDATIONS", output, re.DOTALL)
+    if mr:
+        try:
+            recs = len(json.loads(mr.group(1)))
+        except (json.JSONDecodeError, TypeError):
+            recs = 0
+
+    kv_set("latest_cos_brief", output[:6000])
+    kv_set("last_cos_at", datetime.now(timezone.utc).isoformat())
+
+    link = _report_link("Chief of staff — backlog sweep", output)
+    _notify_card(
+        "🧑‍💼", f"Chief of staff swept the backlog — {recs} action(s), {opened} new dig(s)",
+        body=(f"Reviewed held ({counts['held']}), stale-at-gate ({counts['stale_gate']}), "
+              f"dropped digs ({counts['dropped_digs']}).\n"
+              f"{opened} new thread(s) opened as digs.\n\n{link}"),
+    )
+    log.info("Chief of staff complete: %d recs, %d new digs.", recs, opened)
 
 
 def run_source_scout():

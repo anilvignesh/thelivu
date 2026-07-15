@@ -1064,6 +1064,32 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == "investigate" and payload == "scout":
         await _handle_investigate_scout(query)
         return
+    if action == "digadv":
+        try:
+            kv_set("advance_dig_id", str(int(payload)))
+        except ValueError:
+            await query.message.reply_text("Bad dig ID.")
+            return
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        await query.message.reply_text(
+            f"Advancing dig #{payload} — next step arrives here in ~2 minutes.")
+        return
+    if action == "digpromote":
+        try:
+            kv_set("promote_dig_id", str(int(payload)))
+        except ValueError:
+            await query.message.reply_text("Bad dig ID.")
+            return
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        await query.message.reply_text(
+            f"Promoting dig #{payload} to the pipeline — the draft will come back to your gate.")
+        return
     if action == "addsrc":
         try:
             proposal_id = int(payload)

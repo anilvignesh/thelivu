@@ -1,0 +1,12 @@
+# Command Center (dashboard.py) — deps kept OUT of the lean agent/bot
+# requirements.txt on purpose (the Railway agent/bot services don't need them).
+# Install locally to run the dashboard:
+#   venv/bin/pip install -r requirements-dashboard.txt
+#   DASHBOARD_PASSWORD=... DATABASE_URL=<prod public url> \
+#     venv/bin/python -m streamlit run dashboard.py
+streamlit>=1.40
+plotly>=5.0
+pandas>=2.0
+PyYAML>=6.0
+psycopg2-binary>=2.9
+requests>=2.31

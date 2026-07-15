@@ -143,6 +143,29 @@ CREATE TABLE IF NOT EXISTS bio_links (
     pinned      BOOLEAN DEFAULT FALSE,
     created_at  TIMESTAMP DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS digs (
+    id             SERIAL PRIMARY KEY,
+    title          TEXT NOT NULL,
+    question       TEXT,
+    kerala_anchor  TEXT,
+    hypothesis     TEXT,
+    status         TEXT DEFAULT 'scoping',
+    priority       INTEGER DEFAULT 2,
+    watchlist_id   TEXT,
+    owner_note     TEXT,
+    next_action_at TIMESTAMP,
+    created_at     TIMESTAMP DEFAULT NOW(),
+    updated_at     TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS dig_updates (
+    id          SERIAL PRIMARY KEY,
+    dig_id      INTEGER REFERENCES digs(id),
+    kind        TEXT DEFAULT 'note',
+    body        TEXT,
+    created_at  TIMESTAMP DEFAULT NOW()
+);
 """
 
 # SQLite fallback schema (same structure, SQLite syntax)
@@ -283,6 +306,29 @@ CREATE TABLE IF NOT EXISTS bio_links (
     title       TEXT,
     url         TEXT,
     pinned      INTEGER DEFAULT 0,
+    created_at  TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS digs (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    title          TEXT NOT NULL,
+    question       TEXT,
+    kerala_anchor  TEXT,
+    hypothesis     TEXT,
+    status         TEXT DEFAULT 'scoping',
+    priority       INTEGER DEFAULT 2,
+    watchlist_id   TEXT,
+    owner_note     TEXT,
+    next_action_at TEXT,
+    created_at     TEXT DEFAULT (datetime('now')),
+    updated_at     TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS dig_updates (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    dig_id      INTEGER REFERENCES digs(id),
+    kind        TEXT DEFAULT 'note',
+    body        TEXT,
     created_at  TEXT DEFAULT (datetime('now'))
 );
 """
@@ -1474,3 +1520,161 @@ def reset_run_for_review(run_id):
         conn.close()
     update_run(run_id, status="pending_human")
     return get_run(run_id)
+
+
+# ── Digs — persistent, multi-day investigation threads ──────────────────────────
+# A dig is a thread we work over days: scope it, pull primary records, try to
+# disprove, log findings, and promote to the pipeline only when it holds. The
+# dig_updates table is an append-only investigation log. See docs/command-center.md.
+
+_DIG_STATUSES = ("scoping", "records-pending", "verifying", "ready-to-write", "parked", "killed")
+
+
+def create_dig(title, question="", kerala_anchor="", hypothesis="",
+               watchlist_id="", priority=2, owner_note="", status="scoping"):
+    """Open a new dig thread. Returns the new dig id."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(
+            f"""INSERT INTO digs
+               (title, question, kerala_anchor, hypothesis, watchlist_id,
+                priority, owner_note, status)
+               VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})""",
+            (title, question, kerala_anchor, hypothesis, watchlist_id,
+             priority, owner_note, status),
+        )
+        if _is_postgres():
+            cur.execute("SELECT lastval()")
+            dig_id = cur.fetchone()[0]
+        else:
+            dig_id = cur.lastrowid
+        conn.commit()
+        return dig_id
+    finally:
+        conn.close()
+
+
+def add_dig_update(dig_id, body, kind="note"):
+    """Append an entry to a dig's investigation log. Also bumps digs.updated_at.
+    kind ∈ brief|records|finding|rti|kill-test|note|promoted."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(
+            f"INSERT INTO dig_updates (dig_id, kind, body) VALUES ({ph},{ph},{ph})",
+            (dig_id, kind, body),
+        )
+        now = datetime.now(timezone.utc).isoformat()
+        cur.execute(f"UPDATE digs SET updated_at = {ph} WHERE id = {ph}", (now, dig_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def update_dig(dig_id, **kwargs):
+    """Patch dig fields (status, priority, next_action_at, hypothesis, …)."""
+    kwargs["updated_at"] = datetime.now(timezone.utc).isoformat()
+    ph = "%s" if _is_postgres() else "?"
+    sets = ", ".join(f"{k} = {ph}" for k in kwargs)
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(f"UPDATE digs SET {sets} WHERE id = {ph}", (*kwargs.values(), dig_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_dig(dig_id):
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(f"SELECT * FROM digs WHERE id = {ph}", (dig_id,))
+        return _fetchone(cur)
+    finally:
+        conn.close()
+
+
+def list_digs(include_closed=True, limit=100):
+    """All digs, newest activity first. Set include_closed=False to hide
+    parked/killed threads."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        where = "" if include_closed else "WHERE status NOT IN ('parked','killed') "
+        cur.execute(
+            f"SELECT * FROM digs {where}ORDER BY updated_at DESC LIMIT "
+            + ("%s" if _is_postgres() else "?"),
+            (limit,),
+        )
+        return _fetchall(cur)
+    finally:
+        conn.close()
+
+
+def get_dig_updates(dig_id, limit=200):
+    """A dig's investigation log, oldest first (reads as a timeline)."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(
+            f"SELECT * FROM dig_updates WHERE dig_id = {ph} ORDER BY id ASC LIMIT {ph}",
+            (dig_id, limit),
+        )
+        return _fetchall(cur)
+    finally:
+        conn.close()
+
+
+def get_due_digs(limit=5):
+    """Active digs whose next_action_at has passed — the daily auto-advance set.
+    Only live statuses; parked/killed/ready-to-write are excluded."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        now = datetime.now(timezone.utc).isoformat()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(
+            f"""SELECT * FROM digs
+                WHERE status IN ('scoping','records-pending','verifying')
+                  AND next_action_at IS NOT NULL AND next_action_at <= {ph}
+                ORDER BY priority ASC, next_action_at ASC LIMIT {ph}""",
+            (now, limit),
+        )
+        return _fetchall(cur)
+    finally:
+        conn.close()
+
+
+def queue_ingest(url, note=""):
+    """Queue a pasted link (article or video) for the pipeline to pick up.
+
+    Writes a pending_topics row (source='ingest') with a [LINK] marker so
+    _run_topic_intake fetches the URL's content before triaging. Returns the
+    topic id. The result still lands at the human gate — ingestion never
+    auto-publishes."""
+    label = f"[LINK] {url}"
+    if note:
+        label += f"\nAngle/note: {note}"
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(
+            f"INSERT INTO pending_topics (topic, source) VALUES ({ph}, {ph})",
+            (label, "ingest"),
+        )
+        if _is_postgres():
+            cur.execute("SELECT lastval()")
+            tid = cur.fetchone()[0]
+        else:
+            tid = cur.lastrowid
+        conn.commit()
+        return tid
+    finally:
+        conn.close()

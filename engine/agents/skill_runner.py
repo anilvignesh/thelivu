@@ -208,6 +208,9 @@ _GEMINI_PRO_SKILLS = {"source-verifier"}
 # need no Claude-side tools.)
 _CLAUDE_SKILL_TOOLS = {
     "topic-intake": [WEB_SEARCH_TOOL],
+    # Chief of staff sweeps the backlog and must check "what moved since" on the
+    # open web before recommending recheck/kill/revive.
+    "chief-of-staff": [WEB_SEARCH_TOOL],
 }
 
 

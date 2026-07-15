@@ -1,0 +1,16 @@
+# Thelivu Command Center — the "dossier" brand, dark.
+# Palette mirrors publishing/slides.py PALETTE (kraft/ink/brick/gold) so the
+# command center wears the same identity as the bio page, articles and carousels.
+[theme]
+base = "dark"
+primaryColor = "#D2AA6D"            # gold — accents, primary buttons
+backgroundColor = "#17140D"         # ink — page base
+secondaryBackgroundColor = "#221C13" # raised surfaces / cards / inputs
+textColor = "#E6DCC3"               # kraft — body text
+font = "sans serif"                  # body reads sans; headers go mono via CSS
+
+[server]
+headless = true
+
+[browser]
+gatherUsageStats = false
