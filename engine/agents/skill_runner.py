@@ -228,6 +228,12 @@ def _load_skill(skill_name):
 
 # ── Provider runners ──────────────────────────────────────────────────────────
 
+class GeminiContentBlocked(Exception):
+    """Gemini returned no text because its safety/recitation filter blocked the
+    response (not a quota outage, not truncation). These are permanent for the
+    given prompt — the fix is to fall back to Claude+web-search, not to retry."""
+
+
 def _run_gemini(skill_name, input_text, system_prompt, max_tokens, run_id=None,
                 model=GEMINI_MODEL):
     from google.genai import types
@@ -257,15 +263,25 @@ def _run_gemini(skill_name, input_text, system_prompt, max_tokens, run_id=None,
         finish_reason = "unknown"
         if response.candidates:
             finish_reason = str(getattr(response.candidates[0], "finish_reason", "unknown"))
+        # A prompt-level block (no candidates at all) shows up in prompt_feedback.
+        block_reason = ""
+        try:
+            block_reason = str(getattr(response.prompt_feedback, "block_reason", "") or "")
+        except Exception:
+            pass
         if "MAX_TOKENS" in finish_reason.upper():
             raise ValueError(
                 f"Gemini response truncated for skill '{skill_name}' (finish_reason=MAX_TOKENS "
                 f"at max_tokens={max_tokens}). The response was cut off before producing usable "
                 f"output — the topic may be too complex or the output budget too tight."
             )
-        raise ValueError(
-            f"Gemini returned no text for skill '{skill_name}' — response may have been "
-            f"filtered or blocked (finish_reason: {finish_reason})"
+        # Any other empty is a content filter (SAFETY / RECITATION / PROHIBITED_CONTENT /
+        # BLOCKLIST / prompt block / unknown). Retrying Gemini won't help — the story is
+        # blocked, not the service down. Signal a content block so run_skill can fall back
+        # to Claude+web-search (which doesn't hard-empty on named-person / sensitive topics).
+        raise GeminiContentBlocked(
+            f"Gemini blocked '{skill_name}' (finish_reason={finish_reason}"
+            f"{', block_reason=' + block_reason if block_reason else ''})"
         )
     return text.strip()
 
@@ -413,12 +429,22 @@ def run_skill(skill_name, input_text, extra_tools=None, max_tokens=4096,
             try:
                 return _run_gemini(skill_name, input_text, system_prompt, gemini_max, run_id,
                                    model=gemini_model)
+            except GeminiContentBlocked as e:
+                # Content filter, not an outage. Retrying Gemini is futile — the
+                # story is blocked (typically named-person / political / recitation).
+                # Fall back to Claude WITH web search so the research still happens,
+                # grounded, instead of the run dying empty. This is a deliberate
+                # exception to "no cross-engine fallback": a block is permanent, a
+                # quota outage is transient, and they warrant opposite responses.
+                log.warning("Gemini content-blocked %s (%s) — falling back to Claude+web-search.",
+                            skill_name, e)
+                return _run_claude(skill_name, input_text, system_prompt,
+                                   [WEB_SEARCH_TOOL] + (extra_tools or []), max_tokens, run_id)
             except Exception as e:
-                # No cross-engine fallback for grounded research. Switching the
-                # research engine to Claude silently would change how facts are
-                # sourced; instead we raise so the run pauses and the lead waits in
-                # the queue until Gemini is back. (Same philosophy as a Claude
-                # outage: if it's down, it's down — capture, queue, resume later.)
+                # A quota/outage/transport failure IS transient — pause so the lead
+                # waits in the queue until Gemini is back, rather than silently
+                # re-sourcing facts through a different engine. (Same philosophy as a
+                # Claude outage: if it's down, it's down — capture, queue, resume.)
                 log.warning("Gemini failed for %s (%s) — pausing (no fallback).", skill_name, e)
                 _send_quota_alert("gemini", skill_name, e)
                 raise
