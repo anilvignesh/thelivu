@@ -1680,27 +1680,82 @@ def run_chief_of_staff():
         except (json.JSONDecodeError, TypeError) as e:
             log.warning("chief-of-staff NEW_DIGS parse failed: %s", e)
 
-    # Count recommendations for the card headline (execution stays owner-driven via
-    # the dashboard Follow-ups tab — recheck/requeue/kill are one-tap there).
-    recs = 0
+    # EXECUTE the recommendations autonomously. The owner granted full authority to
+    # work the backlog on its own — the only reserved decision is the publish/review
+    # gate, and nothing here publishes: recheck/requeue re-open work, open-dig starts
+    # a multi-day investigation, kill clears a dead thread (reversible — draft_text is
+    # retained). Capped per sweep so a bad batch can't storm the pipeline.
+    _MAX_ACTIONS = 8
+    runs_by_id = {r["id"]: r for r in get_all_runs_summary(limit=80)}
+    actions_taken = []
     mr = re.search(r"RECOMMENDATIONS\s*(\[.*?\])\s*END_RECOMMENDATIONS", output, re.DOTALL)
+    rec_list = []
     if mr:
         try:
-            recs = len(json.loads(mr.group(1)))
-        except (json.JSONDecodeError, TypeError):
-            recs = 0
+            rec_list = json.loads(mr.group(1))
+        except (json.JSONDecodeError, TypeError) as e:
+            log.warning("chief-of-staff RECOMMENDATIONS parse failed: %s", e)
+    for rec in rec_list[:_MAX_ACTIONS]:
+        ref = str(rec.get("ref", "")).strip()
+        action = (rec.get("action") or "").strip().lower()
+        why = (rec.get("why") or "").strip()
+        kind, _, rid = ref.partition("-")
+        if not rid.isdigit():
+            continue
+        rid = int(rid)
+        try:
+            if kind == "run":
+                run = runs_by_id.get(rid, {})
+                throughline = (run.get("throughline") or "").strip()
+                if action == "recheck":
+                    update_run(rid, status="recheck_requested")
+                    actions_taken.append(f"🔬 rechecked run #{rid}")
+                elif action in ("requeue", "nudge"):
+                    update_run(rid, status="pending_human")
+                    actions_taken.append(f"📬 requeued run #{rid} to the gate")
+                elif action == "kill":
+                    update_run(rid, status="killed")
+                    actions_taken.append(f"❌ killed run #{rid}")
+                elif action == "open-dig":
+                    did = create_dig(
+                        title=(throughline or f"From run #{rid}")[:200],
+                        question=why, owner_note=f"opened by chief-of-staff from run #{rid}",
+                        priority=2, status="scoping")
+                    update_dig(did, next_action_at=datetime.now(timezone.utc).isoformat())
+                    add_dig_update(did, f"Opened by the chief-of-staff from backlog run "
+                                        f"#{rid}. Rationale: {why}", kind="note")
+                    actions_taken.append(f"🗺️ opened dig #{did} from run #{rid}")
+                elif action == "queue-topic":
+                    queue_topic(f"[CHIEF] {why or throughline}"[:1000], source="chief-of-staff")
+                    actions_taken.append(f"📥 queued a topic from run #{rid}")
+            elif kind == "dig":
+                if action in ("advance", "recheck", "requeue"):
+                    # Make it due now; the auto-advancer takes the next step next tick.
+                    update_dig(rid, next_action_at=datetime.now(timezone.utc).isoformat(),
+                               status="verifying")
+                    actions_taken.append(f"⏭️ queued dig #{rid} to advance")
+                elif action == "kill":
+                    update_dig(rid, status="killed", next_action_at=None)
+                    actions_taken.append(f"❌ killed dig #{rid}")
+        except Exception as e:
+            log.warning("chief-of-staff could not execute %s on %s: %s", action, ref, e)
 
     kv_set("latest_cos_brief", output[:6000])
+    kv_set("latest_cos_actions", json.dumps(actions_taken))
     kv_set("last_cos_at", datetime.now(timezone.utc).isoformat())
 
     link = _report_link("Chief of staff — backlog sweep", output)
+    acted_lines = "\n".join(f"• {a}" for a in actions_taken) if actions_taken else "• (no backlog actions this sweep)"
     _notify_card(
-        "🧑‍💼", f"Chief of staff swept the backlog — {recs} action(s), {opened} new dig(s)",
+        "🧑‍💼", f"Chief of staff acted — {len(actions_taken)} action(s), {opened} new dig(s)",
         body=(f"Reviewed held ({counts['held']}), stale-at-gate ({counts['stale_gate']}), "
-              f"dropped digs ({counts['dropped_digs']}).\n"
-              f"{opened} new thread(s) opened as digs.\n\n{link}"),
+              f"dropped digs ({counts['dropped_digs']}).\n\n"
+              f"<b>Acted autonomously:</b>\n{acted_lines}\n\n"
+              f"{opened} new thread(s) opened as digs. Everything still stops at your "
+              f"review gate.\n\n{link}"),
     )
-    log.info("Chief of staff complete: %d recs, %d new digs.", recs, opened)
+    log.info("Chief of staff complete: executed %d action(s), %d new digs.",
+             len(actions_taken), opened)
 
 
 def run_source_scout():
