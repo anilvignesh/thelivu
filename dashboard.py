@@ -1,4 +1,11 @@
-"""Thelivu — Management Dashboard. Run: streamlit run dashboard.py"""
+"""Thelivu — Command Center. Run: streamlit run dashboard.py
+
+The owner's single screen. Reads and drives the deployed engine (Railway) over the
+shared Postgres DB: ingest links, work persistent digs, run the proactive
+follow-up sweep, manage sources and scheduled jobs, review drafts. The ONE gated
+action is publishing — approving a draft posts it to the channel; everything else
+is autonomous (see docs/command-center.md, memory thelivu-autonomy).
+"""
 
 import os
 import re
@@ -12,27 +19,31 @@ import streamlit as st
 from pathlib import Path
 from datetime import datetime, timezone
 
+# Shared engine helpers (respect DATABASE_URL — same DB the dashboard talks to).
+from shared.db import (
+    list_digs, get_dig, get_dig_updates, create_dig, update_dig, add_dig_update,
+    queue_ingest, kv_get, kv_set,
+)
+
 # ── Config ────────────────────────────────────────────────────────────────────
 DB_URL         = os.environ.get("DATABASE_URL", "")
 BOT_TOKEN      = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 CHANNEL_ID     = os.environ.get("TELEGRAM_CHANNEL_ID", "")
 DRAFT_CHAT_ID  = os.environ.get("TELEGRAM_DRAFT_CHAT_ID", "")
 TG_API        = f"https://api.telegram.org/bot{BOT_TOKEN}"
+REPO_ROOT     = Path(__file__).parent
 
 _INR = 84
-# Pipeline runs on Gemini + Claude only. Verifier uses Gemini Pro (priced apart).
 _MODEL_COSTS = {
     "claude":     {"in": 3.00, "out": 15.00},
-    "gemini":     {"in": 0.30, "out": 1.00},   # Flash
+    "gemini":     {"in": 0.30, "out": 1.00},
     "gemini-pro": {"in": 1.25, "out": 10.00},
 }
 
-st.set_page_config(page_title="Thelivu", page_icon="📰", layout="wide")
+st.set_page_config(page_title="Thelivu — Command Center", page_icon="📰", layout="wide")
 
 
 # ── Auth gate ─────────────────────────────────────────────────────────────────
-# This dashboard can publish, kill, and run raw SQL — it must never be served
-# open. Set DASHBOARD_PASSWORD on the host; without it, the app refuses to start.
 def _require_auth():
     expected = os.environ.get("DASHBOARD_PASSWORD", "")
     if not expected:
@@ -54,6 +65,102 @@ def _require_auth():
 
 
 _require_auth()
+
+
+# ── Brand / dossier styling ───────────────────────────────────────────────────
+# The Thelivu palette (mirrors publishing/slides.py). Dark, kraft-on-ink, with
+# gold and brick accents. Mono for headers/labels — the "dossier" feel.
+KRAFT, INK, BRICK, GOLD = "#E6DCC3", "#17140D", "#8C2A1B", "#D2AA6D"
+SURFACE, LINE, MUTED = "#221C13", "#3A3123", "#A79876"
+_MONO = "'DejaVu Sans Mono','JetBrains Mono','SFMono-Regular',Menlo,Consolas,monospace"
+
+# Semantic colors for status pills.
+_PILL = {
+    "pending_human": ("#3a2f14", GOLD),   "published": ("#173a22", "#7fd1a0"),
+    "investigating": ("#14304a", "#8fc7ff"), "writing": ("#14304a", "#8fc7ff"),
+    "killed": ("#3a1713", "#e39a8f"), "kill": ("#3a1713", "#e39a8f"),
+    "held": ("#332a12", "#e6c86a"), "hold": ("#332a12", "#e6c86a"),
+    "recheck_requested": ("#2a2340", "#c3b3ff"),
+    # dig statuses
+    "scoping": ("#2a2512", "#e6c86a"), "records-pending": ("#14304a", "#8fc7ff"),
+    "verifying": ("#2a2340", "#c3b3ff"), "ready-to-write": ("#173a22", "#7fd1a0"),
+    "parked": ("#2b2b2b", "#b9b9b9"),
+    "queued": ("#2b2b2b", "#c9bfa6"), "running": ("#14304a", "#8fc7ff"), "done": ("#173a22", "#7fd1a0"),
+}
+
+def pill(status):
+    bg, fg = _PILL.get(status, ("#2b2b2b", KRAFT))
+    return (f"<span style='background:{bg};color:{fg};padding:2px 9px;border-radius:999px;"
+            f"font-family:{_MONO};font-size:11px;font-weight:700;letter-spacing:.04em;"
+            f"white-space:nowrap'>{status}</span>")
+
+st.markdown(f"""
+<style>
+:root {{ --kraft:{KRAFT}; --ink:{INK}; --gold:{GOLD}; --brick:{BRICK}; --surface:{SURFACE}; --line:{LINE}; }}
+
+/* hide Streamlit chrome for a product feel */
+#MainMenu, footer, header[data-testid="stHeader"] {{ visibility:hidden; height:0; }}
+[data-testid="stToolbar"], [data-testid="stDecoration"] {{ display:none; }}
+.block-container {{ padding-top:1.2rem; max-width:1400px; }}
+
+/* headers + labels in the dossier mono */
+h1,h2,h3,h4 {{ font-family:{_MONO} !important; letter-spacing:-.01em; color:var(--kraft); }}
+h1 {{ font-weight:700; }}
+[data-testid="stMetricLabel"], [data-testid="stWidgetLabel"] label,
+.stTabs [data-baseweb="tab"] {{ font-family:{_MONO} !important; }}
+
+/* brand header bar */
+.thv-hero {{ display:flex; align-items:center; gap:14px; padding:14px 18px; margin-bottom:8px;
+  background:linear-gradient(90deg, {SURFACE}, {INK}); border:1px solid var(--line);
+  border-left:4px solid var(--gold); border-radius:12px; }}
+.thv-hero .mark {{ font-family:{_MONO}; font-size:22px; font-weight:800; color:var(--gold);
+  letter-spacing:-.02em; }}
+.thv-hero .sub {{ font-family:{_MONO}; font-size:12px; color:var(--muted,{'#A79876'}); letter-spacing:.06em; text-transform:uppercase; }}
+.thv-hero .mal {{ color:var(--kraft); font-size:20px; margin-left:2px; opacity:.85; }}
+
+/* tabs → nav strip */
+.stTabs [data-baseweb="tab-list"] {{ gap:2px; border-bottom:1px solid var(--line); }}
+.stTabs [data-baseweb="tab"] {{ padding:8px 16px; font-size:13px; color:{'#A79876'}; letter-spacing:.03em; }}
+.stTabs [aria-selected="true"] {{ color:var(--gold) !important; border-bottom:2px solid var(--gold); }}
+
+/* metrics as cards */
+[data-testid="stMetric"] {{ background:var(--surface); border:1px solid var(--line);
+  border-radius:12px; padding:14px 16px; }}
+[data-testid="stMetricValue"] {{ font-family:{_MONO}; color:var(--kraft); }}
+
+/* bordered containers → dossier cards */
+[data-testid="stVerticalBlockBorderWrapper"] {{ border-radius:12px !important;
+  border-color:var(--line) !important; background:rgba(255,255,255,.012); }}
+
+/* buttons */
+.stButton button {{ border-radius:9px; font-family:{_MONO}; font-size:13px; border:1px solid var(--line); }}
+.stButton button[kind="primary"] {{ background:var(--gold); color:{INK}; border:none; font-weight:700; }}
+.stButton button[kind="primary"]:hover {{ background:#e6bd82; color:{INK}; }}
+
+/* inputs + expanders */
+[data-testid="stExpander"] {{ border:1px solid var(--line); border-radius:10px; background:var(--surface); }}
+.stTextInput input, .stTextArea textarea, .stSelectbox div[data-baseweb] {{ border-radius:8px; }}
+.stDataFrame {{ border:1px solid var(--line); border-radius:10px; }}
+
+/* section labels */
+.thv-eyebrow {{ font-family:{_MONO}; font-size:11px; letter-spacing:.14em; text-transform:uppercase;
+  color:{'#A79876'}; margin:2px 0 6px; }}
+hr {{ border-color:var(--line); }}
+</style>
+""", unsafe_allow_html=True)
+
+
+def eyebrow(text):
+    st.markdown(f"<div class='thv-eyebrow'>{text}</div>", unsafe_allow_html=True)
+
+def empty_state(icon, title, hint):
+    st.markdown(
+        f"<div style='text-align:center;padding:34px 12px;border:1px dashed {LINE};"
+        f"border-radius:12px;background:{SURFACE}'>"
+        f"<div style='font-size:30px'>{icon}</div>"
+        f"<div style='font-family:{_MONO};color:{KRAFT};margin-top:6px;font-size:14px'>{title}</div>"
+        f"<div style='color:#A79876;font-size:12px;margin-top:3px'>{hint}</div></div>",
+        unsafe_allow_html=True)
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
@@ -88,6 +195,48 @@ def cost(model, i, o):
     c = _MODEL_COSTS[tier]
     return (i/1e6 * c["in"]) + (o/1e6 * c["out"])
 
+def signal(key, value="1"):
+    """Write a kv_store signal the orchestrator tick loop reads."""
+    kv_set(key, value)
+
+def _age_days(ts):
+    if not ts:
+        return 0
+    try:
+        dt = ts if isinstance(ts, datetime) else datetime.fromisoformat(str(ts))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - dt).days
+    except Exception:
+        return 0
+
+def _since(ts):
+    """Human 'x ago' from an ISO timestamp string in kv_store."""
+    if not ts:
+        return "never"
+    try:
+        dt = datetime.fromisoformat(str(ts))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        secs = (datetime.now(timezone.utc) - dt).total_seconds()
+        if secs < 3600:   return f"{int(secs//60)}m ago"
+        if secs < 86400:  return f"{int(secs//3600)}h ago"
+        return f"{int(secs//86400)}d ago"
+    except Exception:
+        return str(ts)[:16]
+
+@st.cache_data(ttl=30)
+def load_watchlist():
+    import yaml
+    p = REPO_ROOT / "engine" / "watchlist.yaml"
+    if not p.exists():
+        return []
+    try:
+        return yaml.safe_load(p.read_text()).get("themes", []) or []
+    except Exception:
+        return []
+
+
 # ── Telegram helpers ───────────────────────────────────────────────────────────
 TG_LIMIT = 4096
 
@@ -121,7 +270,7 @@ def tg_notify(text):
     for chunk in _tg_chunks(text):
         requests.post(f"{TG_API}/sendMessage", json={"chat_id": DRAFT_CHAT_ID, "text": chunk}, timeout=15)
 
-# ── Status helpers ────────────────────────────────────────────────────────────
+# ── Icons ──────────────────────────────────────────────────────────────────────
 STATUS_ICON = {
     "investigating": "🔍", "writing": "✍️", "pending_human": "📬",
     "published": "✅", "killed": "❌", "kill": "❌", "held": "⏸", "hold": "⏸",
@@ -131,53 +280,85 @@ SKILL_ICON = {
     "article-writer": "✍️", "editorial-reviewer": "📝", "pattern-synthesizer": "🧩",
     "topic-intake": "📥", "source-scout": "🕵️", "beat-monitor": "📻",
     "story-scout": "🗺️", "story-tracker": "📌", "newsworthiness-gate": "🚦",
-    "meta-synthesizer": "🧭", "source-ingestor": "📼",
+    "meta-synthesizer": "🧭", "source-ingestor": "📼", "chief-of-staff": "🧑‍💼",
+}
+DIG_STATUS_ICON = {
+    "scoping": "🔦", "records-pending": "📂", "verifying": "🔬",
+    "ready-to-write": "✅", "parked": "🅿️", "killed": "❌",
 }
 
 # ── Header ────────────────────────────────────────────────────────────────────
-col_title, col_refresh, col_time = st.columns([4, 1, 2])
-with col_title:
-    st.title("📰 Thelivu")
+col_brand, col_time, col_refresh = st.columns([5, 2, 1])
+with col_brand:
+    st.markdown(
+        "<div class='thv-hero'>"
+        "<span class='mark'>THELIVU</span><span class='mal'>തെളിവ്</span>"
+        "<span class='sub'>· command center</span></div>",
+        unsafe_allow_html=True)
+with col_time:
+    st.write("")
+    st.caption(f"🟢 live · {datetime.now(timezone.utc).strftime('%H:%M UTC')}")
 with col_refresh:
     st.write("")
-    if st.button("🔄 Refresh", use_container_width=True):
+    if st.button("🔄", use_container_width=True, help="Refresh data"):
         st.cache_data.clear(); st.rerun()
-with col_time:
-    st.caption(f"Updated {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}")
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
-t_overview, t_drafts, t_pipeline, t_sources, t_costs = st.tabs(
-    ["Overview", "Drafts", "Pipeline", "Sources", "Costs"]
+(t_overview, t_ingest, t_drafts, t_pipeline, t_digs,
+ t_followups, t_sources, t_tasks, t_costs) = st.tabs(
+    ["Overview", "Ingest", "Drafts", "Pipeline", "Digs",
+     "Follow-ups", "Sources", "Tasks", "Costs"]
 )
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 1 — OVERVIEW
 # ══════════════════════════════════════════════════════════════════════════════
 with t_overview:
-    # Metrics row
     runs = q("SELECT status, COUNT(*) as n FROM pipeline_runs GROUP BY status")
     rm = {r["status"]: r["n"] for r in runs}
-    c1,c2,c3,c4,c5 = st.columns(5)
-    c1.metric("Live", rm.get("investigating",0)+rm.get("writing",0))
-    c2.metric("Pending review", rm.get("pending_human",0))
+    n_gate = rm.get("pending_human", 0)
+    n_held = rm.get("held", 0) + rm.get("hold", 0)
+    n_live = rm.get("investigating", 0) + rm.get("writing", 0)
     _db_published = scalar("SELECT COUNT(*) FROM publications")
-    _file_published = len(list((Path(__file__).parent / "articles" / "published").glob("*.md"))) if (Path(__file__).parent / "articles" / "published").exists() else 0
-    c3.metric("Published", _db_published + _file_published)
-    c4.metric("Killed", rm.get("killed",0)+rm.get("kill",0))
-    c5.metric("Held", rm.get("held",0)+rm.get("hold",0))
+    try:
+        active_digs = list_digs(include_closed=False)
+    except Exception:
+        active_digs = []
+    usage = q("""SELECT model, SUM(input_tokens) as i, SUM(output_tokens) as o
+                 FROM token_usage WHERE recorded_at::date = CURRENT_DATE GROUP BY model""")
+    today_usd = sum(cost(r["model"], r["i"] or 0, r["o"] or 0) for r in usage)
+
+    # ── "Needs you" banner — the one thing that gates on Anil ──────────────────
+    if n_gate:
+        st.markdown(
+            f"<div style='background:{SURFACE};border:1px solid {LINE};border-left:4px solid {GOLD};"
+            f"border-radius:12px;padding:14px 18px;margin-bottom:14px;display:flex;align-items:center;gap:12px'>"
+            f"<span style='font-size:22px'>📬</span>"
+            f"<span style='font-family:{_MONO};color:{KRAFT};font-size:15px'>"
+            f"<b style='color:{GOLD}'>{n_gate}</b> draft{'s' if n_gate!=1 else ''} waiting at your gate"
+            f"</span><span style='color:{MUTED};font-size:12px'>— review in the Drafts tab</span></div>",
+            unsafe_allow_html=True)
+    else:
+        st.markdown(
+            f"<div style='color:{MUTED};font-family:{_MONO};font-size:13px;margin-bottom:14px'>"
+            f"✓ Gate clear — nothing waiting on you.</div>", unsafe_allow_html=True)
+
+    c1,c2,c3,c4,c5 = st.columns(5)
+    c1.metric("At the gate", n_gate)
+    c2.metric("Live now", n_live)
+    c3.metric("Held", n_held)
+    c4.metric("Active digs", len(active_digs))
+    c5.metric("Published", _db_published)
 
     st.divider()
     left, right = st.columns([3,2])
 
     with left:
         # Live agents
-        agents = q("""
-            SELECT skill, model, topic,
-                   EXTRACT(EPOCH FROM (NOW()-started_at))::int AS secs
-            FROM active_agents ORDER BY started_at
-        """)
+        agents = q("""SELECT skill, model, topic, EXTRACT(EPOCH FROM (NOW()-started_at))::int AS secs
+                      FROM active_agents ORDER BY started_at""")
+        eyebrow(f"⚡ Live agents — {len(agents)} running" if agents else "⚡ Live agents — idle")
         if agents:
-            st.subheader(f"⚡ Live agents — {len(agents)} running")
             cols = st.columns(min(len(agents), 4))
             for i, ag in enumerate(agents):
                 m, s = divmod(ag["secs"] or 0, 60)
@@ -187,74 +368,99 @@ with t_overview:
                     st.metric(f"{icon} {ag['skill']}", model_s, f"{m}m {s}s" if m else f"{s}s")
                     if ag["topic"]: st.caption(ag["topic"][:55])
         else:
-            st.subheader("⚡ Live agents")
-            st.caption("Idle — no skills running right now.")
+            st.caption("No skills running right now.")
 
-        st.divider()
+        st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
 
-        # Recent runs
-        st.subheader("Recent runs")
-        recent = q("SELECT id, created_at::date as date, source, LEFT(throughline,70) as story, trust_gate, status, updated_at::time(0) as updated FROM pipeline_runs ORDER BY id DESC LIMIT 10")
+        # Recent runs — as cards with pills
+        eyebrow("Recent runs")
+        recent = q("SELECT id, created_at::date as date, source, LEFT(throughline,74) as story, trust_gate, status FROM pipeline_runs ORDER BY id DESC LIMIT 8")
         if recent:
-            df = pd.DataFrame(recent)
-            df["status"] = df["status"].apply(lambda s: f"{STATUS_ICON.get(s,'?')} {s}")
-            st.dataframe(df, use_container_width=True, hide_index=True,
-                column_config={"id": st.column_config.NumberColumn("Run", width="small"),
-                                "date": st.column_config.TextColumn("Date", width="small"),
-                                "trust_gate": st.column_config.TextColumn("Gate", width="small"),
-                                "updated": st.column_config.TextColumn("At", width="small")})
+            for r in recent:
+                st.markdown(
+                    f"<div style='display:flex;justify-content:space-between;align-items:center;gap:10px;"
+                    f"padding:9px 12px;border:1px solid {LINE};border-radius:9px;background:{SURFACE};margin-bottom:6px'>"
+                    f"<div style='min-width:0'>"
+                    f"<span style='font-family:{_MONO};color:{GOLD};font-size:12px'>#{r['id']}</span> "
+                    f"<span style='color:{KRAFT};font-size:13px'>{(r['story'] or 'Untitled')}</span><br>"
+                    f"<span style='color:{MUTED};font-size:11px'>{r['date']} · {r['source']} · gate {r['trust_gate'] or '—'}</span>"
+                    f"</div>{pill(r['status'])}</div>",
+                    unsafe_allow_html=True)
         else:
-            st.info("No pipeline runs yet.")
+            empty_state("📭", "No pipeline runs yet", "They'll appear here as the engine works.")
 
     with right:
-        # Quick actions
-        st.subheader("Actions")
-        with st.form("topic_form"):
-            topic_input = st.text_area("Submit a topic", placeholder="What's the story?", height=80)
-            submitted = st.form_submit_button("Submit topic →", use_container_width=True)
-            if submitted and topic_input.strip():
+        eyebrow("Quick submit")
+        with st.form("topic_form_ov"):
+            topic_input = st.text_area("Submit a topic", placeholder="What's the story?", height=70, label_visibility="collapsed")
+            if st.form_submit_button("Submit topic →", use_container_width=True, type="primary") and topic_input.strip():
                 execute("INSERT INTO pending_topics (topic, source) VALUES (%s, %s)",
                         (topic_input.strip(), "dashboard"))
                 st.success("Queued — agent picks it up within 2 minutes.")
                 st.cache_data.clear()
 
-        if st.button("Force RSS cycle now", use_container_width=True):
-            execute("INSERT INTO kv_store (key, value, updated_at) VALUES ('force_rss_run','1',NOW()) ON CONFLICT (key) DO UPDATE SET value='1', updated_at=NOW()")
-            st.success("Signalled — agent will run RSS cycle on next tick.")
-
-        st.divider()
-
-        # Queue
-        st.subheader("Queue")
-        topics = q("SELECT id, LEFT(topic,65) as topic, status, submitted_at::date as date FROM pending_topics WHERE status IN ('queued','running') ORDER BY id")
-        if topics:
-            for t in topics:
-                icon = "🔄" if t["status"] == "running" else "⏳"
-                st.write(f"{icon} **#{t['id']}** {t['topic']}")
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+        eyebrow("Digs in flight")
+        if active_digs:
+            for d in active_digs[:6]:
+                st.markdown(
+                    f"<div style='padding:8px 11px;border:1px solid {LINE};border-radius:9px;"
+                    f"background:{SURFACE};margin-bottom:6px'>"
+                    f"<span style='font-family:{_MONO};color:{GOLD};font-size:12px'>#{d['id']}</span> "
+                    f"<span style='color:{KRAFT};font-size:13px'>{d['title'][:44]}</span><br>"
+                    f"<span style='color:{MUTED};font-size:11px'>updated {_since(d.get('updated_at'))}</span> "
+                    f"{pill(d['status'])}</div>", unsafe_allow_html=True)
         else:
-            st.caption("Queue is empty.")
+            empty_state("🗺️", "No active digs", "Open one in the Digs tab.")
 
-        st.divider()
-
-        # Today's cost
-        st.subheader("Cost today")
-        usage = q("""SELECT model, SUM(input_tokens) as i, SUM(output_tokens) as o
-                     FROM token_usage WHERE recorded_at::date = CURRENT_DATE GROUP BY model""")
-        today_usd = sum(cost(r["model"], r["i"] or 0, r["o"] or 0) for r in usage)
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+        eyebrow("Cost today")
         st.metric("Today", f"₹{today_usd*_INR:.2f}", f"${today_usd:.4f}")
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 2 — DRAFTS
+# TAB 2 — INGEST
+# ══════════════════════════════════════════════════════════════════════════════
+with t_ingest:
+    st.subheader("📥 Paste a link to pick up")
+    st.caption("Article or YouTube URLs. The engine fetches the content, triages it "
+               "through topic-intake, verifies on the open web, and brings a draft to "
+               "your gate. Nothing auto-publishes.")
+    with st.form("ingest_form"):
+        urls_raw = st.text_area("URL(s) — one per line",
+                                placeholder="https://www.thehindu.com/...\nhttps://youtu.be/...", height=110)
+        note = st.text_input("Angle / note (optional)", placeholder="Why this, what to look for")
+        if st.form_submit_button("Ingest →", use_container_width=True, type="primary"):
+            urls = [u.strip() for u in urls_raw.splitlines() if u.strip().startswith("http")]
+            if not urls:
+                st.warning("No valid http(s) URL found.")
+            else:
+                for u in urls:
+                    queue_ingest(u, note.strip())
+                st.success(f"Queued {len(urls)} link(s). The agent picks them up within ~2 minutes.")
+                st.cache_data.clear()
+
+    st.divider()
+    st.subheader("Recent ingests")
+    ingests = q("""SELECT id, LEFT(topic, 90) AS topic, status, submitted_at::timestamp(0) AS at
+                   FROM pending_topics WHERE source='ingest' ORDER BY id DESC LIMIT 20""")
+    if ingests:
+        idf = pd.DataFrame(ingests)
+        idf["status"] = idf["status"].apply(lambda s: {"queued":"⏳ queued","running":"🔄 running","done":"✅ done"}.get(s, s))
+        st.dataframe(idf, use_container_width=True, hide_index=True)
+        st.caption("A finished ingest becomes a pipeline run — see it in Pipeline / Drafts.")
+    else:
+        st.caption("No links ingested yet.")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 3 — DRAFTS
 # ══════════════════════════════════════════════════════════════════════════════
 def _load_file_drafts():
-    """Read draft .md files from articles/drafts/ that aren't in the DB."""
-    drafts_dir = Path(__file__).parent / "articles" / "drafts"
+    drafts_dir = REPO_ROOT / "articles" / "drafts"
     if not drafts_dir.exists():
         return []
     files = []
     for f in sorted(drafts_dir.glob("*.md"), reverse=True):
         text = f.read_text(encoding="utf-8")
-        # Extract first H1 heading as title
         m = re.search(r'^#\s+(.+)', text, re.MULTILINE)
         title = m.group(1).strip() if m else f.stem
         files.append({"path": f, "name": f.name, "title": title, "text": text})
@@ -264,14 +470,14 @@ with t_drafts:
     drafts = q("""SELECT id, created_at::date as date, source, throughline,
                          trust_gate, draft_text, review_text, verification_report
                   FROM pipeline_runs WHERE status='pending_human' ORDER BY id DESC""")
-
     held = q("""SELECT id, created_at::date as date, source, throughline, trust_gate
                 FROM pipeline_runs WHERE status IN ('held','hold') ORDER BY id DESC""")
 
     if not drafts and not held:
         st.info("No drafts pending review. Stories will appear here when ready.")
     else:
-        st.caption(f"{len(drafts)} pending review · {len(held)} on hold")
+        st.caption(f"{len(drafts)} pending review · {len(held)} on hold  ·  "
+                   "**Approving is the only action that publishes.**")
 
     for run in drafts:
         run_id = run["id"]
@@ -288,8 +494,7 @@ with t_drafts:
 
             if approve:
                 try:
-                    draft_text = run.get("draft_text") or ""
-                    msg_ids = tg_post_channel(draft_text)
+                    msg_ids = tg_post_channel(run.get("draft_text") or "")
                     execute("UPDATE pipeline_runs SET status='published', updated_at=NOW() WHERE id=%s", (run_id,))
                     execute("INSERT INTO publications (run_id, channel_msg_ids, confidence) VALUES (%s,%s,%s)",
                             (run_id, json.dumps(msg_ids), "Confirmed"))
@@ -298,12 +503,10 @@ with t_drafts:
                     st.cache_data.clear(); time.sleep(1); st.rerun()
                 except Exception as e:
                     st.error(f"Publish failed: {e}")
-
             if kill:
                 execute("UPDATE pipeline_runs SET status='killed', updated_at=NOW() WHERE id=%s", (run_id,))
                 tg_notify(f"❌ Story #{run_id} killed from dashboard.")
                 st.cache_data.clear(); st.rerun()
-
             if hold:
                 execute("UPDATE pipeline_runs SET status='held', updated_at=NOW() WHERE id=%s", (run_id,))
                 tg_notify(f"⏸ Story #{run_id} held from dashboard.")
@@ -311,10 +514,8 @@ with t_drafts:
 
             with st.expander("Read draft"):
                 st.markdown(run.get("draft_text") or "_No draft text saved._")
-
             with st.expander("Review notes"):
                 st.text(run.get("review_text") or "_No review notes._")
-
             with st.expander("Verification report"):
                 st.text(run.get("verification_report") or "_No verification report._")
 
@@ -322,103 +523,89 @@ with t_drafts:
         st.subheader("On hold")
         for run in held:
             with st.container(border=True):
-                hc1, hc2 = st.columns([5,1])
+                hc1, hc2 = st.columns([5,2])
                 with hc1:
                     st.markdown(f"**#{run['id']}** — {(run['throughline'] or '')[:100]}")
                     st.caption(f"{run['date']} · {run['source']}")
                 with hc2:
-                    if st.button("Requeue", key=f"req_{run['id']}", use_container_width=True):
+                    b1, b2 = st.columns(2)
+                    if b1.button("Requeue", key=f"req_{run['id']}", use_container_width=True):
                         execute("UPDATE pipeline_runs SET status='pending_human', updated_at=NOW() WHERE id=%s", (run['id'],))
                         st.cache_data.clear(); st.rerun()
+                    if b2.button("Recheck", key=f"rck_{run['id']}", use_container_width=True):
+                        execute("UPDATE pipeline_runs SET status='recheck_requested', updated_at=NOW() WHERE id=%s", (run['id'],))
+                        st.success("Queued for recheck."); st.cache_data.clear(); st.rerun()
 
-    # File-based drafts (APPROVAL_MODE=file, written to articles/drafts/)
     file_drafts = _load_file_drafts()
     if file_drafts:
         st.subheader(f"File drafts ({len(file_drafts)})")
-        st.caption("Drafts written locally when APPROVAL_MODE=file. Approve to post to channel.")
-        published_dir = Path(__file__).parent / "articles" / "published"
-        killed_dir    = Path(__file__).parent / "articles" / "killed"
+        published_dir = REPO_ROOT / "articles" / "published"
+        killed_dir    = REPO_ROOT / "articles" / "killed"
         published_dir.mkdir(parents=True, exist_ok=True)
         killed_dir.mkdir(parents=True, exist_ok=True)
-
         for fd in file_drafts:
             slug = fd["name"].replace(".md", "")
             with st.container(border=True):
                 hc1, hc2 = st.columns([5, 2])
                 with hc1:
-                    st.markdown(f"**{fd['title']}**")
-                    st.caption(fd["name"])
+                    st.markdown(f"**{fd['title']}**"); st.caption(fd["name"])
                 with hc2:
-                    a1, a2, a3 = st.columns(3)
+                    a1, a2 = st.columns(2)
                     approve = a1.button("✓ Approve", key=f"fapp_{slug}", type="primary", use_container_width=True)
                     kill    = a2.button("✗ Kill",    key=f"fkil_{slug}", use_container_width=True)
-                    hold    = a3.button("⏸ Hold",   key=f"fhld_{slug}", use_container_width=True)
-
                 if approve:
                     try:
                         msg_ids = tg_post_channel(fd["text"])
                         fd["path"].rename(published_dir / fd["name"])
-                        # Record in DB so stats stay accurate
-                        execute(
-                            "INSERT INTO publications (run_id, channel_msg_ids, confidence) VALUES (%s,%s,%s)",
-                            (None, json.dumps(msg_ids), "Confirmed")
-                        )
+                        execute("INSERT INTO publications (run_id, channel_msg_ids, confidence) VALUES (%s,%s,%s)",
+                                (None, json.dumps(msg_ids), "Confirmed"))
                         tg_notify(f"✅ Published file draft: {fd['name']} ({len(msg_ids)} message(s)).")
                         st.success(f"Published! {len(msg_ids)} message(s) posted.")
                         st.cache_data.clear(); time.sleep(1); st.rerun()
                     except Exception as e:
                         st.error(f"Publish failed: {e}")
-
                 if kill:
                     fd["path"].rename(killed_dir / fd["name"])
                     tg_notify(f"❌ File draft killed: {fd['name']}")
                     st.cache_data.clear(); st.rerun()
-
-                if hold:
-                    st.info("File draft left in place — reload to see it again.")
-
                 with st.expander("Read draft"):
                     st.markdown(fd["text"])
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 3 — PIPELINE
+# TAB 4 — PIPELINE
 # ══════════════════════════════════════════════════════════════════════════════
 with t_pipeline:
-    status_filter = st.selectbox("Filter by status", ["all","investigating","writing","pending_human","published","killed","held"], index=0)
-
+    status_filter = st.selectbox("Filter by status",
+        ["all","investigating","writing","pending_human","published","killed","held"], index=0)
     sql = "SELECT id, created_at, source, throughline, trust_gate, status, updated_at FROM pipeline_runs"
     if status_filter != "all":
-        sql += f" WHERE status='{status_filter}'"
+        sql += " WHERE status=%(s)s"
     sql += " ORDER BY id DESC LIMIT 50"
+    all_runs = q(sql, {"s": status_filter} if status_filter != "all" else None)
 
-    all_runs = q(sql)
     if not all_runs:
         st.info("No runs match this filter.")
     else:
         for run in all_runs:
             icon = STATUS_ICON.get(run["status"], "?")
-            label = f"{icon} **#{run['id']}** {(run['throughline'] or 'Untitled')[:80]}"
-            with st.expander(label):
+            with st.expander(f"{icon} **#{run['id']}** {(run['throughline'] or 'Untitled')[:80]}"):
                 dc1, dc2, dc3 = st.columns(3)
                 dc1.metric("Status", run["status"])
                 dc2.metric("Gate", run["trust_gate"] or "—")
-                dc3.metric("Source", run["source"] or "—")
+                dc3.metric("Source", (run["source"] or "—")[:18])
                 st.caption(f"Created: {run['created_at']} · Updated: {run['updated_at']}")
-
-                detail = q("SELECT draft_text, review_text, verification_report FROM pipeline_runs WHERE id=%s", (run["id"],))
+                detail = q("SELECT draft_text, review_text, verification_report FROM pipeline_runs WHERE id=%(i)s", {"i": run["id"]})
                 if detail:
                     d = detail[0]
-                    t1, t2, t3 = st.tabs(["Draft", "Review", "Verification"])
-                    with t1: st.markdown(d.get("draft_text") or "_Not yet written._")
-                    with t2: st.text(d.get("review_text") or "_No review._")
-                    with t3: st.text(d.get("verification_report") or "_No verification._")
-
+                    dt1, dt2, dt3 = st.tabs(["Draft", "Review", "Verification"])
+                    with dt1: st.markdown(d.get("draft_text") or "_Not yet written._")
+                    with dt2: st.text(d.get("review_text") or "_No review._")
+                    with dt3: st.text(d.get("verification_report") or "_No verification._")
                 if run["status"] == "pending_human":
                     bc1, bc2, bc3 = st.columns(3)
                     if bc1.button("✓ Approve", key=f"pa_{run['id']}", type="primary"):
-                        draft_text = (detail[0].get("draft_text") or "") if detail else ""
                         try:
-                            msg_ids = tg_post_channel(draft_text)
+                            msg_ids = tg_post_channel((detail[0].get("draft_text") or "") if detail else "")
                             execute("UPDATE pipeline_runs SET status='published', updated_at=NOW() WHERE id=%s", (run["id"],))
                             execute("INSERT INTO publications (run_id,channel_msg_ids,confidence) VALUES (%s,%s,%s)",
                                     (run["id"], json.dumps(msg_ids), "Confirmed"))
@@ -433,15 +620,201 @@ with t_pipeline:
                         st.cache_data.clear(); st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 4 — SOURCES
+# TAB 5 — DIGS  (persistent, multi-day investigations)
+# ══════════════════════════════════════════════════════════════════════════════
+with t_digs:
+    st.subheader("🗺️ Persistent digs")
+    st.caption("A thread worked over days: scope → pull records → try to disprove → "
+               "promote only when it holds. Advance runs the next step; promote sends "
+               "it into the pipeline (still ends at your gate).")
+
+    with st.expander("➕ Open a new dig"):
+        with st.form("new_dig"):
+            nd_title = st.text_input("Title")
+            nd_q     = st.text_area("Falsifiable question", height=60,
+                                    placeholder="Who controls X, and how did they get it?")
+            nd_anchor = st.text_input("Kerala anchor (optional)")
+            nd_hyp    = st.text_area("Working hypothesis (optional)", height=60)
+            nd_pri    = st.selectbox("Priority", [1,2,3], index=1, format_func=lambda p: f"{p} ({'high' if p==1 else 'normal' if p==2 else 'low'})")
+            nd_start  = st.checkbox("Advance immediately (queue first step)", value=True)
+            if st.form_submit_button("Open dig", type="primary", use_container_width=True) and nd_title.strip():
+                did = create_dig(title=nd_title.strip(), question=nd_q.strip(),
+                                 kerala_anchor=nd_anchor.strip(), hypothesis=nd_hyp.strip(),
+                                 priority=nd_pri, owner_note="opened from dashboard")
+                if nd_start:
+                    signal("advance_dig_id", str(did))
+                st.success(f"Dig #{did} opened." + (" First step queued." if nd_start else ""))
+                st.cache_data.clear(); st.rerun()
+
+    # Watchlist → start-as-dig
+    themes = load_watchlist()
+    if themes:
+        with st.expander(f"📋 Watchlist ({len(themes)} themes) — start any as a dig"):
+            for th in themes:
+                wc1, wc2 = st.columns([5,1])
+                with wc1:
+                    st.markdown(f"**{th.get('id','?')}** — {(th.get('question') or '')[:110]}")
+                    st.caption(f"anchor: {th.get('kerala_anchor','—')} · status: {th.get('status','—')}")
+                with wc2:
+                    if st.button("Start", key=f"wl_{th.get('id')}", use_container_width=True):
+                        did = create_dig(title=th.get("id","watchlist theme").replace("-"," ").title(),
+                                         question=th.get("question",""),
+                                         kerala_anchor=th.get("kerala_anchor",""),
+                                         watchlist_id=th.get("id",""), owner_note="from watchlist")
+                        signal("advance_dig_id", str(did))
+                        st.success(f"Dig #{did} opened + first step queued.")
+                        st.cache_data.clear(); st.rerun()
+
+    st.divider()
+    show_closed = st.checkbox("Show parked/killed", value=False)
+    try:
+        digs = list_digs(include_closed=show_closed)
+    except Exception as e:
+        digs = []; st.error(f"Could not load digs: {e}")
+
+    if not digs:
+        st.info("No digs yet. Open one above, or start a watchlist theme.")
+    for d in digs:
+        icon = DIG_STATUS_ICON.get(d["status"], "🕳️")
+        with st.expander(f"{icon} **#{d['id']}** {d['title'][:70]}  ·  {d['status']}"):
+            st.caption(f"Updated {_since(d.get('updated_at'))} · priority {d.get('priority')} "
+                       f"· next action: {_since(d.get('next_action_at')) if d.get('next_action_at') else '—'}")
+            if d.get("question"):     st.markdown(f"**Q:** {d['question']}")
+            if d.get("kerala_anchor"): st.caption(f"Anchor: {d['kerala_anchor']}")
+            if d.get("hypothesis"):   st.caption(f"Hypothesis: {d['hypothesis']}")
+
+            bc1, bc2, bc3, bc4 = st.columns(4)
+            if bc1.button("⏭️ Advance", key=f"dadv_{d['id']}", use_container_width=True):
+                signal("advance_dig_id", str(d["id"]))
+                st.success("Next step queued (~2 min)."); st.cache_data.clear()
+            if bc2.button("📝 Promote", key=f"dpro_{d['id']}", use_container_width=True):
+                signal("promote_dig_id", str(d["id"]))
+                st.success("Promoting to pipeline."); st.cache_data.clear()
+            if bc3.button("🅿️ Park", key=f"dpark_{d['id']}", use_container_width=True):
+                update_dig(d["id"], status="parked", next_action_at=None); st.cache_data.clear(); st.rerun()
+            if bc4.button("❌ Kill", key=f"dkill_{d['id']}", use_container_width=True):
+                update_dig(d["id"], status="killed", next_action_at=None); st.cache_data.clear(); st.rerun()
+
+            # Investigation timeline
+            try:
+                ups = get_dig_updates(d["id"])
+            except Exception:
+                ups = []
+            st.markdown("**Investigation log**")
+            if ups:
+                for u in ups:
+                    st.markdown(f"`{str(u['created_at'])[:16]}` · **{u['kind']}**")
+                    st.markdown(u["body"][:4000])
+                    st.divider()
+            else:
+                st.caption("No steps yet.")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 6 — FOLLOW-UPS  (chief of staff)
+# ══════════════════════════════════════════════════════════════════════════════
+with t_followups:
+    hc1, hc2 = st.columns([4,1])
+    with hc1:
+        st.subheader("🧑‍💼 Chief of staff")
+        st.caption("Proactive sweep of the neglected backlog — held stories, drafts "
+                   "going stale, dropped/parked digs — plus new threads worth opening.")
+    with hc2:
+        st.write("")
+        if st.button("▶ Run sweep now", use_container_width=True, type="primary"):
+            signal("run_chief_of_staff", "1")
+            st.success("Sweep queued (~2 min)."); st.cache_data.clear()
+
+    st.caption(f"Last sweep: {_since(kv_get('last_cos_at'))}")
+    st.divider()
+
+    brief = kv_get("latest_cos_brief")
+    if not brief:
+        st.info("No sweep has run yet. Hit **Run sweep now** to have the chief of staff "
+                "work the backlog.")
+    else:
+        # Prose (before the machine blocks)
+        prose = re.split(r"RECOMMENDATIONS\s*\[", brief)[0].strip()
+        if prose:
+            st.markdown(prose)
+
+        # Parse RECOMMENDATIONS → actionable rows
+        m = re.search(r"RECOMMENDATIONS\s*(\[.*?\])\s*END_RECOMMENDATIONS", brief, re.DOTALL)
+        recs = []
+        if m:
+            try: recs = json.loads(m.group(1))
+            except Exception: recs = []
+        if recs:
+            st.subheader(f"Recommended actions ({len(recs)})")
+            for i, rec in enumerate(recs):
+                ref = str(rec.get("ref",""))
+                action = rec.get("action","")
+                why = rec.get("why","")
+                with st.container(border=True):
+                    st.markdown(f"**{ref}** → `{action}` — {why}")
+                    kind, _, rid = ref.partition("-")
+                    cc1, cc2, cc3 = st.columns(3)
+                    if kind == "run" and rid.isdigit():
+                        rid = int(rid)
+                        if action in ("recheck",) and cc1.button("Recheck", key=f"cosr_{i}", use_container_width=True):
+                            execute("UPDATE pipeline_runs SET status='recheck_requested', updated_at=NOW() WHERE id=%s", (rid,))
+                            st.success(f"Run #{rid} queued for recheck."); st.cache_data.clear()
+                        if action in ("requeue","nudge") and cc2.button("Requeue", key=f"cosq_{i}", use_container_width=True):
+                            execute("UPDATE pipeline_runs SET status='pending_human', updated_at=NOW() WHERE id=%s", (rid,))
+                            st.success(f"Run #{rid} back at the gate."); st.cache_data.clear()
+                        if action == "kill" and cc3.button("Kill", key=f"cosk_{i}", use_container_width=True):
+                            execute("UPDATE pipeline_runs SET status='killed', updated_at=NOW() WHERE id=%s", (rid,))
+                            st.success(f"Run #{rid} killed."); st.cache_data.clear()
+                    elif kind == "dig" and rid.isdigit():
+                        rid = int(rid)
+                        if cc1.button("Advance dig", key=f"cosda_{i}", use_container_width=True):
+                            signal("advance_dig_id", str(rid)); st.success(f"Dig #{rid} advancing."); st.cache_data.clear()
+                        if action == "kill" and cc2.button("Kill dig", key=f"cosdk_{i}", use_container_width=True):
+                            update_dig(rid, status="killed", next_action_at=None); st.success(f"Dig #{rid} killed."); st.cache_data.clear()
+
+        # New digs the sweep opened
+        mnd = re.search(r"NEW_DIGS\s*(\[.*?\])\s*END_NEW_DIGS", brief, re.DOTALL)
+        if mnd:
+            try: newdigs = json.loads(mnd.group(1))
+            except Exception: newdigs = []
+            if newdigs:
+                st.subheader(f"New threads proposed ({len(newdigs)})")
+                st.caption("These were auto-opened as scoping digs — see the Digs tab.")
+                for nd in newdigs:
+                    st.markdown(f"- **{nd.get('title','')}** — {nd.get('question','')}")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 7 — SOURCES  (+ analyse)
 # ══════════════════════════════════════════════════════════════════════════════
 with t_sources:
     import yaml, pathlib
+    st.subheader("Source performance")
+    st.caption("Judge sources on what they actually produced — leads → drafts → "
+               "published, and how often their leads get killed.")
+    perf = q("""
+        SELECT source,
+               COUNT(*)                                                   AS runs,
+               COUNT(*) FILTER (WHERE status='published')                 AS published,
+               COUNT(*) FILTER (WHERE status IN ('killed','kill'))        AS killed,
+               COUNT(*) FILTER (WHERE status IN ('held','hold'))          AS held,
+               MAX(created_at)::date                                      AS last_seen
+        FROM pipeline_runs
+        GROUP BY source ORDER BY runs DESC
+    """)
+    if perf:
+        pdf = pd.DataFrame(perf)
+        pdf["kill_rate"] = (pdf["killed"] / pdf["runs"].replace(0, 1) * 100).map("{:.0f}%".format)
+        pdf["pub_rate"]  = (pdf["published"] / pdf["runs"].replace(0, 1) * 100).map("{:.0f}%".format)
+        st.dataframe(pdf[["source","runs","published","pub_rate","killed","kill_rate","held","last_seen"]],
+                     use_container_width=True, hide_index=True)
+    else:
+        st.caption("No runs yet to analyse.")
+
+    st.divider()
     src_left, src_right = st.columns(2)
 
     with src_left:
         st.subheader("Active sources")
-        sources_path = pathlib.Path(__file__).parent / "engine" / "sources.yaml"
+        sources_path = pathlib.Path(REPO_ROOT) / "engine" / "sources.yaml"
         if sources_path.exists():
             src_data = yaml.safe_load(sources_path.read_text())
             for s in src_data.get("sources", []):
@@ -449,7 +822,6 @@ with t_sources:
                     icon = "🎬" if s.get("platform") == "youtube" else "📰"
                     st.markdown(f"{icon} **{s['name']}** `{s.get('platform','')}` Tier {s.get('tier',3)}")
                     st.caption(f"  {s.get('lean','')[:60]}")
-
         st.divider()
         st.subheader("Approved via bot")
         approved = q("SELECT name, platform, lean, tier, added_at::date as added FROM approved_sources WHERE status='active'")
@@ -466,7 +838,7 @@ with t_sources:
             for p in proposals:
                 with st.container(border=True):
                     st.markdown(f"**{p['name']}** — {p['platform']} · Tier {p['tier']}")
-                    st.caption(p.get("lean","") + " · " + (p.get("notes","")[:80]))
+                    st.caption((p.get("lean","") or "") + " · " + (p.get("notes","") or "")[:80])
                     pc1, pc2 = st.columns(2)
                     if pc1.button("✓ Add", key=f"add_{p['id']}", type="primary", use_container_width=True):
                         execute("""INSERT INTO approved_sources (name,platform,lean,tier,role,notes)
@@ -496,13 +868,67 @@ with t_sources:
                     st.cache_data.clear()
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 5 — COSTS
+# TAB 8 — TASKS / SCHEDULES
+# ══════════════════════════════════════════════════════════════════════════════
+with t_tasks:
+    st.subheader("Scheduled jobs")
+    st.caption("Every periodic job the engine runs, with last-run and a manual trigger. "
+               "Triggers write a signal the orchestrator picks up on its next 2-min tick.")
+
+    # (label, last_at kv key, cadence text, signal key or None, signal value)
+    JOBS = [
+        ("📰 RSS / daily cycle",       "last_cycle_at",       "hourly-ish",  "force_rss_run", "1"),
+        ("🕵️ Source scout",            "last_scout_at",       "weekly",      "force_scout_run", "1"),
+        ("🗺️ Story scout (dig brief)",  "last_scout_at",       "weekly",      "dig_request",
+         "infrastructure-concentration — Adani infrastructure footprint, anchored on Vizhinjam"),
+        ("📌 Story tracker",           "last_tracker_at",     "weekly",      "force_tracker_run", "1"),
+        ("🧑‍💼 Chief of staff",         "last_cos_at",         "daily",       "run_chief_of_staff", "1"),
+        ("🔬 Dig auto-advance",        "last_dig_sweep_at",   "~6h",         None, None),
+        ("🔁 Auto-recheck (held)",     "last_auto_recheck_at","~daily",      None, None),
+        ("🧭 Meta-synthesis",          "last_meta_at",        "monthly",     "force_meta_run", "1"),
+    ]
+    for label, last_key, cadence, sig_key, sig_val in JOBS:
+        jc1, jc2, jc3, jc4 = st.columns([3, 2, 2, 2])
+        jc1.markdown(f"**{label}**")
+        jc2.caption(f"cadence: {cadence}")
+        jc3.caption(f"last: {_since(kv_get(last_key))}")
+        if sig_key:
+            if jc4.button("Run now", key=f"job_{last_key}_{sig_key}", use_container_width=True):
+                signal(sig_key, sig_val)
+                st.success(f"Signalled — runs within ~2 min."); st.cache_data.clear()
+        else:
+            jc4.caption("automatic")
+
+    st.divider()
+    st.subheader("⚡ Live agents")
+    agents = q("""SELECT skill, model, topic, EXTRACT(EPOCH FROM (NOW()-started_at))::int AS secs
+                  FROM active_agents ORDER BY started_at""")
+    if agents:
+        for ag in agents:
+            m, s = divmod(ag["secs"] or 0, 60)
+            st.write(f"{SKILL_ICON.get(ag['skill'],'🤖')} **{ag['skill']}** · "
+                     f"{'Gemini' if ag['model'] and 'gemini' in ag['model'].lower() else 'Claude'} · "
+                     f"{m}m {s}s" + (f" · {ag['topic'][:50]}" if ag["topic"] else ""))
+    else:
+        st.caption("Idle — nothing running.")
+
+    st.divider()
+    st.subheader("Queue")
+    topics = q("""SELECT id, LEFT(topic,70) as topic, source, status
+                  FROM pending_topics WHERE status IN ('queued','running') ORDER BY id""")
+    if topics:
+        for t in topics:
+            icon = "🔄" if t["status"] == "running" else "⏳"
+            st.write(f"{icon} **#{t['id']}** [{t['source']}] {t['topic']}")
+    else:
+        st.caption("Queue is empty.")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 9 — COSTS
 # ══════════════════════════════════════════════════════════════════════════════
 with t_costs:
     import plotly.express as px
-    import plotly.graph_objects as go
 
-    # Summary metrics
     usage_summary = q("""
         SELECT model,
             SUM(input_tokens)  FILTER (WHERE recorded_at::date=CURRENT_DATE) as ti,
@@ -518,7 +944,6 @@ with t_costs:
         today_usd += cost(r["model"], r["ti"] or 0, r["to_"] or 0)
         month_usd += cost(r["model"], r["mi"] or 0, r["mo"] or 0)
         total_usd += cost(r["model"], r["ai"] or 0, r["ao"] or 0)
-
     mc1,mc2,mc3 = st.columns(3)
     mc1.metric("Today", f"₹{today_usd*_INR:.2f}", f"${today_usd:.4f}")
     mc2.metric("This month", f"₹{month_usd*_INR:.2f}", f"${month_usd:.4f}")
@@ -526,53 +951,38 @@ with t_costs:
 
     st.divider()
     ch1, ch2 = st.columns(2)
-
     with ch1:
-        # Daily spend chart
-        daily = q("""
-            SELECT recorded_at::date as date, model,
-                   SUM(input_tokens) as i, SUM(output_tokens) as o
-            FROM token_usage GROUP BY date, model ORDER BY date
-        """)
+        daily = q("""SELECT recorded_at::date as date, model,
+                            SUM(input_tokens) as i, SUM(output_tokens) as o
+                     FROM token_usage GROUP BY date, model ORDER BY date""")
         if daily:
             df_daily = pd.DataFrame(daily)
-            df_daily["usd"] = df_daily.apply(lambda r: cost(r["model"], r["i"] or 0, r["o"] or 0), axis=1)
-            df_daily["inr"] = df_daily["usd"] * _INR
-            fig = px.bar(df_daily, x="date", y="inr", color="model", title="Daily spend (₹)",
-                         color_discrete_map={"claude-sonnet-4-6": "#6366f1", "gemini-2.5-flash": "#10b981"})
+            df_daily["inr"] = df_daily.apply(lambda r: cost(r["model"], r["i"] or 0, r["o"] or 0), axis=1) * _INR
+            fig = px.bar(df_daily, x="date", y="inr", color="model", title="Daily spend (₹)")
             fig.update_layout(height=300, margin=dict(t=40,b=0,l=0,r=0))
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("No usage data yet.")
-
     with ch2:
-        # Per-model pie
         if usage_summary:
-            df_model = pd.DataFrame([{
-                "model": r["model"],
-                "cost_usd": cost(r["model"], r["ai"] or 0, r["ao"] or 0)
-            } for r in usage_summary])
+            df_model = pd.DataFrame([{"model": r["model"],
+                                      "cost_usd": cost(r["model"], r["ai"] or 0, r["ao"] or 0)}
+                                     for r in usage_summary])
             fig2 = px.pie(df_model, values="cost_usd", names="model", title="All-time spend by model")
             fig2.update_layout(height=300, margin=dict(t=40,b=0,l=0,r=0))
             st.plotly_chart(fig2, use_container_width=True)
 
-    # Per-skill breakdown
     st.subheader("By skill (all time)")
-    skill_usage = q("""
-        SELECT skill, model, SUM(input_tokens) as i, SUM(output_tokens) as o, COUNT(*) as runs
-        FROM token_usage GROUP BY skill, model ORDER BY SUM(input_tokens)+SUM(output_tokens) DESC
-    """)
+    skill_usage = q("""SELECT skill, model, SUM(input_tokens) as i, SUM(output_tokens) as o, COUNT(*) as runs
+                       FROM token_usage GROUP BY skill, model ORDER BY SUM(input_tokens)+SUM(output_tokens) DESC""")
     if skill_usage:
         df_skill = pd.DataFrame(skill_usage)
-        df_skill["cost_inr"] = df_skill.apply(lambda r: cost(r["model"], r["i"] or 0, r["o"] or 0)*_INR, axis=1)
-        df_skill["cost_inr"] = df_skill["cost_inr"].map("₹{:.4f}".format)
+        df_skill["cost_inr"] = df_skill.apply(lambda r: cost(r["model"], r["i"] or 0, r["o"] or 0)*_INR, axis=1).map("₹{:.4f}".format)
         df_skill["tokens"] = df_skill["i"].astype(str) + " in + " + df_skill["o"].astype(str) + " out"
-        st.dataframe(df_skill[["skill","model","tokens","runs","cost_inr"]],
-                     use_container_width=True, hide_index=True)
+        st.dataframe(df_skill[["skill","model","tokens","runs","cost_inr"]], use_container_width=True, hide_index=True)
     else:
         st.caption("No skill usage recorded yet.")
 
-    # Published stories
     st.divider()
     st.subheader("Published")
     pubs = q("""SELECT p.id, p.published_at::date as date, r.throughline, r.source, r.trust_gate

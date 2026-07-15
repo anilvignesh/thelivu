@@ -3,11 +3,11 @@ import os
 service = os.environ.get("RAILWAY_SERVICE_NAME", "thelivu")
 
 if service == "thelivu-agent":
-    from engine.agents.orchestrator import run_daily_cycle, process_recheck_requests, process_queued_carousels, cleanup_finished_carousels, send_cost_report, run_source_scout, run_story_scout, run_story_tracker, run_meta_synthesis, _cost_report_due
+    from engine.agents.orchestrator import run_daily_cycle, process_recheck_requests, process_queued_carousels, cleanup_finished_carousels, send_cost_report, run_source_scout, run_story_scout, run_story_tracker, run_meta_synthesis, run_dig_advance, promote_dig, run_chief_of_staff, _cost_report_due
     import time, logging, sys
     from datetime import datetime, timezone, timedelta
     from shared.config import ANTHROPIC_API_KEY, APPROVAL_MODE, TELEGRAM_BOT_TOKEN, TELEGRAM_DRAFT_CHAT_ID, CHECK_INTERVAL_HOURS, REPO_ROOT, SLIDE_SERVER_BASE_URL, SLIDE_SERVER_PORT
-    from shared.db import init_db, kv_get, kv_set, update_run
+    from shared.db import init_db, kv_get, kv_set, update_run, get_due_digs
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", stream=sys.stdout)
     log = logging.getLogger("orchestrator")
@@ -133,6 +133,24 @@ if service == "thelivu-agent":
         except Exception as e:
             log.error("Forced scout run failed: %s", e)
 
+        # Manual story-tracker signal (command center "Run now")
+        try:
+            if kv_get("force_tracker_run"):
+                kv_set("force_tracker_run", "")
+                log.info("Force story-tracker signalled")
+                run_story_tracker()
+        except Exception as e:
+            log.error("Forced tracker run failed: %s", e)
+
+        # Manual meta-synthesis signal (command center "Run now")
+        try:
+            if kv_get("force_meta_run"):
+                kv_set("force_meta_run", "")
+                log.info("Force meta-synthesis signalled")
+                run_meta_synthesis()
+        except Exception as e:
+            log.error("Forced meta run failed: %s", e)
+
         # Targeted dig signal (/dig [theme]) — story-scout on that theme now
         try:
             dig_theme = kv_get("dig_request")
@@ -142,6 +160,62 @@ if service == "thelivu-agent":
                 run_story_scout(theme_hint=dig_theme)
         except Exception as e:
             log.error("Targeted dig failed: %s", e)
+
+        # Persistent dig — manual advance signal (dashboard/bot button)
+        try:
+            adv_id = kv_get("advance_dig_id")
+            if adv_id:
+                kv_set("advance_dig_id", "")
+                log.info("Advancing dig #%s (signalled)", adv_id)
+                run_dig_advance(int(adv_id))
+        except Exception as e:
+            log.error("Manual dig advance failed: %s", e)
+
+        # Persistent dig — manual promote signal (dashboard/bot button)
+        try:
+            promo_id = kv_get("promote_dig_id")
+            if promo_id:
+                kv_set("promote_dig_id", "")
+                log.info("Promoting dig #%s (signalled)", promo_id)
+                promote_dig(int(promo_id))
+        except Exception as e:
+            log.error("Manual dig promote failed: %s", e)
+
+        # Persistent digs — daily auto-advance of due threads (next_action_at passed).
+        # One per tick to keep model cost bounded; the rest wait for the next tick.
+        try:
+            last_dig = kv_get("last_dig_sweep_at")
+            dig_due = (not last_dig) or (now_utc - datetime.fromisoformat(last_dig)).total_seconds() >= 6 * 3600
+            if dig_due:
+                due = get_due_digs(limit=1)
+                if due:
+                    kv_set("last_dig_sweep_at", now_utc.isoformat())
+                    log.info("Auto-advancing due dig #%s", due[0]["id"])
+                    run_dig_advance(due[0]["id"])
+        except Exception as e:
+            log.error("Auto dig advance failed: %s", e)
+
+        # Chief of staff — manual signal (dashboard/bot "Run now").
+        try:
+            if kv_get("run_chief_of_staff"):
+                kv_set("run_chief_of_staff", "")
+                log.info("Chief-of-staff sweep signalled")
+                run_chief_of_staff()
+        except Exception as e:
+            log.error("Chief-of-staff (manual) failed: %s", e)
+
+        # Chief of staff — daily proactive backlog sweep.
+        try:
+            last_cos = kv_get("last_cos_at")
+            cos_due = (not last_cos) or (now_utc - datetime.fromisoformat(last_cos)).total_seconds() >= 24 * 3600
+            if cos_due:
+                # Stamp BEFORE running so a mid-way failure can't retry-storm the
+                # sweep (and its web-search cost) every 2 min. run_chief_of_staff
+                # re-stamps on success.
+                kv_set("last_cos_at", now_utc.isoformat())
+                run_chief_of_staff()
+        except Exception as e:
+            log.error("Chief-of-staff (daily) failed: %s", e)
 
         # Owner topics — check every 2 minutes, run immediately if queued
         try:
