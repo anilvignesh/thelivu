@@ -3,15 +3,17 @@
 **Name:** Thelivu (തെളിവ്) — Malayalam for *clarity* and *evidence/proof*. Names
 both the method (the receipts) and the goal (understanding).
 
-**Tagline:** "Kerala, explained — with the evidence."
-*(alt: "The evidence, and what it means.")*
+**Tagline:** "The evidence, and what it means."
 
 **About blurb** (also the public statement of stance):
-> Thelivu is explanatory journalism for Kerala and India. We take important but
-> under-reported stories, verify them across independent sources, and explain why
-> they matter — openly from the side of ordinary people and public goods, and we
-> tell you when we're arguing a view. Every claim is sourced. We correct mistakes
-> in the open.
+> Thelivu is explanatory journalism. We take important but under-reported stories —
+> wherever they are — verify them across independent sources, and explain why they
+> matter — openly from the side of ordinary people and public goods, and we tell you
+> when we're arguing a view. Every claim is sourced. We correct mistakes in the open.
+
+*(Positioning: global in scope with a working emphasis on uncovering Kerala — where
+much of the audience is — but never Kerala-limited. This is a sourcing emphasis, not
+a public frame: we don't brand as "Kerala-first." See PROJECT-STATUS, 2026-07-16.)*
 
 **Standing footer** (on every published piece — keep verbatim):
 > Sources above. Drafted with AI assistance, reviewed by a human editor before

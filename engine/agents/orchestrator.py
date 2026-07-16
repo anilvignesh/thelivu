@@ -2109,11 +2109,12 @@ def process_recheck_requests():
             update_run(run["id"], status="held")  # leave it holdable
 
 
-# Evergreen hashtags on every post — geography + brand/category — so even a
-# generic story gets baseline reach. Story-specific tags (from the composer) are
-# added on top. Keep this lean and relevant; Instagram penalises spammy tag walls.
-_BASE_HASHTAGS = ["Kerala", "KeralaNews", "India", "IndiaNews", "Thelivu",
-                  "FactCheck", "Journalism"]
+# Evergreen hashtags on every post — brand/category only, deliberately NOT
+# geography. Thelivu covers all sorts of stories; Kerala/India are pursued hard in
+# sourcing but never stamped on every post. Geography tags are story-specific (the
+# composer adds #Kerala when a piece is Kerala, its own place tags otherwise).
+# Keep this lean and relevant; Instagram penalises spammy tag walls.
+_BASE_HASHTAGS = ["Thelivu", "FactCheck", "Journalism", "News"]
 _MAX_HASHTAGS = 15
 
 
