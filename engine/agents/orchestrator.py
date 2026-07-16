@@ -2109,19 +2109,48 @@ def process_recheck_requests():
             update_run(run["id"], status="held")  # leave it holdable
 
 
+# Evergreen hashtags on every post — geography + brand/category — so even a
+# generic story gets baseline reach. Story-specific tags (from the composer) are
+# added on top. Keep this lean and relevant; Instagram penalises spammy tag walls.
+_BASE_HASHTAGS = ["Kerala", "KeralaNews", "India", "IndiaNews", "Thelivu",
+                  "FactCheck", "Journalism"]
+_MAX_HASHTAGS = 15
+
+
+def _build_hashtags(story_tags):
+    """Combine evergreen brand/geo tags with the story-specific ones the composer
+    produced. Normalises (#, no spaces/punctuation), de-dupes case-insensitively,
+    caps the count, and returns a single caption-ready line."""
+    seen, out = set(), []
+    for raw in _BASE_HASHTAGS + list(story_tags or []):
+        tag = re.sub(r"[^0-9A-Za-z]", "", str(raw).lstrip("#"))
+        if not tag:
+            continue
+        key = tag.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append("#" + tag)
+        if len(out) >= _MAX_HASHTAGS:
+            break
+    return " ".join(out)
+
+
 def _parse_carousel_fields(text):
-    """Pull DARK/STAMP/SLIDE 1..N out of carousel-composer's structured output."""
+    """Pull DARK/STAMP/HASHTAGS/SLIDE 1..N out of carousel-composer's output."""
     def field(name, default=""):
         m = re.search(rf"^{name}:\s*(.+)$", text or "", re.IGNORECASE | re.MULTILINE)
         return m.group(1).strip() if m else default
 
     dark = field("DARK", "false").strip().lower() == "true"
     stamp = field("STAMP", "VERIFIED")
+    # HASHTAGS: a space/comma-separated list on one line; tolerate leading '#'.
+    hashtags = [t for t in re.split(r"[,\s]+", field("HASHTAGS", "")) if t]
     slides = []
     for m in re.finditer(r"^SLIDE\s+(\d+):\s*(.+)$", text or "", re.IGNORECASE | re.MULTILINE):
         slides.append((int(m.group(1)), m.group(2).strip()))
     slides.sort(key=lambda s: s[0])
-    return dark, stamp, [text for _, text in slides]
+    return dark, stamp, [text for _, text in slides], hashtags
 
 
 def process_queued_carousels():
@@ -2148,7 +2177,7 @@ def process_queued_carousels():
         try:
             composed = run_structured_skill(
                 "carousel-composer", run["draft_text"], marker=_M_CAROUSEL, run_id=carousel["run_id"])
-            dark, stamp, slide_texts = _parse_carousel_fields(composed)
+            dark, stamp, slide_texts, story_tags = _parse_carousel_fields(composed)
             if not slide_texts:
                 raise ValueError("carousel-composer returned no SLIDE lines")
 
@@ -2171,6 +2200,9 @@ def process_queued_carousels():
             caption_bits = [run.get("throughline") or ""]
             if article_url:
                 caption_bits.append(f"Full story & sources: {article_url}")
+            hashtags = _build_hashtags(story_tags)
+            if hashtags:
+                caption_bits.append(hashtags)
             caption = "\n\n".join(b for b in caption_bits if b)[:2200]
             update_carousel_run(carousel_id, caption=caption, status="pending_review")
 
