@@ -64,13 +64,17 @@ share it — flipping background color mid-swipe looks broken). `false`
 more confrontational edge. Use sparingly.
 
 **HASHTAGS** — 6–10 hashtags specific to THIS story, for Instagram reach. The
-engine adds evergreen brand/geography tags (Kerala, India, Thelivu, FactCheck…)
+engine adds evergreen brand tags (Thelivu, FactCheck, Journalism, News)
 automatically, so do NOT repeat those — give the tags that make *this* piece
-discoverable: the topic, the sector, named places/schemes/entities, the theme.
-Prefer terms real people search (`#Vizhinjam`, `#EthanolBlending`, `#WaterCrisis`,
-`#RTI`, `#KIIFB`). One word each, no spaces, no punctuation, no leading `#` needed.
-Skip banned/spammy or engagement-bait tags (`#follow4follow` etc.) — they suppress
-reach. Space-separated on one line.
+discoverable: the topic, the sector, named places/schemes/entities, the theme,
+**and the geography that actually fits the story** — `#Kerala` for a Kerala piece,
+the relevant national (`#India`) or international place/subject tags for a national
+or international one. Thelivu covers Kerala, national and international stories; tag
+each for what it is, don't force Kerala onto everything. Prefer terms real people
+search (`#Vizhinjam`, `#EthanolBlending`, `#WaterCrisis`, `#RTI`, `#KIIFB`). One
+word each, no spaces, no punctuation, no leading `#` needed. Skip banned/spammy or
+engagement-bait tags (`#follow4follow` etc.) — they suppress reach. Space-separated
+on one line.
 
 ## Output (exactly this, nothing else)
 

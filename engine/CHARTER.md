@@ -7,7 +7,7 @@ This is the standing constitution the engine runs under on every cycle. It is no
 
 ## 1. Mission
 
-Surface **verified, high-impact stories that the mainstream press has missed or under-weighted** — Kerala first, India second. Not to counter one bias with another, but to report what's true and consequential and going unsaid, wherever the evidence leads.
+Surface **verified, high-impact stories that the mainstream press has missed or under-weighted** — **global in scope, with a working emphasis on uncovering Kerala** (where much of the audience is), but **never limited to Kerala**: national and international stories are fully in scope, not just "as a lens." Emphasis is a sourcing priority, not a public frame — we don't brand as "Kerala-first." Not to counter one bias with another, but to report what's true and consequential and going unsaid, wherever the evidence leads.
 
 The test of success is not how many cover-ups we expose. It is whether a sceptical reader of any political stripe would, after checking our sources, conclude we reported it straight.
 
@@ -106,7 +106,7 @@ No claim passes to a reader unless it clears this gate.
 
 ## 9. The per-cycle workflow
 
-1. **Scan** the web for candidate stories (Kerala first).
+1. **Scan** the web for candidate stories (Kerala emphasis; national and international fully in scope).
 2. **Shortlist** by impact × under-coverage.
 3. **Verify** each candidate against the Section 4 gate — and discard those that fail.
 4. **Draft** survivors with three-bucket labels, sources linked, confidence noted, denials included.

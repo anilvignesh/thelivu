@@ -42,8 +42,14 @@ chat. To bootstrap it:
 ## Decisions locked (don't silently reverse — see CONTEXT-AND-HISTORY for why)
 
 Name **Thelivu**. Stance: **transparent perspective** (argue a view, openly; verify
-facts, judge framing). **English.** **One** human-reviewed piece a day. **Kerala-first,
-India-second, international as a lens** — distance from Kerala raises the bar. Sources
+facts, judge framing). **English.** **One** human-reviewed piece a day. **Global in
+scope, with a working emphasis on uncovering Kerala** (where much of the audience is)
+— **never Kerala-limited**; national and international stories are fully in scope.
+Emphasis is a sourcing priority, not a public frame — we do **not** brand as
+"Kerala-first." *(Repositioned 2026-07-16 from the original "Kerala-first,
+India-second, international as a lens; distance raises the bar" — owner's call:
+open to stories from around the world, Kerala emphasised for the audience, not a
+limit.)* Sources
 are leads; the open web verifies. Run **attended** on an M1 Mac via Claude Code under
 a Pro plan; **no local LLMs**; automation deferred until after validation. **The human
 gate is absolute.**
@@ -78,7 +84,8 @@ Each was downgraded, attributed, or dropped. **Preserve this reflex above all el
   (evidence the link, name the weakest link, downgrade by default).
 - A **self-similarity / anti-monotony check** in the editorial-reviewer — added
   because two early pieces both landed on "fiscal stress → privatisation."
-- Geographic tiers (Kerala core / national-by-hook / international-as-lens).
+- Geographic emphasis (Kerala prioritised for the audience; national + international
+  fully in scope — not just "as a lens"). Repositioned 2026-07-16; see Decisions.
 - The **dig**: `story-scout` + `watchlist.yaml` — proactive, hypothesis-driven
   investigation from primary records, to *unearth* stories rather than wait.
 - Public-tips discipline in `topic-intake` (tips are leads; protect sources; guard

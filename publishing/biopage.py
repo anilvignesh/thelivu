@@ -67,7 +67,7 @@ _PAGE = """<!DOCTYPE html>
 <header>
   <h1>Thelivu</h1>
   <hr class="rule">
-  <p class="tagline">Verification-first &middot; Kerala-first &middot; human-reviewed</p>{channel_line}
+  <p class="tagline">Verification-first &middot; human-reviewed</p>{channel_line}
 </header>
 {body}
 <footer>every story fact-checked before it reaches you</footer>
