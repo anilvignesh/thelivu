@@ -467,16 +467,27 @@ def _load_file_drafts():
     return files
 
 with t_drafts:
+    # Cap what's rendered — Streamlit re-renders every widget each run, so showing
+    # dozens of full drafts at once makes the tab crawl. Newest N, with the total.
+    _DRAFT_LIMIT, _HELD_LIMIT = 15, 12
+    n_drafts = scalar("SELECT COUNT(*) FROM pipeline_runs WHERE status='pending_human'")
+    n_held   = scalar("SELECT COUNT(*) FROM pipeline_runs WHERE status IN ('held','hold','needs_attention')")
     drafts = q("""SELECT id, created_at::date as date, source, throughline,
                          trust_gate, draft_text, review_text, verification_report
-                  FROM pipeline_runs WHERE status='pending_human' ORDER BY id DESC""")
-    held = q("""SELECT id, created_at::date as date, source, throughline, trust_gate
-                FROM pipeline_runs WHERE status IN ('held','hold') ORDER BY id DESC""")
+                  FROM pipeline_runs WHERE status='pending_human'
+                  ORDER BY id DESC LIMIT %(l)s""", {"l": _DRAFT_LIMIT})
+    held = q("""SELECT id, created_at::date as date, source, throughline, trust_gate,
+                       status, draft_text, review_text, verification_report
+                FROM pipeline_runs
+                WHERE status IN ('held','hold','needs_attention')
+                ORDER BY id DESC LIMIT %(l)s""", {"l": _HELD_LIMIT})
 
     if not drafts and not held:
         st.info("No drafts pending review. Stories will appear here when ready.")
     else:
-        st.caption(f"{len(drafts)} pending review · {len(held)} on hold  ·  "
+        more_d = f" (showing newest {len(drafts)})" if n_drafts > len(drafts) else ""
+        more_h = f" (showing newest {len(held)})" if n_held > len(held) else ""
+        st.caption(f"{n_drafts} pending review{more_d} · {n_held} on hold{more_h}  ·  "
                    "**Approving is the only action that publishes.**")
 
     for run in drafts:
@@ -520,21 +531,57 @@ with t_drafts:
                 st.text(run.get("verification_report") or "_No verification report._")
 
     if held:
-        st.subheader("On hold")
+        st.subheader(f"On hold / needs attention ({len(held)})")
+        st.caption("Held by the trust gate — read why, then act: requeue as-is, "
+                   "recheck (optionally with your editorial direction), publish if you "
+                   "judge it sound, or kill. No item dead-ends here.")
         for run in held:
+            rid = run["id"]
+            gate = run.get("trust_gate") or "—"
+            badge = "🚧 NEEDS ATTENTION" if run.get("status") == "needs_attention" else "⏸ HELD"
             with st.container(border=True):
-                hc1, hc2 = st.columns([5,2])
-                with hc1:
-                    st.markdown(f"**#{run['id']}** — {(run['throughline'] or '')[:100]}")
-                    st.caption(f"{run['date']} · {run['source']}")
-                with hc2:
-                    b1, b2 = st.columns(2)
-                    if b1.button("Requeue", key=f"req_{run['id']}", use_container_width=True):
-                        execute("UPDATE pipeline_runs SET status='pending_human', updated_at=NOW() WHERE id=%s", (run['id'],))
-                        st.cache_data.clear(); st.rerun()
-                    if b2.button("Recheck", key=f"rck_{run['id']}", use_container_width=True):
-                        execute("UPDATE pipeline_runs SET status='recheck_requested', updated_at=NOW() WHERE id=%s", (run['id'],))
-                        st.success("Queued for recheck."); st.cache_data.clear(); st.rerun()
+                st.markdown(f"**#{rid}** {badge} · gate `{gate}` — {(run['throughline'] or '')[:110]}")
+                st.caption(f"{run['date']} · {run['source']}")
+
+                with st.expander("📄 Read draft"):
+                    st.markdown(run.get("draft_text") or "_No draft text saved._")
+                with st.expander("🔎 Why it's held — verification report"):
+                    st.text(run.get("verification_report") or "_No verification report._")
+                with st.expander("📝 Review notes"):
+                    st.text(run.get("review_text") or "_No review notes._")
+
+                # Recheck WITH editorial direction — the key "close the loop" action.
+                note = st.text_area(
+                    "Editorial direction for a recheck (optional)",
+                    key=f"note_{rid}", height=70,
+                    placeholder="e.g. Attribute the Gadkari claim + add his denial; lean on the verified water/mandate spine.")
+                b1, b2, b3, b4 = st.columns(4)
+                if b1.button("🔄 Recheck", key=f"rck_{rid}", use_container_width=True,
+                             help="Re-develop the story; applies your direction above if set"):
+                    if note.strip():
+                        signal(f"recheck_note_{rid}", note.strip())
+                    execute("UPDATE pipeline_runs SET status='recheck_requested', updated_at=NOW() WHERE id=%s", (rid,))
+                    st.success("Queued for recheck" + (" with your direction." if note.strip() else "."))
+                    st.cache_data.clear(); st.rerun()
+                if b2.button("📬 Requeue as-is", key=f"req_{rid}", use_container_width=True,
+                             help="Send to your gate unchanged"):
+                    execute("UPDATE pipeline_runs SET status='pending_human', updated_at=NOW() WHERE id=%s", (rid,))
+                    st.cache_data.clear(); st.rerun()
+                if b3.button("✓ Publish", key=f"hpub_{rid}", use_container_width=True,
+                             help="You are the gate — publish if you judge it sound"):
+                    try:
+                        msg_ids = tg_post_channel(run.get("draft_text") or "")
+                        execute("UPDATE pipeline_runs SET status='published', updated_at=NOW() WHERE id=%s", (rid,))
+                        execute("INSERT INTO publications (run_id, channel_msg_ids, confidence) VALUES (%s,%s,%s)",
+                                (rid, json.dumps(msg_ids), "Confirmed"))
+                        tg_notify(f"✅ Published held run #{rid} ({len(msg_ids)} message(s)).")
+                        st.success(f"Published! {len(msg_ids)} message(s)."); st.cache_data.clear(); time.sleep(1); st.rerun()
+                    except Exception as e:
+                        st.error(f"Publish failed: {e}")
+                if b4.button("✗ Kill", key=f"hkil_{rid}", use_container_width=True):
+                    execute("UPDATE pipeline_runs SET status='killed', updated_at=NOW() WHERE id=%s", (rid,))
+                    tg_notify(f"❌ Held story #{rid} killed from dashboard.")
+                    st.cache_data.clear(); st.rerun()
 
     file_drafts = _load_file_drafts()
     if file_drafts:
@@ -577,10 +624,12 @@ with t_drafts:
 with t_pipeline:
     status_filter = st.selectbox("Filter by status",
         ["all","investigating","writing","pending_human","published","killed","held"], index=0)
-    sql = "SELECT id, created_at, source, throughline, trust_gate, status, updated_at FROM pipeline_runs"
+    # One query with the text columns — not a per-run round-trip (that was 50+ trips).
+    sql = ("SELECT id, created_at, source, throughline, trust_gate, status, updated_at, "
+           "draft_text, review_text, verification_report FROM pipeline_runs")
     if status_filter != "all":
         sql += " WHERE status=%(s)s"
-    sql += " ORDER BY id DESC LIMIT 50"
+    sql += " ORDER BY id DESC LIMIT 30"
     all_runs = q(sql, {"s": status_filter} if status_filter != "all" else None)
 
     if not all_runs:
@@ -594,18 +643,15 @@ with t_pipeline:
                 dc2.metric("Gate", run["trust_gate"] or "—")
                 dc3.metric("Source", (run["source"] or "—")[:18])
                 st.caption(f"Created: {run['created_at']} · Updated: {run['updated_at']}")
-                detail = q("SELECT draft_text, review_text, verification_report FROM pipeline_runs WHERE id=%(i)s", {"i": run["id"]})
-                if detail:
-                    d = detail[0]
-                    dt1, dt2, dt3 = st.tabs(["Draft", "Review", "Verification"])
-                    with dt1: st.markdown(d.get("draft_text") or "_Not yet written._")
-                    with dt2: st.text(d.get("review_text") or "_No review._")
-                    with dt3: st.text(d.get("verification_report") or "_No verification._")
+                dt1, dt2, dt3 = st.tabs(["Draft", "Review", "Verification"])
+                with dt1: st.markdown(run.get("draft_text") or "_Not yet written._")
+                with dt2: st.text(run.get("review_text") or "_No review._")
+                with dt3: st.text(run.get("verification_report") or "_No verification._")
                 if run["status"] == "pending_human":
                     bc1, bc2, bc3 = st.columns(3)
                     if bc1.button("✓ Approve", key=f"pa_{run['id']}", type="primary"):
                         try:
-                            msg_ids = tg_post_channel((detail[0].get("draft_text") or "") if detail else "")
+                            msg_ids = tg_post_channel(run.get("draft_text") or "")
                             execute("UPDATE pipeline_runs SET status='published', updated_at=NOW() WHERE id=%s", (run["id"],))
                             execute("INSERT INTO publications (run_id,channel_msg_ids,confidence) VALUES (%s,%s,%s)",
                                     (run["id"], json.dumps(msg_ids), "Confirmed"))

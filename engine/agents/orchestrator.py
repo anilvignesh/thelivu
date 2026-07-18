@@ -2044,25 +2044,35 @@ def send_cost_report():
 # Re-check held stories — owner-triggered (/recheck), fresh re-investigation
 # ---------------------------------------------------------------------------
 
-def recheck_run(run_id):
+def recheck_run(run_id, note=""):
     """Re-develop one held story from scratch: re-investigate against today's live
     sources, re-verify, and — if it now clears the gate — re-write and bring back a
     FULLER draft for approval. This is how a story 'ripens': held while thin, it
-    comes back once the record has actually moved. Triggered only by the owner."""
+    comes back once the record has actually moved. Triggered only by the owner.
+
+    `note` carries optional OWNER EDITORIAL DIRECTION (e.g. "downgrade claim X to an
+    attributed allegation + add the denial; lean on the verified spine"). It flows
+    into the brief so every downstream stage — investigate, verify, write — respects
+    it. It steers framing/emphasis; it never licenses publishing an unverified claim
+    as fact (the trust gate still governs)."""
     from shared.db import get_run
     run = get_run(run_id)
     if not run:
         log.warning("recheck_run: #%s not found", run_id)
         return
     throughline = run.get("throughline") or ""
-    log.info("Re-checking held run #%s: %s", run_id, throughline[:60])
+    note = (note or "").strip()
+    log.info("Re-checking held run #%s%s: %s", run_id,
+             " (with owner direction)" if note else "", throughline[:60])
 
+    direction_line = (f"\nOwner editorial direction (follow this): {note[:600]}" if note else "")
     brief = (
         "STORY_BRIEF\n"
         "Geography: Follow the story — match scope to evidence and impact\n"
         f"Angle: {throughline[:200]}\n"
         "Source: previously-held story, re-checked for development\n"
-        "Scope: Re-investigate as reported; expand or narrow on what the evidence now shows\n"
+        "Scope: Re-investigate as reported; expand or narrow on what the evidence now shows"
+        f"{direction_line}\n"
         "END_STORY_BRIEF"
     )
     investigate_input = (
@@ -2070,7 +2080,11 @@ def recheck_run(run_id):
         "sources and surface anything that has developed since it was held (new "
         "filings, hearings, data, corroborating reports, official responses).\n\n"
         f"Throughline: {throughline}\n\n"
-        f"Earlier verification notes (for context only — re-verify fresh):\n"
+        + (f"OWNER EDITORIAL DIRECTION — apply this to framing, emphasis and how "
+           f"contested claims are handled (attribute + include denials rather than "
+           f"asserting; downgrade allegations to what the record supports). It does "
+           f"NOT override the trust gate:\n{note}\n\n" if note else "")
+        + f"Earlier verification notes (for context only — re-verify fresh):\n"
         f"{(run.get('verification_report') or 'N/A')[:1500]}"
     )
 
@@ -2097,16 +2111,22 @@ def recheck_run(run_id):
 
 
 def process_recheck_requests():
-    """Pick up runs the owner flagged via /recheck (status 'recheck_requested') and
-    re-develop them. Cheap when there's nothing pending (one status query)."""
+    """Pick up runs the owner flagged for recheck (status 'recheck_requested') and
+    re-develop them, honouring any owner editorial direction stashed in kv
+    ('recheck_note_<id>'). Cheap when there's nothing pending (one status query)."""
     from shared.db import get_runs_by_status
     pending = get_runs_by_status("recheck_requested", limit=5)
     for run in pending:
+        note_key = f"recheck_note_{run['id']}"
+        note = kv_get(note_key) or ""
         try:
-            recheck_run(run["id"])
+            recheck_run(run["id"], note=note)
         except Exception as e:
             log.error("recheck_run #%s failed: %s", run["id"], e, exc_info=True)
             update_run(run["id"], status="held")  # leave it holdable
+        finally:
+            if note:
+                kv_set(note_key, "")  # consume the direction once used
 
 
 # Evergreen hashtags on every post — brand/category only, deliberately NOT
