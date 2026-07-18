@@ -2065,6 +2065,14 @@ def recheck_run(run_id, note=""):
     log.info("Re-checking held run #%s%s: %s", run_id,
              " (with owner direction)" if note else "", throughline[:60])
 
+    # If the owner's direction includes a link (article or video), fetch its content
+    # so the recheck works from the actual source, not just the URL string — same
+    # enrichment the Ingest tab uses. The short instruction still drives framing; the
+    # fetched text is handed to the investigator as source material.
+    note_enriched = note
+    if note and ("http://" in note or "https://" in note):
+        note_enriched = _enrich_topic_with_link(note)
+
     direction_line = (f"\nOwner editorial direction (follow this): {note[:600]}" if note else "")
     brief = (
         "STORY_BRIEF\n"
@@ -2082,8 +2090,10 @@ def recheck_run(run_id, note=""):
         f"Throughline: {throughline}\n\n"
         + (f"OWNER EDITORIAL DIRECTION — apply this to framing, emphasis and how "
            f"contested claims are handled (attribute + include denials rather than "
-           f"asserting; downgrade allegations to what the record supports). It does "
-           f"NOT override the trust gate:\n{note}\n\n" if note else "")
+           f"asserting; downgrade allegations to what the record supports). If it "
+           f"includes a source/article below, treat it as a lead to verify "
+           f"independently, not as proof. It does NOT override the trust gate:\n"
+           f"{note_enriched}\n\n" if note else "")
         + f"Earlier verification notes (for context only — re-verify fresh):\n"
         f"{(run.get('verification_report') or 'N/A')[:1500]}"
     )

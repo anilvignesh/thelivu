@@ -552,9 +552,10 @@ with t_drafts:
 
                 # Recheck WITH editorial direction — the key "close the loop" action.
                 note = st.text_area(
-                    "Editorial direction for a recheck (optional)",
+                    "Editorial direction for a recheck (optional) — you can paste links too",
                     key=f"note_{rid}", height=70,
-                    placeholder="e.g. Attribute the Gadkari claim + add his denial; lean on the verified water/mandate spine.")
+                    placeholder="e.g. Attribute the Gadkari claim + add his denial; lean on the verified spine. "
+                                "Or paste a source: https://… (it'll fetch and verify it).")
                 b1, b2, b3, b4 = st.columns(4)
                 if b1.button("🔄 Recheck", key=f"rck_{rid}", use_container_width=True,
                              help="Re-develop the story; applies your direction above if set"):
