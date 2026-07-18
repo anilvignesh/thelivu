@@ -51,7 +51,8 @@ sources:
     name: Johnny Harris
     platform: youtube
     handle: "@johnnyharris"
-    feed: "https://www.youtube.com/feeds/videos.xml?channel_id=UCRMqltDYBpKM-6_HnCwL8Vg"
+    # channel_id corrected 2026-07-18 (old UCRMqltDYBpKM-6_HnCwL8Vg returned an empty feed)
+    feed: "https://www.youtube.com/feeds/videos.xml?channel_id=UCmGSJVG3mCRXVOP4yZrU1Dw"
     role: lead
     tier: 3
     lean: "explainer journalism (geopolitics); mild establishment-progressive tint"
@@ -67,7 +68,10 @@ sources:
     role: lead
     tier: 3
     lean: "progressive labor advocacy — OPENLY not neutral (rated Left / Mostly-Factual)"
-    status: active
+    # DEACTIVATED 2026-07-18: old channel_id returns an empty feed and the @perfectunion
+    # handle now resolves to a different channel ("Brian Williams"). Needs a verified
+    # channel_id before reactivating — don't pull until confirmed.
+    status: inactive
     added: 2026-06-21
     notes: "Use as a LEAD only, never as a verification source — its lean disqualifies it as corroboration."
 
