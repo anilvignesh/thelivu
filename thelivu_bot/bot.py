@@ -662,39 +662,53 @@ async def cmd_held(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_recheck(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Flag a held story for a fresh re-investigation (the agent does it next tick)."""
+    """Flag a held story for a fresh re-investigation, optionally with editorial
+    direction: /recheck <id> [your direction — what to search / how to frame; links OK]."""
     if not context.args:
         await update.message.reply_text(
-            "Usage: /recheck <run_id>\n\n"
-            "Re-investigates a held story from scratch against today's live sources "
-            "and brings back a fuller draft if it has developed enough to publish. "
+            "Usage: /recheck <run_id> [direction]\n\n"
+            "Re-investigates a held story from scratch. Add optional direction — what "
+            "to search for, how to handle a claim, even a source link — and the agent "
+            "applies it:\n"
+            "• /recheck 86\n"
+            "• /recheck 86 attribute the Gadkari claim + add his denial; lean on the "
+            "verified spine\n"
+            "• /recheck 86 verify against https://example.com/report\n\n"
+            "It steers the search + framing; it never overrides the trust gate. "
             "Use /held to see held stories."
         )
         return
     try:
         run_id = int(context.args[0])
     except ValueError:
-        await update.message.reply_text("Usage: /recheck <run_id> — run_id must be a number.")
+        await update.message.reply_text("Usage: /recheck <run_id> [direction] — run_id must be a number.")
         return
-    await _request_recheck(update.message, run_id)
+    note = " ".join(context.args[1:]).strip()
+    await _request_recheck(update.message, run_id, note=note)
 
 
-async def _request_recheck(message, run_id):
+async def _request_recheck(message, run_id, note=""):
     run = get_run(run_id)
     if run is None:
         await message.reply_text(f"Run #{run_id} not found.")
         return
-    if run.get("status") not in ("held", "hold"):
+    if run.get("status") not in ("held", "hold", "needs_attention"):
         await message.reply_text(
-            f"Run #{run_id} isn't held (status: {run.get('status')}). Only held stories can be re-checked."
+            f"Run #{run_id} isn't held (status: {run.get('status')}). Only held / "
+            "needs-attention stories can be re-checked."
         )
         return
+    if note:
+        kv_set(f"recheck_note_{run_id}", note[:1500])
     update_run(run_id, status="recheck_requested")
     await message.reply_text(
-        f"Re-check queued for #{run_id}. The agent will re-investigate it from scratch "
-        f"on its next tick and send back a fuller draft if it's developed enough to publish."
+        f"Re-check queued for #{run_id}"
+        + (" with your direction." if note else ".")
+        + " The agent will re-investigate it on its next tick"
+        + (" applying what you said" if note else "")
+        + " and send back a fuller draft if it develops enough to publish."
     )
-    log.info("Recheck requested for run #%d", run_id)
+    log.info("Recheck requested for run #%d%s", run_id, " (with direction)" if note else "")
 
 
 async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
