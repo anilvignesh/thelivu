@@ -1611,6 +1611,46 @@ def _days_ago(ts):
         return 0
 
 
+def _extract_block_array(output, name):
+    """Pull the JSON array after a NAME marker, tolerating a missing END_<NAME>
+    marker or a truncated tail (the chief-of-staff sometimes runs out of output
+    budget mid-array). Salvages complete objects rather than dropping everything."""
+    m = re.search(rf"{name}\s*(\[.*?\])\s*END_{name}", output, re.DOTALL)
+    raw = m.group(1) if m else None
+    if raw is None:
+        i = output.find(name)
+        if i == -1:
+            return []
+        start = output.find("[", i)
+        if start == -1:
+            return []
+        depth, end = 0, None
+        for j in range(start, len(output)):
+            if output[j] == "[":
+                depth += 1
+            elif output[j] == "]":
+                depth -= 1
+                if depth == 0:
+                    end = j + 1
+                    break
+        raw = output[start:end] if end else None
+        if raw is None:  # truncated array — close it at the last complete object
+            last = output.rfind("}", start)
+            raw = (output[start:last + 1] + "]") if last != -1 else None
+    if not raw:
+        return []
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        last = raw.rfind("}")  # final salvage: keep complete objects only
+        if last != -1:
+            try:
+                return json.loads(raw[:last + 1] + "]")
+            except (json.JSONDecodeError, TypeError):
+                return []
+        return []
+
+
 def _build_cos_snapshot():
     """Gather the neglected backlog for the chief-of-staff sweep."""
     runs = get_all_runs_summary(limit=80)
@@ -1649,8 +1689,10 @@ def run_chief_of_staff():
         kv_set("last_cos_at", datetime.now(timezone.utc).isoformat())
         return
     try:
+        # Generous budget — the sweep reasons over the whole backlog AND must emit
+        # two complete machine blocks at the end; 4096 truncated them mid-array.
         output = run_skill("chief-of-staff", f"BACKLOG SNAPSHOT:\n\n{snapshot}",
-                           topic="backlog sweep")
+                           topic="backlog sweep", max_tokens=8192)
     except Exception as e:
         log.error("Chief of staff skill failed: %s", e)
         return
@@ -1658,27 +1700,21 @@ def run_chief_of_staff():
     # Auto-open the new investigation threads it proposes (a dig never publishes,
     # so opening one is within the follow-up brain's remit).
     opened = 0
-    m = re.search(r"NEW_DIGS\s*(\[.*?\])\s*END_NEW_DIGS", output, re.DOTALL)
-    if m:
-        try:
-            for nd in json.loads(m.group(1)):
-                title = (nd.get("title") or "").strip()
-                if not title:
-                    continue
-                from datetime import timedelta
-                did = create_dig(
-                    title=title[:200], question=(nd.get("question") or "").strip(),
-                    kerala_anchor=(nd.get("kerala_anchor") or "").strip(),
-                    hypothesis=(nd.get("hypothesis") or "").strip(),
-                    owner_note="opened by chief-of-staff", priority=2, status="scoping",
-                )
-                # Make it due soon so the daily auto-advance picks it up.
-                update_dig(did, next_action_at=datetime.now(timezone.utc).isoformat())
-                add_dig_update(did, "Thread opened by the chief-of-staff sweep from a "
-                                    "backlog/watchlist pattern. First advance pending.", kind="note")
-                opened += 1
-        except (json.JSONDecodeError, TypeError) as e:
-            log.warning("chief-of-staff NEW_DIGS parse failed: %s", e)
+    for nd in _extract_block_array(output, "NEW_DIGS"):
+        title = (nd.get("title") or "").strip()
+        if not title:
+            continue
+        did = create_dig(
+            title=title[:200], question=(nd.get("question") or "").strip(),
+            kerala_anchor=(nd.get("kerala_anchor") or "").strip(),
+            hypothesis=(nd.get("hypothesis") or "").strip(),
+            owner_note="opened by chief-of-staff", priority=2, status="scoping",
+        )
+        # Make it due soon so the daily auto-advance picks it up.
+        update_dig(did, next_action_at=datetime.now(timezone.utc).isoformat())
+        add_dig_update(did, "Thread opened by the chief-of-staff sweep from a "
+                            "backlog/watchlist pattern. First advance pending.", kind="note")
+        opened += 1
 
     # EXECUTE the recommendations autonomously. The owner granted full authority to
     # work the backlog on its own — the only reserved decision is the publish/review
@@ -1688,13 +1724,7 @@ def run_chief_of_staff():
     _MAX_ACTIONS = 8
     runs_by_id = {r["id"]: r for r in get_all_runs_summary(limit=80)}
     actions_taken = []
-    mr = re.search(r"RECOMMENDATIONS\s*(\[.*?\])\s*END_RECOMMENDATIONS", output, re.DOTALL)
-    rec_list = []
-    if mr:
-        try:
-            rec_list = json.loads(mr.group(1))
-        except (json.JSONDecodeError, TypeError) as e:
-            log.warning("chief-of-staff RECOMMENDATIONS parse failed: %s", e)
+    rec_list = _extract_block_array(output, "RECOMMENDATIONS")
     for rec in rec_list[:_MAX_ACTIONS]:
         ref = str(rec.get("ref", "")).strip()
         action = (rec.get("action") or "").strip().lower()

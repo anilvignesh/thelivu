@@ -43,7 +43,9 @@ The backlog is only half the job. From patterns across the archive and gaps in t
 
 ## Output — two structured blocks (both mandatory, even if empty)
 
-First a short prose brief (what you swept, the headline judgments), then exactly these two machine-readable blocks:
+**Brevity is mandatory — the two machine blocks are the deliverable, the prose is not.** Lead with a **2–4 sentence** summary only (what you swept + the top judgment). Do NOT write a long per-item prose analysis — put per-item reasoning in each recommendation's one-sentence `why`, nowhere else. Then emit BOTH blocks **in full, with their closing markers**; if you're running long, cut the prose, never the blocks. Keep each `why` to one sentence so both blocks always complete.
+
+A short prose lead, then exactly these two machine-readable blocks (both closed):
 
 ```
 RECOMMENDATIONS
