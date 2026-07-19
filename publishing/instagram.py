@@ -175,19 +175,38 @@ def publish_photo(image_url, caption=""):
     return media_id, _permalink(media_id)
 
 
-def publish_carousel(image_urls, caption=""):
+def publish_carousel(image_urls, caption="", progress=None):
     """Publish up to 10 images (already at public image_urls) as one
     Instagram carousel post. Returns (media_id, permalink). Raises
     IGNotConfigured if the Meta app isn't set up, or IGPublishError on any
     Graph API failure (including a single bad child — the whole carousel is
-    one post, so a partial publish isn't meaningful)."""
+    one post, so a partial publish isn't meaningful).
+
+    `progress(fraction, message)` — optional callback for a UI progress bar; called
+    at each step (0.0→1.0). Ignored if None."""
+    def _p(frac, msg):
+        if progress:
+            try:
+                progress(min(max(frac, 0.0), 1.0), msg)
+            except Exception:
+                pass
+
     _require_config()
     if not 2 <= len(image_urls) <= 10:
         raise IGPublishError(f"Carousel needs 2-10 images, got {len(image_urls)}")
-    child_ids = [_create_carousel_item(url) for url in image_urls]
-    for child_id in child_ids:
+    n = len(image_urls)
+    total = n + 2  # each slide upload + assemble + publish
+    child_ids = []
+    for i, url in enumerate(image_urls):
+        _p(i / total, f"Uploading slide {i + 1} of {n}…")
+        child_ids.append(_create_carousel_item(url))
+    for i, child_id in enumerate(child_ids):
         _wait_until_ready(child_id)
+        _p((i + 1) / total, f"Processing slide {i + 1} of {n}…")
+    _p(n / total, "Assembling the carousel…")
     container_id = _create_carousel_container(child_ids, caption)
     _wait_until_ready(container_id)
+    _p((n + 1) / total, "Publishing to Instagram…")
     media_id = _publish_container(container_id)
+    _p(1.0, "Posted ✓")
     return media_id, _permalink(media_id)
