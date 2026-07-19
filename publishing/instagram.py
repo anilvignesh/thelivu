@@ -27,6 +27,19 @@ from shared.config import IG_USER_ID, IG_ACCESS_TOKEN
 _API = "https://graph.instagram.com/v21.0"
 log = logging.getLogger("instagram")
 
+# Meta error codes that are transient (their servers, not our request) — retry these.
+# 1/2 = unknown/unexpected, 4/17/32/613 = rate/throughput limits. is_transient=True
+# also marks them. A non-transient error (bad token, bad param) is returned as-is so
+# the caller can raise a clear message instead of retrying pointlessly.
+_TRANSIENT_CODES = {1, 2, 4, 17, 32, 341, 368, 613}
+
+
+def _is_transient_error(payload):
+    err = payload.get("error") if isinstance(payload, dict) else None
+    if not err:
+        return False
+    return bool(err.get("is_transient")) or err.get("code") in _TRANSIENT_CODES
+
 
 class IGNotConfigured(RuntimeError):
     """IG_USER_ID / IG_ACCESS_TOKEN not set yet — Meta app isn't wired up."""
@@ -54,15 +67,21 @@ def _graph_post(node_path, data, tries=5):
         r = None
         try:
             r = requests.post(f"{_API}/{node_path}", data=data, timeout=30)
-            return r.json()
+            out = r.json()
+            if _is_transient_error(out):  # Meta-side blip (is_transient) — retry
+                last = out["error"]
+                log.warning("Instagram POST %s attempt %d/%d transient: %s",
+                            node_path, i + 1, tries, out["error"].get("message"))
+                time.sleep(min(2 ** i, 10)); continue
+            return out
         except (requests.RequestException, ValueError) as e:
             last = e
-            # Capture the smoking gun: on an empty/non-JSON body we now log the raw
-            # HTTP status + body snippet, instead of a bare "Expecting value" error.
+            # Capture the smoking gun: on an empty/non-JSON body log the raw HTTP
+            # status + body snippet, instead of a bare "Expecting value" error.
             detail = f" [HTTP {r.status_code}, body={r.text[:200]!r}]" if r is not None else " [no response]"
             log.warning("Instagram POST %s attempt %d/%d failed: %s%s", node_path, i + 1, tries, e, detail)
             time.sleep(min(2 ** i, 10))
-    raise IGPublishError(f"Instagram POST {node_path} failed after {tries} tries: {last}")
+    raise IGPublishError(f"Instagram POST {node_path} failed after {tries} tries (last: {last})")
 
 
 def _graph_get(node_path, params, tries=5):
@@ -71,13 +90,17 @@ def _graph_get(node_path, params, tries=5):
         r = None
         try:
             r = requests.get(f"{_API}/{node_path}", params=params, timeout=15)
-            return r.json()
+            out = r.json()
+            if _is_transient_error(out):
+                last = out["error"]
+                time.sleep(min(2 ** i, 10)); continue
+            return out
         except (requests.RequestException, ValueError) as e:
             last = e
             detail = f" [HTTP {r.status_code}, body={r.text[:200]!r}]" if r is not None else " [no response]"
             log.warning("Instagram GET %s attempt %d/%d failed: %s%s", node_path, i + 1, tries, e, detail)
             time.sleep(min(2 ** i, 10))
-    raise IGPublishError(f"Instagram GET {node_path} failed after {tries} tries: {last}")
+    raise IGPublishError(f"Instagram GET {node_path} failed after {tries} tries (last: {last})")
 
 
 def _create_container(image_url, caption):
