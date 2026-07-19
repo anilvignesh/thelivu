@@ -42,42 +42,57 @@ def _require_config():
         )
 
 
+def _graph_post(node_path, data, tries=5):
+    """POST to the Graph API with retries. Meta's domains are flaky on some ISPs
+    (docs/HANDOFF.md §5) — a reset/empty response makes r.json() raise a bare
+    "Expecting value" JSONDecodeError, which used to crash the whole publish. Retry
+    transient transport/parse failures with backoff; return parsed JSON or raise."""
+    last = None
+    for i in range(tries):
+        try:
+            r = requests.post(f"{_API}/{node_path}", data=data, timeout=30)
+            return r.json()
+        except (requests.RequestException, ValueError) as e:
+            last = e
+            time.sleep(min(2 ** i, 10))
+    raise IGPublishError(f"Instagram POST {node_path} failed after {tries} tries: {last}")
+
+
+def _graph_get(node_path, params, tries=5):
+    last = None
+    for i in range(tries):
+        try:
+            r = requests.get(f"{_API}/{node_path}", params=params, timeout=15)
+            return r.json()
+        except (requests.RequestException, ValueError) as e:
+            last = e
+            time.sleep(min(2 ** i, 10))
+    raise IGPublishError(f"Instagram GET {node_path} failed after {tries} tries: {last}")
+
+
 def _create_container(image_url, caption):
-    r = requests.post(
-        f"{_API}/{IG_USER_ID}/media",
-        data={"image_url": image_url, "caption": caption, "access_token": IG_ACCESS_TOKEN},
-        timeout=30,
-    )
-    data = r.json()
+    data = _graph_post(f"{IG_USER_ID}/media",
+                       {"image_url": image_url, "caption": caption, "access_token": IG_ACCESS_TOKEN})
     if "id" not in data:
         raise IGPublishError(f"Container creation failed: {data}")
     return data["id"]
 
 
 def _create_carousel_item(image_url):
-    r = requests.post(
-        f"{_API}/{IG_USER_ID}/media",
-        data={"image_url": image_url, "is_carousel_item": "true", "access_token": IG_ACCESS_TOKEN},
-        timeout=30,
-    )
-    data = r.json()
+    data = _graph_post(f"{IG_USER_ID}/media",
+                       {"image_url": image_url, "is_carousel_item": "true", "access_token": IG_ACCESS_TOKEN})
     if "id" not in data:
         raise IGPublishError(f"Carousel item creation failed: {data}")
     return data["id"]
 
 
 def _create_carousel_container(child_ids, caption):
-    r = requests.post(
-        f"{_API}/{IG_USER_ID}/media",
-        data={
-            "media_type": "CAROUSEL",
-            "children": ",".join(child_ids),
-            "caption": caption,
-            "access_token": IG_ACCESS_TOKEN,
-        },
-        timeout=30,
-    )
-    data = r.json()
+    data = _graph_post(f"{IG_USER_ID}/media", {
+        "media_type": "CAROUSEL",
+        "children": ",".join(child_ids),
+        "caption": caption,
+        "access_token": IG_ACCESS_TOKEN,
+    })
     if "id" not in data:
         raise IGPublishError(f"Carousel container creation failed: {data}")
     return data["id"]
@@ -88,12 +103,7 @@ def _wait_until_ready(container_id, attempts=10, delay=2):
     publishing anyway — single-image containers are usually ready instantly;
     this just avoids a race on a slow day)."""
     for _ in range(attempts):
-        r = requests.get(
-            f"{_API}/{container_id}",
-            params={"fields": "status_code", "access_token": IG_ACCESS_TOKEN},
-            timeout=15,
-        )
-        status = r.json().get("status_code")
+        status = _graph_get(container_id, {"fields": "status_code", "access_token": IG_ACCESS_TOKEN}).get("status_code")
         if status == "FINISHED":
             return
         if status == "ERROR":
@@ -102,12 +112,8 @@ def _wait_until_ready(container_id, attempts=10, delay=2):
 
 
 def _publish_container(container_id):
-    r = requests.post(
-        f"{_API}/{IG_USER_ID}/media_publish",
-        data={"creation_id": container_id, "access_token": IG_ACCESS_TOKEN},
-        timeout=30,
-    )
-    data = r.json()
+    data = _graph_post(f"{IG_USER_ID}/media_publish",
+                       {"creation_id": container_id, "access_token": IG_ACCESS_TOKEN})
     if "id" not in data:
         raise IGPublishError(f"Publish failed: {data}")
     return data["id"]
