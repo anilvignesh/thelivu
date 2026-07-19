@@ -165,9 +165,17 @@ def empty_state(icon, title, hint):
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
-@st.cache_data(ttl=10)
+# connect_timeout so a network blip to Railway fails fast (a few s) with a clear
+# error instead of freezing the whole page on a dead socket for ~30s+.
+_DB_CONNECT_TIMEOUT = 8
+
+# ttl=30 (was 10): a click reruns the WHOLE script before reaching the button's
+# handler, and each query is a round-trip to Railway over the internet — a longer
+# cache means most reruns skip the DB, so actions (and the post animation) start
+# sooner. The 🔄 Refresh button clears the cache when you want fresh data.
+@st.cache_data(ttl=30)
 def q(sql, params=None):
-    conn = psycopg2.connect(DB_URL)
+    conn = psycopg2.connect(DB_URL, connect_timeout=_DB_CONNECT_TIMEOUT)
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute(sql, params or ())
@@ -176,7 +184,7 @@ def q(sql, params=None):
         conn.close()
 
 def execute(sql, params=None):
-    conn = psycopg2.connect(DB_URL)
+    conn = psycopg2.connect(DB_URL, connect_timeout=_DB_CONNECT_TIMEOUT)
     try:
         cur = conn.cursor()
         cur.execute(sql, params or ())
@@ -701,6 +709,7 @@ with t_carousels:
             if actionable:
                 pc1, pc2 = st.columns(2)
                 if pc1.button("📤 Post to Instagram", key=f"cpost_{cid}", type="primary", use_container_width=True):
+                    st.toast(f"Posting carousel #{cid}…", icon="📤")  # instant feedback
                     from publishing.publish import post_carousel_run
                     with st.status(f"Posting carousel #{cid} to Instagram…", expanded=True) as status:
                         bar = st.progress(0.0, text="Starting…")
