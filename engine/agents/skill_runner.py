@@ -312,13 +312,20 @@ def _run_openai_compat(client, model, skill_name, input_text, system_prompt,
     return response.choices[0].message.content.strip()
 
 
-def _run_claude(skill_name, input_text, system_prompt, extra_tools, max_tokens, run_id=None):
-    from shared.db import record_usage
+# Hard cap on Claude tool-use (web-search) rounds. Each round re-sends the ENTIRE
+# accumulated context as input tokens, so an uncapped search loop balloons to
+# ~400k input tokens in a single call (this was ~95% of the whole project's cost —
+# a handful of research fallbacks that ran away). After the cap we make one final
+# call with NO tools, forcing the model to answer from what it has already gathered.
+_MAX_TOOL_ROUNDS = 6
 
+
+def _run_claude(skill_name, input_text, system_prompt, extra_tools, max_tokens, run_id=None):
     tools = _CLAUDE_SKILL_TOOLS.get(skill_name, []) + (extra_tools or [])
     messages = [{"role": "user", "content": input_text}]
     client = _get_claude()
     total_in = total_out = 0
+    rounds = 0
 
     # Cache the system prompt (contract + date anchor + full SKILL.md, ~1.5-2k
     # tokens). When the same skill is called again within the cache window — the
@@ -331,10 +338,13 @@ def _run_claude(skill_name, input_text, system_prompt, extra_tools, max_tokens, 
     log.info("Running %s via Claude", skill_name)
 
     while True:
+        # Once the round cap is reached, drop the tools so the model must answer
+        # from what it has instead of searching forever (the cost runaway).
+        call_tools = tools if rounds < _MAX_TOOL_ROUNDS else []
         response = client.messages.create(
             model=CLAUDE_MODEL,
             system=system_blocks,
-            tools=tools,
+            tools=call_tools,
             messages=messages,
             max_tokens=max_tokens,
         )
@@ -346,6 +356,14 @@ def _run_claude(skill_name, input_text, system_prompt, extra_tools, max_tokens, 
             return _extract_claude_text(response)
 
         if response.stop_reason == "tool_use":
+            if not call_tools:
+                # Tools were already withdrawn but the model still tried — stop.
+                _record_claude(skill_name, total_in, total_out, run_id)
+                return _extract_claude_text(response)
+            rounds += 1
+            if rounds >= _MAX_TOOL_ROUNDS:
+                log.info("%s hit the %d-round Claude tool cap — forcing a final answer",
+                         skill_name, _MAX_TOOL_ROUNDS)
             messages.append({"role": "assistant", "content": response.content})
             tool_results = []
             for block in response.content:
