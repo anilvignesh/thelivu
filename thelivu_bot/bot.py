@@ -1327,41 +1327,27 @@ async def _handle_carousel_approve(query, carousel_id, carousel):
     # (self-hosted file server) — this bot runs as a separate Railway service
     # with its own filesystem, so it can't read local image_paths written by
     # that process. See process_queued_carousels() in engine/agents/orchestrator.py.
-    slides = get_carousel_slides(carousel_id)
-    image_urls = [s["image_url"] for s in slides if s.get("image_url")]
-    if len(image_urls) != len(slides) or not image_urls:
-        await query.message.reply_text(
-            f"Carousel #{carousel_id} has {len(slides)} slides but only {len(image_urls)} hosted "
-            f"images. Try again shortly, or check SLIDE_SERVER_BASE_URL is set."
-        )
-        return
-
     try:
         await query.edit_message_reply_markup(reply_markup=None)
     except Exception:
         pass
 
-    from shared.config import IG_USER_ID, IG_ACCESS_TOKEN
-    if not IG_USER_ID or not IG_ACCESS_TOKEN:
-        update_carousel_run(carousel_id, status="approved_manual")
+    # One shared path for the bot and the dashboard (dedupe + cap 10 + publish).
+    from publishing.publish import post_carousel_run
+    res = post_carousel_run(carousel_id)
+    if res.get("ok"):
+        link_line = f"\n{res['permalink']}" if res.get("permalink") else ""
+        await query.message.reply_text(
+            f"Posted {res['count']}-slide carousel #{carousel_id} to Instagram ✓{link_line}")
+        log.info("Posted carousel #%d to Instagram (media %s)", carousel_id, res.get("media_id"))
+    elif res.get("needs_config"):
         await query.message.reply_text(
             f"Carousel #{carousel_id} approved — but Instagram isn't configured yet "
             f"(set IG_USER_ID / IG_ACCESS_TOKEN once the Meta app is ready). "
-            f"The slides are above in this chat — post them manually for now."
-        )
-        return
-
-    from publishing.instagram import publish_carousel
-    try:
-        caption = carousel.get("caption") or ""
-        media_id, permalink = publish_carousel(image_urls, caption)
-        update_carousel_run(carousel_id, status="posted", ig_media_id=media_id, ig_permalink=permalink)
-        link_line = f"\n{permalink}" if permalink else ""
-        await query.message.reply_text(f"Posted {len(image_urls)}-slide carousel #{carousel_id} to Instagram ✓{link_line}")
-        log.info("Posted carousel #%d to Instagram (media %s)", carousel_id, media_id)
-    except Exception as e:
-        log.error("Instagram publish failed for carousel #%d: %s", carousel_id, e)
-        await query.message.reply_text(f"Instagram publish failed for carousel #{carousel_id}: {e}")
+            f"The slides are above in this chat — post them manually for now.")
+    else:
+        await query.message.reply_text(
+            f"Instagram publish failed for carousel #{carousel_id}: {res.get('error')}")
 
 
 async def _handle_carousel_kill(query, carousel_id):

@@ -30,6 +30,7 @@ DB_URL         = os.environ.get("DATABASE_URL", "")
 BOT_TOKEN      = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 CHANNEL_ID     = os.environ.get("TELEGRAM_CHANNEL_ID", "")
 DRAFT_CHAT_ID  = os.environ.get("TELEGRAM_DRAFT_CHAT_ID", "")
+SLIDE_BASE     = os.environ.get("SLIDE_SERVER_BASE_URL", "").rstrip("/")
 TG_API        = f"https://api.telegram.org/bot{BOT_TOKEN}"
 REPO_ROOT     = Path(__file__).parent
 
@@ -317,9 +318,9 @@ with col_refresh:
         st.cache_data.clear(); st.rerun()
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
-(t_overview, t_ingest, t_drafts, t_pipeline, t_digs,
+(t_overview, t_ingest, t_drafts, t_pipeline, t_carousels, t_digs,
  t_followups, t_sources, t_tasks, t_costs) = st.tabs(
-    ["Overview", "Ingest", "Drafts", "Pipeline", "Digs",
+    ["Overview", "Ingest", "Drafts", "Pipeline", "Carousels", "Digs",
      "Follow-ups", "Sources", "Tasks", "Costs"]
 )
 
@@ -654,6 +655,64 @@ with t_pipeline:
                     if bc3.button("⏸ Hold", key=f"ph_{run['id']}"):
                         execute("UPDATE pipeline_runs SET status='held', updated_at=NOW() WHERE id=%s", (run["id"],))
                         st.cache_data.clear(); st.rerun()
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB — CAROUSELS  (Instagram slides: review + post)
+# ══════════════════════════════════════════════════════════════════════════════
+with t_carousels:
+    st.subheader("🖼️ Instagram carousels")
+    st.caption("Review the rendered slides and post to Instagram — the same gated "
+               "action as the bot (dedupe + capped at 10). Slides render on demand "
+               "from the DB, so they survive redeploys.")
+    if not SLIDE_BASE:
+        st.warning("SLIDE_SERVER_BASE_URL not set in this dashboard's env — slide "
+                   "previews won't load. (Relaunch with it exported.)")
+    cars = q("""SELECT cr.id, cr.run_id, cr.status, cr.caption, cr.ig_permalink,
+                       LEFT(r.throughline,80) AS story
+                FROM carousel_runs cr LEFT JOIN pipeline_runs r ON r.id=cr.run_id
+                ORDER BY cr.id DESC LIMIT 10""")
+    if not cars:
+        empty_state("🖼️", "No carousels yet", "They appear here after you approve an article.")
+    _CIC = {"pending_review":"🕓","posted":"✅","queued":"⚙️","composing":"⚙️",
+            "killed":"❌","approved_manual":"📎","failed":"⚠️"}
+    for c in cars:
+        cid = c["id"]
+        actionable = c["status"] in ("pending_review", "queued", "composing", "approved_manual", "failed")
+        with st.container(border=True):
+            st.markdown(f"{_CIC.get(c['status'],'•')} **Carousel #{cid}** · run #{c['run_id']} "
+                        f"· `{c['status']}` — {c['story'] or ''}")
+            # Show the rendered slides only for carousels that need a decision
+            # (keeps the tab fast — posted ones just show a link).
+            if actionable and SLIDE_BASE:
+                pos_rows = q("SELECT DISTINCT position FROM carousel_slides WHERE carousel_id=%(i)s ORDER BY position", {"i": cid})
+                positions = [r["position"] for r in pos_rows][:10]
+                if positions:
+                    cols = st.columns(min(len(positions), 5))
+                    for idx, pos in enumerate(positions):
+                        with cols[idx % 5]:
+                            st.image(f"{SLIDE_BASE}/carousel_{cid}_{pos}.png", use_container_width=True)
+                    st.caption(f"{len(positions)} slide(s)")
+            with st.expander("Caption"):
+                st.text(c["caption"] or "(none)")
+            if actionable:
+                pc1, pc2 = st.columns(2)
+                if pc1.button("📤 Post to Instagram", key=f"cpost_{cid}", type="primary", use_container_width=True):
+                    from publishing.publish import post_carousel_run
+                    res = post_carousel_run(cid)
+                    if res.get("ok"):
+                        tg_notify(f"✅ Posted carousel #{cid} to Instagram ({res['count']} slides).")
+                        st.success(f"Posted {res['count']} slides ✓" + (f" — {res['permalink']}" if res.get("permalink") else ""))
+                        st.cache_data.clear(); time.sleep(1); st.rerun()
+                    elif res.get("needs_config"):
+                        st.warning("Instagram not configured (IG_USER_ID / IG_ACCESS_TOKEN not set).")
+                    else:
+                        st.error(f"Post failed: {res.get('error')}")
+                if pc2.button("✗ Kill", key=f"ckill_{cid}", use_container_width=True):
+                    execute("UPDATE carousel_runs SET status='killed' WHERE id=%s", (cid,))
+                    st.cache_data.clear(); st.rerun()
+            elif c["status"] == "posted" and c["ig_permalink"]:
+                st.markdown(f"▸ [View on Instagram]({c['ig_permalink']})")
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 5 — DIGS  (persistent, multi-day investigations)

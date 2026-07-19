@@ -128,3 +128,42 @@ def publish_run(run_id):
 
     return {"ok": True, "how": how, "msg_ids": msg_ids,
             "article_url": article_url, "slug": slug, "error": None}
+
+
+def carousel_image_urls(carousel_id):
+    """The deduped, ordered, ≤10 slide image URLs for a carousel — exactly one per
+    position, capped at Instagram's carousel limit so a stray duplicate can never
+    make us post 20 (which Meta rejects). The slide server renders any missing PNG
+    on demand, so every hosted URL resolves."""
+    from shared.db import get_carousel_slides
+    by_pos = {}
+    for s in get_carousel_slides(carousel_id):
+        p = s.get("position")
+        if p is not None and p not in by_pos and s.get("image_url"):
+            by_pos[p] = s["image_url"]
+    return [by_pos[p] for p in sorted(by_pos)][:10]
+
+
+def post_carousel_run(carousel_id):
+    """Post an approved carousel to Instagram — the ONE path the bot and dashboard
+    both call. Returns {ok, media_id, permalink, count, needs_config, error}."""
+    from shared.db import get_carousel_run, update_carousel_run
+    from shared.config import IG_USER_ID, IG_ACCESS_TOKEN
+    cr = get_carousel_run(carousel_id)
+    if not cr:
+        return {"ok": False, "error": f"carousel #{carousel_id} not found"}
+    image_urls = carousel_image_urls(carousel_id)
+    if not image_urls:
+        return {"ok": False, "error": "no hosted slide images"}
+    if not IG_USER_ID or not IG_ACCESS_TOKEN:
+        update_carousel_run(carousel_id, status="approved_manual")
+        return {"ok": False, "needs_config": True,
+                "error": "Instagram not configured (IG_USER_ID / IG_ACCESS_TOKEN)"}
+    from publishing.instagram import publish_carousel
+    try:
+        media_id, permalink = publish_carousel(image_urls, cr.get("caption") or "")
+    except Exception as e:
+        log.error("Instagram post failed for carousel #%s: %s", carousel_id, e)
+        return {"ok": False, "error": str(e)}
+    update_carousel_run(carousel_id, status="posted", ig_media_id=media_id, ig_permalink=permalink)
+    return {"ok": True, "media_id": media_id, "permalink": permalink, "count": len(image_urls)}
