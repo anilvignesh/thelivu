@@ -332,7 +332,11 @@ with t_overview:
     rm = {r["status"]: r["n"] for r in runs}
     n_gate = rm.get("pending_human", 0)
     n_held = rm.get("held", 0) + rm.get("hold", 0)
-    n_live = rm.get("investigating", 0) + rm.get("writing", 0)
+    # Only count runs that are ACTUALLY moving — a run stuck in investigating/writing
+    # for hours (a crashed spine) shouldn't inflate "Live now".
+    n_live = scalar("SELECT COUNT(*) FROM pipeline_runs WHERE status IN "
+                    "('investigating','writing') AND updated_at > NOW() - INTERVAL '30 minutes'")
+    n_stuck = (rm.get("investigating", 0) + rm.get("writing", 0)) - n_live
     _db_published = scalar("SELECT COUNT(*) FROM publications")
     try:
         active_digs = list_digs(include_closed=False)
@@ -359,7 +363,7 @@ with t_overview:
 
     c1,c2,c3,c4,c5 = st.columns(5)
     c1.metric("At the gate", n_gate)
-    c2.metric("Live now", n_live)
+    c2.metric("Live now", n_live, delta=(f"{n_stuck} stuck >30m" if n_stuck else None), delta_color="inverse")
     c3.metric("Held", n_held)
     c4.metric("Active digs", len(active_digs))
     c5.metric("Published", _db_published)
