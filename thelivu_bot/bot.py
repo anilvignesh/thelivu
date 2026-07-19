@@ -1255,42 +1255,18 @@ async def _handle_approve(query, run_id, run):
     # docs/article-hosting.md) + a short HTML teaser in the channel. If
     # anything in that path fails, fall back to the chunked plain-text post —
     # approval must never hard-fail.
-    prepared = _prepare_for_publish(draft)
-    how = "teaser"
-    article_url = ""
-    try:
-        if not SLIDE_SERVER_BASE_URL:
-            raise RuntimeError("SLIDE_SERVER_BASE_URL not set — no public domain to host the article on")
-        from publishing.articlepage import make_slug
-        from publishing.parser import parse_article
-        from publishing.telegram import build_teaser
-        article = parse_article(prepared)
-        slug = make_slug(run_id, article.title)
-        set_run_slug(run_id, slug)
-        article_url = f"{SLIDE_SERVER_BASE_URL}/a/{slug}"
-        msg_ids = _post_html_to_channel(build_teaser(article, article_url, CONTACT_HANDLE))
-        log.info("Published run #%d at %s", run_id, article_url)
-        # Every published article lands on the bio page automatically (the
-        # slides' "link in bio" promise). Relative URL — same host as the bio
-        # page, survives a domain change. Deduped, so re-approving a run can't
-        # double-list it. Never let this block the publish itself.
-        try:
-            add_bio_link(article.title, f"/a/{slug}")
-            log.info("Bio page updated with run #%d", run_id)
-        except Exception as e:
-            log.warning("Could not add run #%d to bio page: %s", run_id, e)
-    except Exception as e:
-        log.warning("Article-page path failed for run #%d (%s) — falling back to plain text", run_id, e)
-        how = "plain-text"
-        try:
-            msg_ids = _post_to_channel(draft)
-        except Exception as e2:
-            await query.message.reply_text(f"Failed to publish: {e2}")
-            log.error("Publish failed for run #%d: %s", run_id, e2)
-            return
-
-    save_publication(run_id, msg_ids, "Confirmed")
-    update_run(run_id, status="published")
+    # Publish via the ONE shared flow (publishing/publish.py) — the dashboard
+    # calls the exact same code, so the two paths can never drift again (that
+    # divergence is what produced link-less posts with no article page). It does
+    # the article page + slug + teaser + bio link + linked carousel, with the
+    # plain-text fallback baked in.
+    from publishing.publish import publish_run
+    res = publish_run(run_id)
+    if not res.get("ok"):
+        await query.message.reply_text(f"Failed to publish: {res.get('error')}")
+        log.error("Publish failed for run #%d: %s", run_id, res.get("error"))
+        return
+    msg_ids, how = res["msg_ids"], res["how"]
 
     # Remove the inline keyboard from the original summary message
     try:
@@ -1313,17 +1289,6 @@ async def _handle_approve(query, run_id, run):
         f"{len(msg_ids)} message(s) posted to {TELEGRAM_CHANNEL_ID}.{channel_link}"
     )
     log.info("Published run #%d (%s, %d msgs)", run_id, how, len(msg_ids))
-
-    # Queue the Instagram carousel for this article. The orchestrator (not
-    # this bot process) does the actual composing/rendering on its next tick
-    # and sends the carousel back here for a separate approve/kill. article_url
-    # (the Telegraph page, if that path succeeded) rides along so the final IG
-    # caption can point back to the full story.
-    try:
-        carousel_id = queue_carousel_run(run_id, article_url=article_url)
-        log.info("Queued carousel #%d for run #%d", carousel_id, run_id)
-    except Exception as e:
-        log.error("Failed to queue carousel for run #%d: %s", run_id, e)
 
 
 async def _handle_kill(query, run_id):

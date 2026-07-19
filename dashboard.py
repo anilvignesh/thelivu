@@ -270,6 +270,19 @@ def tg_notify(text):
     for chunk in _tg_chunks(text):
         requests.post(f"{TG_API}/sendMessage", json={"chat_id": DRAFT_CHAT_ID, "text": chunk}, timeout=15)
 
+def publish_and_report(run_id):
+    """Publish via the ONE shared flow the bot uses (article page + slug + bio link
+    + linked carousel), then surface the result. Never a second, simpler copy."""
+    from publishing.publish import publish_run
+    res = publish_run(run_id)
+    if res.get("ok"):
+        extra = f" · article page /a/{res['slug']}" if res.get("slug") else " · plain-text (no article page)"
+        tg_notify(f"✅ Published run #{run_id} ({res['how']}).")
+        st.success(f"Published! {len(res['msg_ids'])} message(s){extra}")
+        st.cache_data.clear(); time.sleep(1); st.rerun()
+    else:
+        st.error(f"Publish failed: {res.get('error')}")
+
 # ── Icons ──────────────────────────────────────────────────────────────────────
 STATUS_ICON = {
     "investigating": "🔍", "writing": "✍️", "pending_human": "📬",
@@ -504,16 +517,7 @@ with t_drafts:
                 hold    = a3.button("⏸ Hold",   key=f"hld_{run_id}", use_container_width=True)
 
             if approve:
-                try:
-                    msg_ids = tg_post_channel(run.get("draft_text") or "")
-                    execute("UPDATE pipeline_runs SET status='published', updated_at=NOW() WHERE id=%s", (run_id,))
-                    execute("INSERT INTO publications (run_id, channel_msg_ids, confidence) VALUES (%s,%s,%s)",
-                            (run_id, json.dumps(msg_ids), "Confirmed"))
-                    tg_notify(f"✅ Published run #{run_id} ({len(msg_ids)} message(s)).")
-                    st.success(f"Published! {len(msg_ids)} message(s) posted to {CHANNEL_ID}")
-                    st.cache_data.clear(); time.sleep(1); st.rerun()
-                except Exception as e:
-                    st.error(f"Publish failed: {e}")
+                publish_and_report(run_id)
             if kill:
                 execute("UPDATE pipeline_runs SET status='killed', updated_at=NOW() WHERE id=%s", (run_id,))
                 tg_notify(f"❌ Story #{run_id} killed from dashboard.")
@@ -570,15 +574,7 @@ with t_drafts:
                     st.cache_data.clear(); st.rerun()
                 if b3.button("✓ Publish", key=f"hpub_{rid}", use_container_width=True,
                              help="You are the gate — publish if you judge it sound"):
-                    try:
-                        msg_ids = tg_post_channel(run.get("draft_text") or "")
-                        execute("UPDATE pipeline_runs SET status='published', updated_at=NOW() WHERE id=%s", (rid,))
-                        execute("INSERT INTO publications (run_id, channel_msg_ids, confidence) VALUES (%s,%s,%s)",
-                                (rid, json.dumps(msg_ids), "Confirmed"))
-                        tg_notify(f"✅ Published held run #{rid} ({len(msg_ids)} message(s)).")
-                        st.success(f"Published! {len(msg_ids)} message(s)."); st.cache_data.clear(); time.sleep(1); st.rerun()
-                    except Exception as e:
-                        st.error(f"Publish failed: {e}")
+                    publish_and_report(rid)
                 if b4.button("✗ Kill", key=f"hkil_{rid}", use_container_width=True):
                     execute("UPDATE pipeline_runs SET status='killed', updated_at=NOW() WHERE id=%s", (rid,))
                     tg_notify(f"❌ Held story #{rid} killed from dashboard.")
@@ -651,14 +647,7 @@ with t_pipeline:
                 if run["status"] == "pending_human":
                     bc1, bc2, bc3 = st.columns(3)
                     if bc1.button("✓ Approve", key=f"pa_{run['id']}", type="primary"):
-                        try:
-                            msg_ids = tg_post_channel(run.get("draft_text") or "")
-                            execute("UPDATE pipeline_runs SET status='published', updated_at=NOW() WHERE id=%s", (run["id"],))
-                            execute("INSERT INTO publications (run_id,channel_msg_ids,confidence) VALUES (%s,%s,%s)",
-                                    (run["id"], json.dumps(msg_ids), "Confirmed"))
-                            st.success("Published!"); st.cache_data.clear(); st.rerun()
-                        except Exception as e:
-                            st.error(f"Failed: {e}")
+                        publish_and_report(run["id"])
                     if bc2.button("✗ Kill", key=f"pk_{run['id']}"):
                         execute("UPDATE pipeline_runs SET status='killed', updated_at=NOW() WHERE id=%s", (run["id"],))
                         st.cache_data.clear(); st.rerun()
