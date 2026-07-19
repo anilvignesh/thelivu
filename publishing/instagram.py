@@ -17,6 +17,7 @@ instagram_business_content_publish) in shared/config.py. Both are set once
 the Meta app + IG account are wired up; until then, IGNotConfigured is raised
 so callers can degrade gracefully instead of crashing the approval flow.
 """
+import logging
 import time
 
 import requests
@@ -24,6 +25,7 @@ import requests
 from shared.config import IG_USER_ID, IG_ACCESS_TOKEN
 
 _API = "https://graph.instagram.com/v21.0"
+log = logging.getLogger("instagram")
 
 
 class IGNotConfigured(RuntimeError):
@@ -49,11 +51,16 @@ def _graph_post(node_path, data, tries=5):
     transient transport/parse failures with backoff; return parsed JSON or raise."""
     last = None
     for i in range(tries):
+        r = None
         try:
             r = requests.post(f"{_API}/{node_path}", data=data, timeout=30)
             return r.json()
         except (requests.RequestException, ValueError) as e:
             last = e
+            # Capture the smoking gun: on an empty/non-JSON body we now log the raw
+            # HTTP status + body snippet, instead of a bare "Expecting value" error.
+            detail = f" [HTTP {r.status_code}, body={r.text[:200]!r}]" if r is not None else " [no response]"
+            log.warning("Instagram POST %s attempt %d/%d failed: %s%s", node_path, i + 1, tries, e, detail)
             time.sleep(min(2 ** i, 10))
     raise IGPublishError(f"Instagram POST {node_path} failed after {tries} tries: {last}")
 
@@ -61,11 +68,14 @@ def _graph_post(node_path, data, tries=5):
 def _graph_get(node_path, params, tries=5):
     last = None
     for i in range(tries):
+        r = None
         try:
             r = requests.get(f"{_API}/{node_path}", params=params, timeout=15)
             return r.json()
         except (requests.RequestException, ValueError) as e:
             last = e
+            detail = f" [HTTP {r.status_code}, body={r.text[:200]!r}]" if r is not None else " [no response]"
+            log.warning("Instagram GET %s attempt %d/%d failed: %s%s", node_path, i + 1, tries, e, detail)
             time.sleep(min(2 ** i, 10))
     raise IGPublishError(f"Instagram GET {node_path} failed after {tries} tries: {last}")
 
