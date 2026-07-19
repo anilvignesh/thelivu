@@ -144,9 +144,11 @@ def carousel_image_urls(carousel_id):
     return [by_pos[p] for p in sorted(by_pos)][:10]
 
 
-def post_carousel_run(carousel_id):
+def post_carousel_run(carousel_id, progress=None):
     """Post an approved carousel to Instagram — the ONE path the bot and dashboard
-    both call. Returns {ok, media_id, permalink, count, needs_config, error}."""
+    both call. `progress(fraction, message)` is an optional UI callback (the dashboard
+    passes one for its progress bar). Returns {ok, media_id, permalink, count,
+    needs_config, error}."""
     from shared.db import get_carousel_run, update_carousel_run
     from shared.config import IG_USER_ID, IG_ACCESS_TOKEN
     cr = get_carousel_run(carousel_id)
@@ -161,7 +163,7 @@ def post_carousel_run(carousel_id):
                 "error": "Instagram not configured (IG_USER_ID / IG_ACCESS_TOKEN)"}
     from publishing.instagram import publish_carousel
     try:
-        media_id, permalink = publish_carousel(image_urls, cr.get("caption") or "")
+        media_id, permalink = publish_carousel(image_urls, cr.get("caption") or "", progress=progress)
     except Exception as e:
         log.error("Instagram post failed for carousel #%s: %s", carousel_id, e)
         return {"ok": False, "error": str(e)}

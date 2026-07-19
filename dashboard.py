@@ -702,15 +702,27 @@ with t_carousels:
                 pc1, pc2 = st.columns(2)
                 if pc1.button("📤 Post to Instagram", key=f"cpost_{cid}", type="primary", use_container_width=True):
                     from publishing.publish import post_carousel_run
-                    res = post_carousel_run(cid)
+                    with st.status(f"Posting carousel #{cid} to Instagram…", expanded=True) as status:
+                        bar = st.progress(0.0, text="Starting…")
+                        def _prog(frac, msg, _b=bar, _s=status):
+                            _b.progress(frac, text=msg)
+                            _s.update(label=msg)
+                        res = post_carousel_run(cid, progress=_prog)
+                        if res.get("ok"):
+                            bar.progress(1.0, text="Posted ✓")
+                            status.update(label=f"Posted {res['count']} slides to Instagram ✓", state="complete")
+                            if res.get("permalink"):
+                                st.markdown(f"▸ [View on Instagram]({res['permalink']})")
+                            tg_notify(f"✅ Posted carousel #{cid} to Instagram ({res['count']} slides).")
+                        elif res.get("needs_config"):
+                            status.update(label="Instagram not configured", state="error")
+                            st.warning("Instagram not configured (IG_USER_ID / IG_ACCESS_TOKEN not set).")
+                        else:
+                            status.update(label="Post failed", state="error")
+                            st.error(f"Post failed: {res.get('error')}")
                     if res.get("ok"):
-                        tg_notify(f"✅ Posted carousel #{cid} to Instagram ({res['count']} slides).")
-                        st.success(f"Posted {res['count']} slides ✓" + (f" — {res['permalink']}" if res.get("permalink") else ""))
-                        st.cache_data.clear(); time.sleep(1); st.rerun()
-                    elif res.get("needs_config"):
-                        st.warning("Instagram not configured (IG_USER_ID / IG_ACCESS_TOKEN not set).")
-                    else:
-                        st.error(f"Post failed: {res.get('error')}")
+                        st.balloons()
+                        time.sleep(2.5); st.cache_data.clear(); st.rerun()
                 if pc2.button("✗ Kill", key=f"ckill_{cid}", use_container_width=True):
                     execute("UPDATE carousel_runs SET status='killed' WHERE id=%s", (cid,))
                     st.cache_data.clear(); st.rerun()
