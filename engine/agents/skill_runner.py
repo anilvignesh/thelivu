@@ -320,6 +320,24 @@ def _run_openai_compat(client, model, skill_name, input_text, system_prompt,
 _MAX_TOOL_ROUNDS = 6
 
 
+def _cache_growing_context(messages):
+    """Mark the end of the conversation as a cache breakpoint so each tool round
+    re-reads the accumulated prefix (prior search results) at ~0.1× instead of full
+    price. Purely a billing optimisation — identical inputs/outputs, zero quality
+    impact. Keeps exactly ONE conversation breakpoint (system prompt has the other,
+    well under Anthropic's 4-breakpoint limit): clear old ones, mark the latest
+    tool_result block. Assistant blocks are SDK objects (not dicts) and are skipped."""
+    for m in messages:
+        c = m.get("content")
+        if isinstance(c, list):
+            for blk in c:
+                if isinstance(blk, dict):
+                    blk.pop("cache_control", None)
+    last = messages[-1].get("content")
+    if isinstance(last, list) and last and isinstance(last[-1], dict):
+        last[-1]["cache_control"] = {"type": "ephemeral"}
+
+
 def _run_claude(skill_name, input_text, system_prompt, extra_tools, max_tokens, run_id=None):
     tools = _CLAUDE_SKILL_TOOLS.get(skill_name, []) + (extra_tools or [])
     messages = [{"role": "user", "content": input_text}]
@@ -378,6 +396,7 @@ def _run_claude(skill_name, input_text, system_prompt, extra_tools, max_tokens, 
                         "content": str(result),
                     })
             messages.append({"role": "user", "content": tool_results})
+            _cache_growing_context(messages)  # cache the prefix for the next round
             continue
 
         _record_claude(skill_name, total_in, total_out, run_id)
