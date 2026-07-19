@@ -392,7 +392,8 @@ def init_db():
                     conn.commit()
                 except Exception:
                     conn.rollback()  # column already exists
-            for col, defn in [("files_cleaned_at", "TIMESTAMP")]:
+            for col, defn in [("files_cleaned_at", "TIMESTAMP"),
+                              ("dark", "BOOLEAN DEFAULT FALSE"), ("stamp", "TEXT")]:
                 try:
                     cur.execute(f"ALTER TABLE carousel_runs ADD COLUMN {col} {defn}")
                     conn.commit()
@@ -405,7 +406,8 @@ def init_db():
                     cur.execute(f"ALTER TABLE pipeline_runs ADD COLUMN {col} {defn}")
                 except Exception:
                     pass
-            for col, defn in [("files_cleaned_at", "TEXT")]:
+            for col, defn in [("files_cleaned_at", "TEXT"),
+                              ("dark", "INTEGER DEFAULT 0"), ("stamp", "TEXT")]:
                 try:
                     cur.execute(f"ALTER TABLE carousel_runs ADD COLUMN {col} {defn}")
                 except Exception:
@@ -1315,6 +1317,44 @@ def get_carousel_run(carousel_id):
         ph = "%s" if _is_postgres() else "?"
         cur.execute("SELECT * FROM carousel_runs WHERE id = " + ph, (carousel_id,))
         return _fetchone(cur)
+    finally:
+        conn.close()
+
+
+def get_slide_render_data(carousel_id, position):
+    """Everything needed to re-render one carousel slide from the DB, so rendered
+    PNGs never have to survive a redeploy. Returns {headline, position, total,
+    dark, stamp} or None. Style defaults gracefully for carousels composed before
+    dark/stamp were persisted."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(f"SELECT headline FROM carousel_slides WHERE carousel_id={ph} AND position={ph}",
+                    (carousel_id, position))
+        row = _fetchone(cur)
+        if not row:
+            return None
+        headline = row["headline"]
+        cur.execute(f"SELECT COUNT(*) AS n FROM carousel_slides WHERE carousel_id={ph}", (carousel_id,))
+        total = (_fetchone(cur) or {}).get("n", 1)
+        cur.execute(f"SELECT dark, stamp FROM carousel_runs WHERE id={ph}", (carousel_id,))
+        cr = _fetchone(cur) or {}
+        return {"headline": headline, "position": position, "total": total,
+                "dark": bool(cr.get("dark")), "stamp": (cr.get("stamp") or "VERIFIED")}
+    finally:
+        conn.close()
+
+
+def clear_carousel_slides(carousel_id):
+    """Remove a carousel's slide rows before a (re-)compose so re-rendering can't
+    leave duplicate positions in carousel_slides."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(f"DELETE FROM carousel_slides WHERE carousel_id = {ph}", (carousel_id,))
+        conn.commit()
     finally:
         conn.close()
 

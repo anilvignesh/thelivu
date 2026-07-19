@@ -2222,7 +2222,8 @@ def process_queued_carousels():
     Mirrors process_recheck_requests."""
     from shared.config import REPO_ROOT, SLIDE_SERVER_BASE_URL
     from shared.db import (
-        get_queued_carousel_runs, update_carousel_run, add_carousel_slide, get_run,
+        get_queued_carousel_runs, update_carousel_run, add_carousel_slide,
+        clear_carousel_slides, get_run,
     )
     from publishing.slides import render_dossier_slide
 
@@ -2244,6 +2245,7 @@ def process_queued_carousels():
 
             out_dir = REPO_ROOT / "articles" / "slides"
             out_dir.mkdir(parents=True, exist_ok=True)
+            clear_carousel_slides(carousel_id)  # idempotent re-compose (no dup positions)
             n = len(slide_texts)
             image_urls = []
             for i, headline in enumerate(slide_texts, start=1):
@@ -2265,7 +2267,10 @@ def process_queued_carousels():
             if hashtags:
                 caption_bits.append(hashtags)
             caption = "\n\n".join(b for b in caption_bits if b)[:2200]
-            update_carousel_run(carousel_id, caption=caption, status="pending_review")
+            # Persist the style so slides can be re-rendered from the DB on demand
+            # (the fileserver regenerates a missing PNG — survives redeploys/cleanup).
+            update_carousel_run(carousel_id, caption=caption, status="pending_review",
+                                dark=dark, stamp=stamp)
 
             keyboard = {"inline_keyboard": [[
                 {"text": "✓ Post carousel to Instagram", "callback_data": f"carouselapprove_{carousel_id}"},

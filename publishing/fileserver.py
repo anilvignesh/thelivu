@@ -11,10 +11,14 @@ local path — see process_queued_carousels() in engine/agents/orchestrator.py.
 """
 import http.server
 import logging
+import re
 import threading
 from pathlib import Path
 
 log = logging.getLogger("fileserver")
+
+# carousel_<carouselId>_<position>.png — the on-demand-renderable slide filenames.
+_SLIDE_RE = re.compile(r"^carousel_(\d+)_(\d+)\.png$")
 
 
 def _make_handler(slides_dir):
@@ -81,9 +85,28 @@ def _make_handler(slides_dir):
                 return
             path = slides_dir / name
             if not path.is_file():
-                self.send_response(404)
-                self.end_headers()
-                return
+                # On-demand render: regenerate the slide from the DB so rendered
+                # PNGs never have to survive a redeploy or the cleanup sweep — same
+                # self-hosting philosophy as the /a/<slug> article pages. Rendered
+                # once here, then cached on disk for subsequent fetches.
+                m = _SLIDE_RE.match(name)
+                if m:
+                    try:
+                        from shared.db import get_slide_render_data
+                        from publishing.slides import render_dossier_slide
+                        cid, pos = int(m.group(1)), int(m.group(2))
+                        d = get_slide_render_data(cid, pos)
+                        if d:
+                            slide_stamp = d["stamp"] if pos == 1 else f"{pos}/{d['total']}"
+                            render_dossier_slide(d["headline"], stamp=slide_stamp,
+                                                 dark=d["dark"], out=str(path))
+                            log.info("On-demand rendered %s", name)
+                    except Exception as e:
+                        log.error("On-demand slide render failed for %r: %s", name, e)
+                if not path.is_file():
+                    self.send_response(404)
+                    self.end_headers()
+                    return
             data = path.read_bytes()
             self.send_response(200)
             self.send_header("Content-Type", "image/png")
