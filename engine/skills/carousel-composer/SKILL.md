@@ -24,14 +24,24 @@ body paragraphs, and a sources footer.
 
 ## What to produce
 
-**A sequence of slides, up to 10, however many the article actually
-supports.** Do not pad to hit 10 — a tightly-argued piece might be a genuine,
-complete carousel at 6 or 7 slides, and forcing more just dilutes it. Do not
-go below about 5 either — fewer than that isn't really a "carousel
-breakdown," it's just the single-slide version with extra steps. Most
-Thelivu pieces have enough structure to clear this easily — a hook, a few
-evidence beats, a turn or reveal, a closing thought — since stories are
-chosen for exactly this join-the-dots shape.
+**Pick the number of slides that does two things at once: explains the story
+completely AND earns engagement.** You decide per story — Thelivu's call, not a
+fixed count. Two forces to balance:
+
+- *Explain properly:* enough slides that a reader finishes understanding the
+  argument — nothing important compressed out.
+- *Engage:* Instagram rewards **completion, saves and dwell time**, and re-serves a
+  carousel to people on a later slide — so a fuller, well-paced set gets more reach,
+  as long as every slide earns its swipe.
+
+In practice that lands at **8–10 slides** for most Thelivu pieces (a substantive
+story with a hook, several evidence beats, a turn, and a close). **Hard ceiling: 10**
+(Instagram's carousel limit). **Never pad** to hit a number — a genuinely tight
+piece can be complete at 6–7, and filler dilutes engagement rather than helping it.
+**Never truncate** a story that needs the room, either — if it takes 9–10 slides to
+land the argument, use them. Below ~5 it isn't a breakdown, just a single slide with
+extra steps. Judge each story on whether the reader leaves both *informed* and
+*wanting to save/share it*.
 
 **Slide 1 — the hook.** Same job as a single slide's headline: the claim or
 question that makes someone stop scrolling and swipe. Close to the article's
