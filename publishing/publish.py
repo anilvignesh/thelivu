@@ -154,6 +154,10 @@ def post_carousel_run(carousel_id, progress=None):
     cr = get_carousel_run(carousel_id)
     if not cr:
         return {"ok": False, "error": f"carousel #{carousel_id} not found"}
+    # Guard against a double-post if Retry is tapped after it actually succeeded.
+    if cr.get("status") == "posted" and cr.get("ig_media_id"):
+        return {"ok": True, "media_id": cr["ig_media_id"], "permalink": cr.get("ig_permalink"),
+                "count": 0, "already_posted": True}
     image_urls = carousel_image_urls(carousel_id)
     if not image_urls:
         return {"ok": False, "error": "no hosted slide images"}

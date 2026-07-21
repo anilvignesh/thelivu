@@ -1263,7 +1263,15 @@ async def _handle_approve(query, run_id, run):
     from publishing.publish import publish_run
     res = publish_run(run_id)
     if not res.get("ok"):
-        await query.message.reply_text(f"Failed to publish: {res.get('error')}")
+        # The run is still pending_human (publish failed before marking published),
+        # so a retry re-runs the same approve path.
+        retry_kb = InlineKeyboardMarkup([[
+            InlineKeyboardButton("🔁 Retry publish", callback_data=f"approve_{run_id}"),
+            InlineKeyboardButton("✗ Kill",           callback_data=f"kill_{run_id}"),
+        ]])
+        await query.message.reply_text(
+            f"Failed to publish run #{run_id}:\n{res.get('error')}\n\nTap Retry to try again.",
+            reply_markup=retry_kb)
         log.error("Publish failed for run #%d: %s", run_id, res.get("error"))
         return
     msg_ids, how = res["msg_ids"], res["how"]
@@ -1346,8 +1354,15 @@ async def _handle_carousel_approve(query, carousel_id, carousel):
             f"(set IG_USER_ID / IG_ACCESS_TOKEN once the Meta app is ready). "
             f"The slides are above in this chat — post them manually for now.")
     else:
+        # Offer a one-tap retry — the carousel is still pending_review (post failed,
+        # not marked posted), so re-tapping runs the same shared post path again.
+        retry_kb = InlineKeyboardMarkup([[
+            InlineKeyboardButton("🔁 Retry post", callback_data=f"carouselapprove_{carousel_id}"),
+            InlineKeyboardButton("✗ Kill",        callback_data=f"carouselkill_{carousel_id}"),
+        ]])
         await query.message.reply_text(
-            f"Instagram publish failed for carousel #{carousel_id}: {res.get('error')}")
+            f"Instagram publish failed for carousel #{carousel_id}:\n{res.get('error')}\n\n"
+            "Often a transient Meta error — tap Retry.", reply_markup=retry_kb)
 
 
 async def _handle_carousel_kill(query, carousel_id):
