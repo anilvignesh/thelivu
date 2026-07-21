@@ -234,6 +234,21 @@ class GeminiContentBlocked(Exception):
     given prompt — the fix is to fall back to Claude+web-search, not to retry."""
 
 
+# Anthropic "out of credit" markers — a PERSISTENT state (until the balance is
+# topped up), distinct from a transient 500/overload. When Claude is out of credit
+# we auto-fall-back to Gemini so the engine keeps running; when the balance is
+# restored (next salary), Claude calls simply succeed again and normal routing
+# resumes — no manual switch needed.
+_OUT_OF_CREDIT_MARKERS = (
+    "credit balance is too low", "credit balance", "billing", "insufficient",
+    "payment required", "purchase credits", "plan and billing", "billing_hard_limit",
+)
+
+
+def _claude_out_of_credit(exc):
+    return any(m in str(exc).lower() for m in _OUT_OF_CREDIT_MARKERS)
+
+
 def _run_gemini(skill_name, input_text, system_prompt, max_tokens, run_id=None,
                 model=GEMINI_MODEL):
     from google.genai import types
@@ -489,7 +504,17 @@ def run_skill(skill_name, input_text, extra_tools=None, max_tokens=4096,
         try:
             return _run_claude(skill_name, input_text, system_prompt, extra_tools, max_tokens, run_id)
         except Exception as e:
-            _send_quota_alert("claude", skill_name, e)
+            _send_quota_alert("claude", skill_name, e)  # dedups to once/day
+            # Claude out of credit → keep the engine running on Gemini instead of
+            # stalling. Persistent (until the balance is topped up); a transient
+            # outage still raises/pauses below. Gemini brings its own Google Search
+            # grounding, so judgment/writing skills still have live sources. When
+            # credit returns, Claude simply succeeds again — routing self-heals.
+            if _claude_out_of_credit(e) and GEMINI_API_KEY:
+                log.warning("Claude out of credit for %s — falling back to Gemini.", skill_name)
+                gemini_max = max(max_tokens, 8192)
+                return _run_gemini(skill_name, input_text, system_prompt, gemini_max,
+                                   run_id, model=GEMINI_MODEL)
             raise
 
     finally:
