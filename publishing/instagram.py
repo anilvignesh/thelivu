@@ -33,12 +33,21 @@ log = logging.getLogger("instagram")
 # the caller can raise a clear message instead of retrying pointlessly.
 _TRANSIENT_CODES = {1, 2, 4, 17, 32, 341, 368, 613}
 
+# Transient error SUBCODES. Meta sometimes reports a genuinely retryable internal
+# error as code:-1 / is_transient:false, while the human-facing message still says
+# "Please try again later." 2207085 is that "internal server error" subcode on
+# media_publish — carousel #13 failed permanently on a single blip because we
+# classified it as fatal and never retried. Match the subcode so backoff kicks in.
+_TRANSIENT_SUBCODES = {2207085}
+
 
 def _is_transient_error(payload):
     err = payload.get("error") if isinstance(payload, dict) else None
     if not err:
         return False
-    return bool(err.get("is_transient")) or err.get("code") in _TRANSIENT_CODES
+    if err.get("is_transient") or err.get("code") in _TRANSIENT_CODES:
+        return True
+    return err.get("error_subcode") in _TRANSIENT_SUBCODES
 
 
 class IGNotConfigured(RuntimeError):
@@ -131,10 +140,14 @@ def _create_carousel_container(child_ids, caption):
     return data["id"]
 
 
-def _wait_until_ready(container_id, attempts=10, delay=2):
-    """Poll the container's status_code until FINISHED (or give up and try
-    publishing anyway — single-image containers are usually ready instantly;
-    this just avoids a race on a slow day)."""
+def _wait_until_ready(container_id, attempts=30, delay=2):
+    """Poll the container's status_code until FINISHED. A carousel container (and
+    its children) can take longer than a single photo to process; publishing one
+    that isn't FINISHED yet is a known trigger for Meta's opaque "internal server
+    error" on media_publish (subcode 2207085 — how carousel #13 failed). So wait
+    up to attempts*delay seconds and, if it never finishes, raise a clear error
+    rather than silently publishing a half-baked container."""
+    status = None
     for _ in range(attempts):
         status = _graph_get(container_id, {"fields": "status_code", "access_token": IG_ACCESS_TOKEN}).get("status_code")
         if status == "FINISHED":
@@ -142,6 +155,10 @@ def _wait_until_ready(container_id, attempts=10, delay=2):
         if status == "ERROR":
             raise IGPublishError(f"Container {container_id} failed processing.")
         time.sleep(delay)
+    raise IGPublishError(
+        f"Container {container_id} still not FINISHED after {attempts * delay}s "
+        f"(last status_code={status!r}) — refusing to publish a container that isn't ready."
+    )
 
 
 def _publish_container(container_id):
