@@ -32,13 +32,25 @@ log = logging.getLogger("instagram")
 # also marks them. A non-transient error (bad token, bad param) is returned as-is so
 # the caller can raise a clear message instead of retrying pointlessly.
 _TRANSIENT_CODES = {1, 2, 4, 17, 32, 341, 368, 613}
+# Publish-step subcodes that are Meta-side internal errors, NOT our request — these
+# lie about is_transient (they come back is_transient=False, code=-1) but the
+# error_user_msg says "try again later". 2207085 = "Generic internal error" on
+# media_publish (the carousel #13 failure). Retrying after a delay clears them.
+_TRANSIENT_SUBCODES = {2207085, 2207001, 2207032, 2207003, 2207020, 2207026}
+# Message fragments that mark a retryable server-side blip regardless of the flags.
+_TRANSIENT_MSGS = ("try again", "internal server error", "temporarily", "please retry")
 
 
 def _is_transient_error(payload):
     err = payload.get("error") if isinstance(payload, dict) else None
     if not err:
         return False
-    return bool(err.get("is_transient")) or err.get("code") in _TRANSIENT_CODES
+    if err.get("is_transient") or err.get("code") in _TRANSIENT_CODES:
+        return True
+    if err.get("error_subcode") in _TRANSIENT_SUBCODES:
+        return True
+    msg = f"{err.get('error_user_msg','')} {err.get('message','')}".lower()
+    return any(frag in msg for frag in _TRANSIENT_MSGS)
 
 
 class IGNotConfigured(RuntimeError):
@@ -57,22 +69,25 @@ def _require_config():
         )
 
 
-def _graph_post(node_path, data, tries=5):
+def _graph_post(node_path, data, tries=5, max_backoff=10):
     """POST to the Graph API with retries. Meta's domains are flaky on some ISPs
     (docs/HANDOFF.md §5) — a reset/empty response makes r.json() raise a bare
     "Expecting value" JSONDecodeError, which used to crash the whole publish. Retry
-    transient transport/parse failures with backoff; return parsed JSON or raise."""
+    transient transport/parse failures AND Meta-side transient error payloads with
+    backoff; return parsed JSON or raise. max_backoff lets the publish step wait
+    longer (its 2207085 "internal error" often needs 30–60s to clear)."""
     last = None
     for i in range(tries):
         r = None
         try:
             r = requests.post(f"{_API}/{node_path}", data=data, timeout=30)
             out = r.json()
-            if _is_transient_error(out):  # Meta-side blip (is_transient) — retry
+            if _is_transient_error(out):  # Meta-side blip — retry
                 last = out["error"]
-                log.warning("Instagram POST %s attempt %d/%d transient: %s",
-                            node_path, i + 1, tries, out["error"].get("message"))
-                time.sleep(min(2 ** i, 10)); continue
+                log.warning("Instagram POST %s attempt %d/%d transient: %s (subcode %s)",
+                            node_path, i + 1, tries, out["error"].get("message"),
+                            out["error"].get("error_subcode"))
+                time.sleep(min(2 ** i, max_backoff)); continue
             return out
         except (requests.RequestException, ValueError) as e:
             last = e
@@ -80,7 +95,7 @@ def _graph_post(node_path, data, tries=5):
             # status + body snippet, instead of a bare "Expecting value" error.
             detail = f" [HTTP {r.status_code}, body={r.text[:200]!r}]" if r is not None else " [no response]"
             log.warning("Instagram POST %s attempt %d/%d failed: %s%s", node_path, i + 1, tries, e, detail)
-            time.sleep(min(2 ** i, 10))
+            time.sleep(min(2 ** i, max_backoff))
     raise IGPublishError(f"Instagram POST {node_path} failed after {tries} tries (last: {last})")
 
 
@@ -145,8 +160,12 @@ def _wait_until_ready(container_id, attempts=10, delay=2):
 
 
 def _publish_container(container_id):
+    # The publish step is the one that throws Meta's intermittent 2207085 "internal
+    # error" even when the container is FINISHED — give it more tries + longer waits
+    # (up to ~2 min) so it rides out the blip instead of failing the whole post.
     data = _graph_post(f"{IG_USER_ID}/media_publish",
-                       {"creation_id": container_id, "access_token": IG_ACCESS_TOKEN})
+                       {"creation_id": container_id, "access_token": IG_ACCESS_TOKEN},
+                       tries=7, max_backoff=30)
     if "id" not in data:
         raise IGPublishError(f"Publish failed: {data}")
     return data["id"]
