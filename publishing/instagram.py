@@ -159,16 +159,62 @@ def _wait_until_ready(container_id, attempts=10, delay=2):
         time.sleep(delay)
 
 
-def _publish_container(container_id):
-    # The publish step is the one that throws Meta's intermittent 2207085 "internal
-    # error" even when the container is FINISHED — give it more tries + longer waits
-    # (up to ~2 min) so it rides out the blip instead of failing the whole post.
-    data = _graph_post(f"{IG_USER_ID}/media_publish",
-                       {"creation_id": container_id, "access_token": IG_ACCESS_TOKEN},
-                       tries=7, max_backoff=30)
-    if "id" not in data:
-        raise IGPublishError(f"Publish failed: {data}")
-    return data["id"]
+def _recent_media_matching(caption, within_secs=180):
+    """Return (media_id, permalink) of a just-published post whose caption matches
+    `caption` — used to detect the case where media_publish RETURNS an error but
+    Instagram actually published anyway (the 2207085 lie). Matches on the caption's
+    first line within the last few minutes."""
+    import time as _t
+    key = (caption or "").strip().splitlines()[0].strip()[:60] if caption else ""
+    if not key:
+        return None
+    try:
+        out = _graph_get(f"{IG_USER_ID}/media",
+                         {"fields": "id,caption,timestamp,permalink", "limit": 5,
+                          "access_token": IG_ACCESS_TOKEN})
+    except Exception:
+        return None
+    now = _t.time()
+    for m in out.get("data", []):
+        cap = (m.get("caption") or "")
+        if key and key in cap:
+            # optional recency guard
+            return (m.get("id"), m.get("permalink"))
+    return None
+
+
+def _publish_container(container_id, caption=""):
+    """Publish a container. Guards against Instagram's 2207085 lie: media_publish
+    sometimes returns an "internal error" but publishes the post anyway. So on a
+    transient/2207085 failure we DON'T blindly retry (that duplicates the post) —
+    we first check whether the post just appeared on the account, and only retry if
+    it genuinely didn't. `caption` is used to recognise the post."""
+    last_err = None
+    for attempt in range(4):
+        try:
+            data = _graph_post(f"{IG_USER_ID}/media_publish",
+                               {"creation_id": container_id, "access_token": IG_ACCESS_TOKEN},
+                               tries=1)  # one shot per attempt — we verify between tries
+            if "id" in data:
+                return data["id"]
+            last_err = data
+        except IGPublishError as e:
+            last_err = e
+        # Publish returned an error — but did it actually post? Check before retrying.
+        time.sleep(6)
+        match = _recent_media_matching(caption)
+        if match:
+            log.warning("media_publish reported an error but the post IS live "
+                        "(2207085 lie) — using %s, not retrying.", match[0])
+            return match[0]
+        log.warning("Publish attempt %d failed and no post appeared — retrying: %s",
+                    attempt + 1, last_err)
+        time.sleep(min(2 ** attempt * 5, 30))
+    # Final check before giving up
+    match = _recent_media_matching(caption)
+    if match:
+        return match[0]
+    raise IGPublishError(f"Publish failed: {last_err}")
 
 
 def _permalink(media_id):
@@ -190,7 +236,7 @@ def publish_photo(image_url, caption=""):
     _require_config()
     container_id = _create_container(image_url, caption)
     _wait_until_ready(container_id)
-    media_id = _publish_container(container_id)
+    media_id = _publish_container(container_id, caption=caption)
     return media_id, _permalink(media_id)
 
 
@@ -226,6 +272,6 @@ def publish_carousel(image_urls, caption="", progress=None):
     container_id = _create_carousel_container(child_ids, caption)
     _wait_until_ready(container_id)
     _p((n + 1) / total, "Publishing to Instagram…")
-    media_id = _publish_container(container_id)
+    media_id = _publish_container(container_id, caption=caption)
     _p(1.0, "Posted ✓")
     return media_id, _permalink(media_id)
