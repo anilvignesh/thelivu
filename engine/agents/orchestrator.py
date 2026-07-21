@@ -2250,10 +2250,13 @@ def process_queued_carousels():
             image_urls = []
             for i, headline in enumerate(slide_texts, start=1):
                 slide_stamp = stamp if i == 1 else f"{i}/{n}"
-                out_path = str(out_dir / f"carousel_{carousel_id}_{i}.png")
+                # JPEG, not PNG — Instagram's publish step (media_publish) throws a
+                # persistent internal error 2207085 on PNG carousels; JPEG is the
+                # format IG officially wants and re-encodes to anyway.
+                out_path = str(out_dir / f"carousel_{carousel_id}_{i}.jpg")
                 render_dossier_slide(headline, stamp=slide_stamp, dark=dark, out=out_path)
                 image_url = (
-                    f"{SLIDE_SERVER_BASE_URL.rstrip('/')}/carousel_{carousel_id}_{i}.png"
+                    f"{SLIDE_SERVER_BASE_URL.rstrip('/')}/carousel_{carousel_id}_{i}.jpg"
                     if SLIDE_SERVER_BASE_URL else ""
                 )
                 add_carousel_slide(carousel_id, i, headline, image_path=out_path, image_url=image_url)

@@ -17,8 +17,8 @@ from pathlib import Path
 
 log = logging.getLogger("fileserver")
 
-# carousel_<carouselId>_<position>.png — the on-demand-renderable slide filenames.
-_SLIDE_RE = re.compile(r"^carousel_(\d+)_(\d+)\.png$")
+# carousel_<carouselId>_<position>.(png|jpg) — the on-demand-renderable slides.
+_SLIDE_RE = re.compile(r"^carousel_(\d+)_(\d+)\.(?:png|jpg)$")
 
 
 def _make_handler(slides_dir):
@@ -78,8 +78,9 @@ def _make_handler(slides_dir):
                 self.wfile.write(page)
                 return
             # Bare filename only, inside slides_dir — no path traversal, no
-            # directory listing, nothing else on disk is reachable.
-            if "/" in name or ".." in name or not name.endswith(".png"):
+            # directory listing, nothing else on disk is reachable. Serve PNG
+            # (legacy) and JPG (Instagram prefers JPEG — see below).
+            if "/" in name or ".." in name or not (name.endswith(".png") or name.endswith(".jpg")):
                 self.send_response(404)
                 self.end_headers()
                 return
@@ -98,6 +99,8 @@ def _make_handler(slides_dir):
                         d = get_slide_render_data(cid, pos)
                         if d:
                             slide_stamp = d["stamp"] if pos == 1 else f"{pos}/{d['total']}"
+                            # out path keeps the requested extension → PIL saves PNG
+                            # or JPEG accordingly (Image.save infers from extension).
                             render_dossier_slide(d["headline"], stamp=slide_stamp,
                                                  dark=d["dark"], out=str(path))
                             log.info("On-demand rendered %s", name)
@@ -109,7 +112,7 @@ def _make_handler(slides_dir):
                     return
             data = path.read_bytes()
             self.send_response(200)
-            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Type", "image/jpeg" if name.endswith(".jpg") else "image/png")
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
