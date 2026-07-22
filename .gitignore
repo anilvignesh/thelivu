@@ -19,3 +19,6 @@ publishing/slides_out/
 # OS
 .DS_Store
 Thumbs.db
+
+# Attended-mode handoff files (can contain draft material)
+.attend/

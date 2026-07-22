@@ -75,6 +75,46 @@ historical — this is current.
 7. **Reposition** — global scope, Kerala emphasis, NOT Kerala-first (see Decisions).
 8. **Reach** — story-specific + evergreen hashtags on carousels; slide count sized
    for engagement + full explanation (8–10, ceiling 10).
+9. **Attended mode + the quota breaker (2026-07-22)** — the answer to "the APIs ran
+   out." No cross-engine fallback; work parks, Anil runs the cycle by hand at the
+   terminal. See `docs/attended-mode.md`. Details below.
+
+### Attended mode — added 2026-07-22
+
+On 2026-07-21 **both** providers ran dry within hours of each other (Anthropic
+balance exhausted; Gemini AI Studio prepay credits depleted). The tick loop then
+spent **22 hours** crashing on a 429 every 2 minutes, producing nothing, while RSS
+kept queueing leads into a dead pipeline (1,504 of them by the 22nd).
+
+Three things came out of it:
+
+- **The Claude→Gemini auto-fallback (`9b3202f`) is REVERTED.** It contradicted an
+  invariant the code already held (`_pause_run`: *"never run on a substitute
+  engine"*). Silently moving the **trust gate** onto a cheaper model is exactly the
+  quality drift the charter exists to prevent — cheaper output on the gates is not a
+  neutral cost saving. Owner's call, and the right one.
+- **A quota circuit breaker** (`shared/quota.py`). A *hard* failure (out of credit,
+  quota exhausted, bad key) opens it for 60 minutes and the tick skips every model
+  stage; a *transient* failure (overload/500/timeout) does not — those still pause +
+  requeue per-run. It auto-expires, so a top-up or a midnight reset recovers with no
+  manual switch. Work that needs no model — **approve, publish, post a carousel**,
+  cleanup, the bio/article pages — deliberately sits ABOVE the breaker and keeps
+  running. Losing the API must never take the publishing surface down.
+- **Attended mode** (`engine/attend.py`, `./attend`). Runs the *real* orchestrator
+  with only the model call replaced: each skill writes its prompt to
+  `.attend/NNN-<skill>.request.md` and blocks until the assistant in Anil's
+  interactive Claude Code session writes the `.response.md`. Zero pipeline
+  duplication — trust gate, anti-monotony, parsing and the human gate are untouched.
+
+  **⚠️ It is a human-operated tool and must never be automated** — not from cron,
+  not from Railway, not via `claude -p`. A subscription driven by a human doing
+  their own work is legitimate; a subscription wired up as an unattended API
+  replacement is not. The blocking wait *is* the boundary. See
+  `docs/attended-mode.md`.
+
+Also fixed: `_last_rss_run` was only stamped on **success**, so a failing cycle
+stayed permanently "due" and retried every 2 minutes. That was the actual engine of
+the 22-hour loop. It now stamps on failure too, with a 30-minute backoff.
 
 ### Parked (not built — pick up post-20-posts)
 - Marketing/reach push: **Reels generator** + repurpose one verified story to

@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Attended mode — run the Thelivu pipeline by hand when the APIs are dry.
+#
+# Pulls the prod DB + Telegram creds from Railway (same pattern as the dashboard
+# launcher), then hands each skill call to the human-driven Claude Code session
+# in this terminal. See docs/attended-mode.md.
+#
+#   ./attend status
+#   ./attend cycle
+#   ./attend topic "some story idea"
+#   ./attend clear
+#
+# ⚠️ Interactive use only. Never wire this into cron, Railway, or `claude -p` —
+# a human must be driving the session. That is the compliance boundary.
+
+set -euo pipefail
+export PATH="$HOME/.railway/bin:$PATH"
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$REPO"
+
+if [ -z "${DATABASE_URL:-}" ]; then
+  echo "  fetching prod DB url from Railway…"
+  DATABASE_URL="$(railway variables --service Postgres --json \
+    | python3 -c "import sys,json;print(json.load(sys.stdin)['DATABASE_PUBLIC_URL'])")"
+  export DATABASE_URL
+fi
+
+if [ -z "${TELEGRAM_BOT_TOKEN:-}" ]; then
+  BOTV="$(railway variables --service thelivu --json)"
+  getv() { echo "$BOTV" | python3 -c "import sys,json;print(json.load(sys.stdin).get('$1',''))"; }
+  export TELEGRAM_BOT_TOKEN="$(getv TELEGRAM_BOT_TOKEN)"
+  export TELEGRAM_CHANNEL_ID="$(getv TELEGRAM_CHANNEL_ID)"
+  export TELEGRAM_DRAFT_CHAT_ID="$(getv TELEGRAM_DRAFT_CHAT_ID)"
+  export SLIDE_SERVER_BASE_URL="$(getv SLIDE_SERVER_BASE_URL)"
+fi
+
+exec "$REPO/venv/bin/python" -m engine.attend "$@"

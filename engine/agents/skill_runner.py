@@ -22,6 +22,7 @@ from shared.config import (
     SKILLS_DIR,
 )
 from engine.agents.tools import WEB_SEARCH_TOOL, execute_tool
+from shared import quota
 
 log = logging.getLogger("skill_runner")
 
@@ -139,6 +140,18 @@ def _send_quota_alert(provider, skill_name, exc):
         return
 
     alert_type, what, action = classification
+
+    # A hard failure (wallet or key) will not succeed on retry — open the breaker
+    # so the 2-minute tick stops hammering a dead API. Transient errors fall
+    # through untouched: those pause + requeue per-run in the orchestrator.
+    # Tripping is independent of the once/day alert dedup below — the alert is
+    # noise control, the breaker is the actual mechanism, and the breaker must be
+    # re-armed on every hard failure even on a day we've already alerted.
+    if alert_type in quota.HARD_ALERT_TYPES:
+        try:
+            quota.trip(f"{provider.title()}: {what}")
+        except Exception as e:
+            log.warning("Could not trip the LLM breaker: %s", e)
 
     if _already_alerted(provider, alert_type):
         return  # already told the user today
@@ -418,18 +431,102 @@ def _extract_claude_text(response):
     ).strip()
 
 
+# ── Attended mode — the human-operated provider ───────────────────────────────
+#
+# When the APIs run dry we do NOT reroute the trust gate to a weaker model (see
+# docs/attended-mode.md). Instead Anil opens Claude Code and runs the cycle
+# attended: the real pipeline runs, and only the model call is replaced by this
+# handoff. Each skill call writes its prompt to a file and BLOCKS until the
+# assistant in that interactive session writes the answer back.
+#
+# ⚠️ THE BLOCKING IS THE COMPLIANCE BOUNDARY, NOT AN INCONVENIENCE.
+# This path exists because a human is present, driving their own Claude Code
+# session, doing their own work — which is what the subscription is for. It must
+# NEVER be automated: do not shell out to the `claude` binary here, do not add a
+# headless/`-p` mode, and do not run `attend` from cron or from Railway. Doing
+# that would turn a subscription into an unattended API replacement, which is
+# exactly what the terms disallow. If you are tempted to "just automate this
+# one step" — that is the step you must not automate.
+
+ATTEND_DIR_NAME = ".attend"
+_ATTEND_POLL_SECONDS = 3
+
+
+def _attend_dir():
+    from shared.config import REPO_ROOT
+    d = REPO_ROOT / ATTEND_DIR_NAME
+    d.mkdir(exist_ok=True)
+    return d
+
+
+def _run_attended(skill_name, input_text, system_prompt, run_id=None):
+    """Hand one skill call to the human-driven session and wait for the answer."""
+    import itertools
+    import time
+
+    d = _attend_dir()
+    seq = len(list(d.glob("*.request.md"))) + 1
+    stem = f"{seq:03d}-{skill_name}"
+    req = d / f"{stem}.request.md"
+    res = d / f"{stem}.response.md"
+
+    req.write_text(
+        f"# Attended skill call — `{skill_name}`\n\n"
+        f"Run id: {run_id if run_id is not None else '—'}\n\n"
+        f"Do this skill's work yourself (search the live web where the "
+        f"instructions call for it), then write **only** the skill's structured "
+        f"output to:\n\n    {res}\n\n"
+        f"Do not summarise, do not add commentary — the pipeline parses this file "
+        f"as if it came from the model.\n\n"
+        f"---\n\n## SYSTEM PROMPT\n\n{system_prompt}\n\n"
+        f"---\n\n## INPUT\n\n{input_text}\n",
+        encoding="utf-8",
+    )
+
+    log.info("ATTENDED  %s → %s", skill_name, req)
+    print(f"\n  [attend] {skill_name}\n    request : {req}\n"
+          f"    response: {res}\n    waiting for the response file…", flush=True)
+
+    spinner = itertools.cycle("|/-\\")
+    waited = 0
+    while not res.exists():
+        time.sleep(_ATTEND_POLL_SECONDS)
+        waited += _ATTEND_POLL_SECONDS
+        print(f"\r    waiting {next(spinner)} {waited}s", end="", flush=True)
+
+    out = res.read_text(encoding="utf-8").strip()
+    print(f"\r    ✓ got {len(out)} chars                    ", flush=True)
+    if not out:
+        raise RuntimeError(
+            f"Attended response for {skill_name} was empty ({res}). "
+            f"Write the skill's output into that file and re-run."
+        )
+    return out
+
+
+def attended_mode():
+    """True when the operator started this process via `attend` (see attend.py)."""
+    import os
+    return os.environ.get("THELIVU_ATTENDED") == "1"
+
+
 # ── Main entry point ──────────────────────────────────────────────────────────
 
 def run_skill(skill_name, input_text, extra_tools=None, max_tokens=4096,
               run_id=None, topic=None):
     """
-    Route skill to the right model tier, fall back to Claude on any failure.
+    Route a skill to its provider. There is NO cross-engine fallback on failure.
 
     Routing:
-      Gemini skills   → Gemini 2.5 Flash + Google Search
-      DeepSeek skills → DeepSeek R1 (reasoning)
-      Groq skills     → Llama 3.3 70B (free utility)
-      Everything else → Claude Sonnet (editorial judgment)
+      Attended mode   → the human-driven session (see _run_attended)
+      Gemini skills   → Gemini 2.5 Flash + Google Search (verifier on Pro)
+      Everything else → Claude Sonnet (editorial judgment, writing, gates)
+
+    On a provider failure the work pauses and re-queues rather than moving to a
+    substitute engine — switching engines mid-spine would change how facts are
+    sourced and would silently move the trust gate onto a different model.
+    (A Gemini *content block* is the one exception: it's permanent rather than
+    transient, so it falls to Claude+web-search. See the handler below.)
     """
     from shared.db import agent_start, agent_done
 
@@ -443,6 +540,17 @@ def run_skill(skill_name, input_text, extra_tools=None, max_tokens=4096,
         f"recent events. If live sources and your memory disagree, the sources win.\n\n"
     )
     system_prompt = date_anchor + _PIPELINE_CONTRACT + _load_skill(skill_name)
+
+    # Attended mode — a human is running this cycle at the terminal because the
+    # APIs are dry. Every skill call is handed to that session instead of an API.
+    # The rest of the pipeline (trust gate, anti-monotony, parsing, human gate)
+    # is completely unchanged, which is the whole point of putting the seam here.
+    if attended_mode():
+        aid = agent_start(skill_name, "attended", topic=topic, run_id=run_id)
+        try:
+            return _run_attended(skill_name, input_text, system_prompt, run_id)
+        finally:
+            agent_done(aid)
 
     # Two providers only: Gemini for the search-grounded research skills, Claude
     # for everything else (judgment / structured / writing / gates) and as the

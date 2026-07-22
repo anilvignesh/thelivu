@@ -195,7 +195,21 @@ API** — stubs are the only retirement).
     `connect_timeout` so a Railway blip fails fast instead of freezing the page. A
     Streamlit click reruns the WHOLE script before the handler — that's the delay
     before actions/animations start; the real fix is a proper web app (Kiln-era).
-16. **YouTube `channel_id`s go stale/get repurposed.** Verify a feed resolves
+16. **A failing scheduled job must stamp its "last run" marker on failure too.**
+    `_last_rss_run` was set only after `run_daily_cycle()` succeeded, so once the
+    cycle started failing it stayed "due" and re-ran every 2-minute tick — 22
+    hours of it on 2026-07-21. Same trap the scout/cos blocks already avoid by
+    stamping BEFORE running. Any new scheduled block: stamp on both paths.
+17. **When the APIs run dry the engine parks — it does NOT switch models.**
+    `shared/quota.py` opens a 60-min breaker on a hard provider failure (credit /
+    quota / bad key) and `run.py` skips all LLM stages while it's open. Transient
+    errors don't trip it. Non-model work (approve, publish, post, cleanup, the
+    web surface) sits ABOVE the breaker on purpose and keeps running — **never
+    move it below.** Recovery is automatic on expiry; `./attend clear` forces it.
+    The owner then runs the cycle by hand: `./attend cycle`. **`engine/attend.py`
+    is human-operated and must never be automated** (no cron, no Railway, no
+    `claude -p`) — see `docs/attended-mode.md` for why that boundary matters.
+18. **YouTube `channel_id`s go stale/get repurposed.** Verify a feed resolves
     (`feedparser.parse` returns entries) before trusting it. Johnny Harris's id was
     wrong; `@perfectunion` now resolves to a different channel (deactivated).
     Confirmed working: ColdFusion, Coffeezilla, FYI.

@@ -8,6 +8,7 @@ if service == "thelivu-agent":
     from datetime import datetime, timezone, timedelta
     from shared.config import ANTHROPIC_API_KEY, APPROVAL_MODE, TELEGRAM_BOT_TOKEN, TELEGRAM_DRAFT_CHAT_ID, CHECK_INTERVAL_HOURS, REPO_ROOT, SLIDE_SERVER_BASE_URL, SLIDE_SERVER_PORT
     from shared.db import init_db, kv_get, kv_set, update_run, get_due_digs
+    from shared import quota
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", stream=sys.stdout)
     log = logging.getLogger("orchestrator")
@@ -37,7 +38,13 @@ if service == "thelivu-agent":
 
     _last_rss_run = None
     _cost_report_sent_date = None
+    _breaker_logged_at = None  # throttle the "paused" log to twice an hour
     TOPIC_POLL_SECONDS = 120  # check for owner topics every 2 minutes
+
+    # How long a FAILED rss cycle waits before retrying. The full interval would
+    # be too long for a blip; retrying immediately is what produced the 2026-07-21
+    # crash loop, because _last_rss_run was only stamped on success.
+    RSS_RETRY_MINUTES = 30
 
     def _tg_notify(text):
         """Send a plain-text notification to the draft chat from run.py."""
@@ -62,6 +69,56 @@ if service == "thelivu-agent":
                 _cost_report_sent_date = today
             except Exception as e:
                 log.error("Cost report failed: %s", e)
+
+        # ── Work that needs no model ──────────────────────────────────────────
+        # Deliberately ABOVE the quota breaker: when the APIs run dry the
+        # publishing surface must stay alive. Anil can still approve drafts and
+        # post carousels from Telegram/the dashboard with no model reachable.
+
+        # Delete rendered slide files for carousels that finished (posted/killed/failed) —
+        # keeps the volume from filling up with images nobody needs anymore.
+        try:
+            cleanup_finished_carousels()
+        except Exception as e:
+            log.error("Carousel file cleanup failed: %s", e, exc_info=True)
+
+        # Auto-recheck held stories older than 3 days (once per day)
+        try:
+            last_auto = kv_get("last_auto_recheck_at")
+            auto_due = (not last_auto) or (now_utc - datetime.fromisoformat(last_auto)).total_seconds() >= 20 * 3600
+            if auto_due:
+                kv_set("last_auto_recheck_at", now_utc.isoformat())
+                stale = get_held_runs(older_than_days=3)
+                for run in stale:
+                    update_run(run["id"], status="recheck_requested")
+                    log.info("Auto-queued recheck for held run #%d (>3 days held)", run["id"])
+                if stale:
+                    log.info("Auto-recheck: queued %d held story/stories", len(stale))
+        except Exception as e:
+            log.error("Auto-recheck failed: %s", e)
+
+        # ── Quota breaker ─────────────────────────────────────────────────────
+        # Both providers ran dry on 2026-07-21 and the tick spent 22 hours
+        # crashing on a 429 every 2 minutes. While the breaker is open we skip
+        # every model stage instead. It auto-expires (60 min) so a top-up or a
+        # midnight quota reset recovers on its own. There is deliberately NO
+        # fallback to another engine — the work parks and Anil runs the cycle
+        # attended. See docs/attended-mode.md.
+        try:
+            blocked_reason = quota.is_blocked()
+        except Exception as e:
+            log.warning("Breaker check failed (assuming clear): %s", e)
+            blocked_reason = None
+
+        if blocked_reason:
+            if _breaker_logged_at is None or (now_utc - _breaker_logged_at).total_seconds() >= 1800:
+                _breaker_logged_at = now_utc
+                until = quota.blocked_until()
+                log.warning("LLM stages paused — %s (retrying after %s)",
+                            blocked_reason, until.strftime("%H:%M UTC") if until else "expiry")
+            time.sleep(TOPIC_POLL_SECONDS)
+            continue
+        _breaker_logged_at = None
 
         # Weekly: source scout + story scout + story tracker
         try:
@@ -101,28 +158,6 @@ if service == "thelivu-agent":
             process_queued_carousels()
         except Exception as e:
             log.error("Carousel processing failed: %s", e, exc_info=True)
-
-        # Delete rendered slide files for carousels that finished (posted/killed/failed) —
-        # keeps the volume from filling up with images nobody needs anymore.
-        try:
-            cleanup_finished_carousels()
-        except Exception as e:
-            log.error("Carousel file cleanup failed: %s", e, exc_info=True)
-
-        # Auto-recheck held stories older than 3 days (once per day)
-        try:
-            last_auto = kv_get("last_auto_recheck_at")
-            auto_due = (not last_auto) or (now_utc - datetime.fromisoformat(last_auto)).total_seconds() >= 20 * 3600
-            if auto_due:
-                kv_set("last_auto_recheck_at", now_utc.isoformat())
-                stale = get_held_runs(older_than_days=3)
-                for run in stale:
-                    update_run(run["id"], status="recheck_requested")
-                    log.info("Auto-queued recheck for held run #%d (>3 days held)", run["id"])
-                if stale:
-                    log.info("Auto-recheck: queued %d held story/stories", len(stale))
-        except Exception as e:
-            log.error("Auto-recheck failed: %s", e)
 
         # Manual source scout signal (/scoutnow)
         try:
@@ -236,7 +271,15 @@ if service == "thelivu-agent":
                         run_daily_cycle()
                         _last_rss_run = now_utc
                     except Exception as e:
-                        log.error("RSS cycle failed: %s", e, exc_info=True)
+                        # Stamp on failure too, backdated so the retry comes in
+                        # RSS_RETRY_MINUTES rather than on the very next tick.
+                        # Without this a persistent failure re-ran every 2 minutes
+                        # forever (2026-07-21: 22 hours of it).
+                        _last_rss_run = (now_utc
+                                         - timedelta(hours=interval_h)
+                                         + timedelta(minutes=RSS_RETRY_MINUTES))
+                        log.error("RSS cycle failed (retrying in ~%dm): %s",
+                                  RSS_RETRY_MINUTES, e, exc_info=True)
         except Exception as e:
             log.error("Topic check failed: %s", e, exc_info=True)
 
