@@ -791,7 +791,13 @@ with t_carousels:
                 cols = st.columns(min(len(positions), 5))
                 for idx, pos in enumerate(positions):
                     with cols[idx % 5]:
-                        st.image(f"{SLIDE_BASE}/carousel_{cid}_{pos}.png", use_container_width=True)
+                        # .jpg, matching what the composer renders and what actually
+                        # gets posted (commit 0413d63 moved slides to JPEG for
+                        # Instagram's 2207085). Asking for .png still "worked" —
+                        # the fileserver renders missing slides on demand — but it
+                        # silently built a second PNG copy of every previewed slide
+                        # and showed you bytes other than the ones that get posted.
+                        st.image(f"{SLIDE_BASE}/carousel_{cid}_{pos}.jpg", use_container_width=True)
                 st.caption(f"{len(positions)} slide(s)")
 
             # Approving an article only QUEUES the carousel — composing the slide
