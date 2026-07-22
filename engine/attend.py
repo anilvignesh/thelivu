@@ -130,6 +130,36 @@ def cmd_topic(args):
     _postamble()
 
 
+def cmd_carousel(args):
+    """Compose a queued/failed carousel attended.
+
+    Approving an article only queues the carousel; composing the slide copy is a
+    model stage, so while the breaker is open a carousel sits at 'queued' with
+    zero slides and posting it fails with "no hosted slide images". This runs the
+    real composer through the attended handoff so the slides get built with no
+    API credit — same path the tick would take, just human-driven.
+    """
+    from shared.db import get_carousel_run, update_carousel_run
+    from engine.agents.orchestrator import process_queued_carousels
+
+    cid = args.carousel_id
+    if cid is not None:
+        car = get_carousel_run(cid)
+        if not car:
+            sys.exit(f"no carousel #{cid}")
+        if car["status"] != "queued":
+            # process_queued_carousels only picks up 'queued'. Put it back so a
+            # failed or half-composed carousel can be redone without SQL.
+            print(f"  carousel #{cid} is '{car['status']}' — requeueing it")
+            update_carousel_run(cid, status="queued")
+        _preamble(f"carousel #{cid}")
+    else:
+        _preamble("all queued carousels")
+
+    process_queued_carousels()
+    _postamble()
+
+
 def cmd_clear(_args):
     quota.clear()
     print("  breaker closed — the agent will resume automated cycles within 2 minutes.")
@@ -162,6 +192,10 @@ def main():
     t = sub.add_parser("topic", help="run one topic through the spine attended")
     t.add_argument("text", nargs="+")
     t.set_defaults(fn=cmd_topic)
+    c = sub.add_parser("carousel", help="compose a queued/failed carousel attended")
+    c.add_argument("carousel_id", nargs="?", type=int,
+                   help="carousel id; omit to do every queued one")
+    c.set_defaults(fn=cmd_carousel)
     sub.add_parser("clear", help="close the breaker early (after a top-up)").set_defaults(fn=cmd_clear)
     args = p.parse_args()
     args.fn(args)

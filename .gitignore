@@ -16,6 +16,11 @@ venv/
 # Local render test output
 publishing/slides_out/
 
+# Rendered carousel slides — build artefacts, not source. The fileserver
+# re-renders any missing slide on demand from the DB, and cleanup_finished_carousels
+# sweeps them, so they must never be committed.
+articles/slides/
+
 # OS
 .DS_Store
 Thumbs.db

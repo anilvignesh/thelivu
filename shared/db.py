@@ -334,12 +334,46 @@ CREATE TABLE IF NOT EXISTS dig_updates (
 """
 
 
+# Dial retries for the Postgres connection (see _conn). Small and bounded: this
+# runs inside the 2-minute tick, so it must fail fast enough to not stack ticks.
+_CONNECT_TRIES = 3
+_CONNECT_BACKOFF = 1.5
+
+
 def _conn():
     if DATABASE_URL:
         import psycopg2
         import psycopg2.extras
-        c = psycopg2.connect(DATABASE_URL)
-        return c
+        # Keepalives are NOT optional here. Indian ISPs silently drop idle NAT
+        # entries (HANDOFF §5), and Railway's public PG proxy is reached over the
+        # open internet from Anil's laptop. Without these, a dropped connection
+        # leaves psycopg2 blocked in recv() with no timeout — forever. That wedged
+        # an attended cycle mid-ingest on 2026-07-22 with zero log output.
+        # With them a dead socket surfaces as OperationalError in ~60s.
+        # Timing out is better than hanging, but not good enough on its own: with a
+        # flaky link a bare timeout just moves the failure one level up, and a
+        # single dropped dial mid-ingest kills a whole source for the cycle
+        # ("Ingest failed for The Hindu — Kerala: timeout expired", 2026-07-22).
+        # Retry the dial a few times before giving up — the link recovers in
+        # seconds, and every caller here is safe to retry (we've not sent a
+        # statement yet, so there is nothing to double-apply).
+        import time as _time
+        last = None
+        for attempt in range(_CONNECT_TRIES):
+            try:
+                return psycopg2.connect(
+                    DATABASE_URL,
+                    connect_timeout=10,
+                    keepalives=1,
+                    keepalives_idle=30,
+                    keepalives_interval=10,
+                    keepalives_count=3,
+                )
+            except psycopg2.OperationalError as e:
+                last = e
+                if attempt < _CONNECT_TRIES - 1:
+                    _time.sleep(_CONNECT_BACKOFF * (2 ** attempt))
+        raise last
     else:
         import sqlite3
         import pathlib

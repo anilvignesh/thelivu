@@ -14,9 +14,11 @@ import json
 import requests
 import psycopg2
 import psycopg2.extras
+import psycopg2.pool
 import pandas as pd
 import streamlit as st
 from pathlib import Path
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 # Shared engine helpers (respect DATABASE_URL — same DB the dashboard talks to).
@@ -173,28 +175,95 @@ _DB_CONNECT_TIMEOUT = 8
 # handler, and each query is a round-trip to Railway over the internet — a longer
 # cache means most reruns skip the DB, so actions (and the post animation) start
 # sooner. The 🔄 Refresh button clears the cache when you want fresh data.
+# We talk to Railway Postgres over the PUBLIC proxy, so a fresh TCP+TLS handshake
+# costs ~320ms — measured 6x the ~50ms the query itself takes. st.tabs runs EVERY
+# tab body on every rerun (~25 queries), and most buttons call cache_data.clear(),
+# so connecting per query put ~8s of pure handshake on every cold render. Keep the
+# connections warm in a pool instead; only the first render pays for the dial.
+@st.cache_resource
+def _pool():
+    return psycopg2.pool.ThreadedConnectionPool(
+        1, 8, DB_URL, connect_timeout=_DB_CONNECT_TIMEOUT)
+
+@contextmanager
+def _borrow():
+    """Lend out a warm connection; bin the whole pool if the socket went stale."""
+    pool = _pool()
+    conn = pool.getconn()
+    try:
+        yield conn
+    except (psycopg2.OperationalError, psycopg2.InterfaceError):
+        # Railway drops idle sockets — discard the pool so the next call redials.
+        try: pool.closeall()
+        except Exception: pass
+        _pool.clear()
+        raise
+    except Exception:
+        try: conn.rollback()
+        except Exception: pass
+        pool.putconn(conn)
+        raise
+    else:
+        pool.putconn(conn)
+
+def _sql(sql, params, fetch, commit):
+    """Run one statement, retrying once so a stale pooled socket is invisible."""
+    for last_try in (False, True):
+        try:
+            with _borrow() as conn:
+                factory = psycopg2.extras.RealDictCursor if fetch else None
+                cur = conn.cursor(cursor_factory=factory) if factory else conn.cursor()
+                try:
+                    cur.execute(sql, params or ())
+                    rows = [dict(r) for r in cur.fetchall()] if fetch else None
+                    if commit:
+                        conn.commit()
+                    return rows
+                finally:
+                    cur.close()
+        except (psycopg2.OperationalError, psycopg2.InterfaceError):
+            if last_try:
+                raise
+
 @st.cache_data(ttl=30)
 def q(sql, params=None):
-    conn = psycopg2.connect(DB_URL, connect_timeout=_DB_CONNECT_TIMEOUT)
-    try:
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute(sql, params or ())
-        return [dict(r) for r in cur.fetchall()]
-    finally:
-        conn.close()
+    return _sql(sql, params, fetch=True, commit=False)
 
 def execute(sql, params=None):
-    conn = psycopg2.connect(DB_URL, connect_timeout=_DB_CONNECT_TIMEOUT)
-    try:
-        cur = conn.cursor()
-        cur.execute(sql, params or ())
-        conn.commit()
-    finally:
-        conn.close()
+    _sql(sql, params, fetch=False, commit=True)
 
 def scalar(sql, params=None):
     rows = q(sql, params)
     return list(rows[0].values())[0] if rows else 0
+
+@st.cache_data(ttl=30)
+def run_text(run_id):
+    """The three long text columns for ONE run, fetched only when it's opened.
+
+    These are 10-25 KB each. Listing them for every card pulled ~600 KB across
+    the Drafts + Pipeline tabs on EVERY rerun — for text you only see after
+    clicking into a story. Streamlit runs every tab body on every rerun, so that
+    was paid even on tabs you weren't looking at.
+    """
+    rows = q("SELECT draft_text, review_text, verification_report "
+             "FROM pipeline_runs WHERE id=%(i)s", {"i": run_id})
+    return rows[0] if rows else {}
+
+def _open_key(ns, run_id):
+    return f"_open_{ns}_{run_id}"
+
+def read_toggle(ns, run_id, label="📖 Read"):
+    """Per-card open/close switch. Only the open card pays for its text."""
+    k = _open_key(ns, run_id)
+    if st.session_state.get(k):
+        if st.button("✕ Close", key=f"cls_{ns}_{run_id}", use_container_width=True):
+            st.session_state[k] = False
+            st.rerun()
+        return True
+    if st.button(label, key=f"opn_{ns}_{run_id}", use_container_width=True):
+        st.session_state[k] = True
+        st.rerun()
+    return False
 
 def cost(model, i, o):
     m = (model or "").lower()
@@ -498,12 +567,13 @@ with t_drafts:
     _DRAFT_LIMIT, _HELD_LIMIT = 15, 12
     n_drafts = scalar("SELECT COUNT(*) FROM pipeline_runs WHERE status='pending_human'")
     n_held   = scalar("SELECT COUNT(*) FROM pipeline_runs WHERE status IN ('held','hold','needs_attention')")
-    drafts = q("""SELECT id, created_at::date as date, source, throughline,
-                         trust_gate, draft_text, review_text, verification_report
+    # Text columns are NOT listed here — they load per card via run_text() when you
+    # open one. Listing them cost ~360 KB a rerun for text nobody was reading yet.
+    drafts = q("""SELECT id, created_at::date as date, source, throughline, trust_gate
                   FROM pipeline_runs WHERE status='pending_human'
                   ORDER BY id DESC LIMIT %(l)s""", {"l": _DRAFT_LIMIT})
     held = q("""SELECT id, created_at::date as date, source, throughline, trust_gate,
-                       status, draft_text, review_text, verification_report
+                       status
                 FROM pipeline_runs
                 WHERE status IN ('held','hold','needs_attention')
                 ORDER BY id DESC LIMIT %(l)s""", {"l": _HELD_LIMIT})
@@ -540,12 +610,14 @@ with t_drafts:
                 tg_notify(f"⏸ Story #{run_id} held from dashboard.")
                 st.cache_data.clear(); st.rerun()
 
-            with st.expander("Read draft"):
-                st.markdown(run.get("draft_text") or "_No draft text saved._")
-            with st.expander("Review notes"):
-                st.text(run.get("review_text") or "_No review notes._")
-            with st.expander("Verification report"):
-                st.text(run.get("verification_report") or "_No verification report._")
+            if read_toggle("draft", run_id):
+                txt = run_text(run_id)
+                with st.expander("Read draft", expanded=True):
+                    st.markdown(txt.get("draft_text") or "_No draft text saved._")
+                with st.expander("Review notes"):
+                    st.text(txt.get("review_text") or "_No review notes._")
+                with st.expander("Verification report"):
+                    st.text(txt.get("verification_report") or "_No verification report._")
 
     if held:
         st.subheader(f"On hold / needs attention ({len(held)})")
@@ -560,12 +632,14 @@ with t_drafts:
                 st.markdown(f"**#{rid}** {badge} · gate `{gate}` — {(run['throughline'] or '')[:110]}")
                 st.caption(f"{run['date']} · {run['source']}")
 
-                with st.expander("📄 Read draft"):
-                    st.markdown(run.get("draft_text") or "_No draft text saved._")
-                with st.expander("🔎 Why it's held — verification report"):
-                    st.text(run.get("verification_report") or "_No verification report._")
-                with st.expander("📝 Review notes"):
-                    st.text(run.get("review_text") or "_No review notes._")
+                if read_toggle("held", rid, "📖 Read draft + why it's held"):
+                    txt = run_text(rid)
+                    with st.expander("🔎 Why it's held — verification report", expanded=True):
+                        st.text(txt.get("verification_report") or "_No verification report._")
+                    with st.expander("📄 Read draft"):
+                        st.markdown(txt.get("draft_text") or "_No draft text saved._")
+                    with st.expander("📝 Review notes"):
+                        st.text(txt.get("review_text") or "_No review notes._")
 
                 # Recheck WITH editorial direction — the key "close the loop" action.
                 note = st.text_area(
@@ -634,9 +708,10 @@ with t_drafts:
 with t_pipeline:
     status_filter = st.selectbox("Filter by status",
         ["all","investigating","writing","pending_human","published","killed","held"], index=0)
-    # One query with the text columns — not a per-run round-trip (that was 50+ trips).
-    sql = ("SELECT id, created_at, source, throughline, trust_gate, status, updated_at, "
-           "draft_text, review_text, verification_report FROM pipeline_runs")
+    # List is metadata only; the text for a run loads when you expand it (run_text).
+    # Carrying the text columns here pulled ~250 KB per rerun for 30 collapsed rows.
+    sql = ("SELECT id, created_at, source, throughline, trust_gate, status, updated_at "
+           "FROM pipeline_runs")
     if status_filter != "all":
         sql += " WHERE status=%(s)s"
     sql += " ORDER BY id DESC LIMIT 30"
@@ -653,10 +728,12 @@ with t_pipeline:
                 dc2.metric("Gate", run["trust_gate"] or "—")
                 dc3.metric("Source", (run["source"] or "—")[:18])
                 st.caption(f"Created: {run['created_at']} · Updated: {run['updated_at']}")
-                dt1, dt2, dt3 = st.tabs(["Draft", "Review", "Verification"])
-                with dt1: st.markdown(run.get("draft_text") or "_Not yet written._")
-                with dt2: st.text(run.get("review_text") or "_No review._")
-                with dt3: st.text(run.get("verification_report") or "_No verification._")
+                if read_toggle("pipe", run["id"], "📖 Load text"):
+                    txt = run_text(run["id"])
+                    dt1, dt2, dt3 = st.tabs(["Draft", "Review", "Verification"])
+                    with dt1: st.markdown(txt.get("draft_text") or "_Not yet written._")
+                    with dt2: st.text(txt.get("review_text") or "_No review._")
+                    with dt3: st.text(txt.get("verification_report") or "_No verification._")
                 if run["status"] == "pending_human":
                     bc1, bc2, bc3 = st.columns(3)
                     if bc1.button("✓ Approve", key=f"pa_{run['id']}", type="primary"):
@@ -687,28 +764,70 @@ with t_carousels:
         empty_state("🖼️", "No carousels yet", "They appear here after you approve an article.")
     _CIC = {"pending_review":"🕓","posted":"✅","queued":"⚙️","composing":"⚙️",
             "killed":"❌","approved_manual":"📎","failed":"⚠️"}
+    _ACTIONABLE = ("pending_review", "queued", "composing", "approved_manual", "failed")
+    # Slide positions for every actionable card in ONE query — this used to be a
+    # query per card inside the loop, i.e. a fresh round-trip to Railway per
+    # carousel on every rerun.
+    # Fetched even when SLIDE_BASE is unset: we need the COUNT to know whether a
+    # carousel has anything to post, not just to draw thumbnails.
+    _slide_pos = {}
+    _ids = [c["id"] for c in cars if c["status"] in _ACTIONABLE]
+    if _ids:
+        for r in q("SELECT carousel_id, position FROM carousel_slides "
+                   "WHERE carousel_id = ANY(%(ids)s) "
+                   "GROUP BY carousel_id, position "
+                   "ORDER BY carousel_id, position", {"ids": _ids}):
+            _slide_pos.setdefault(r["carousel_id"], []).append(r["position"])
     for c in cars:
         cid = c["id"]
-        actionable = c["status"] in ("pending_review", "queued", "composing", "approved_manual", "failed")
+        actionable = c["status"] in _ACTIONABLE
         with st.container(border=True):
             st.markdown(f"{_CIC.get(c['status'],'•')} **Carousel #{cid}** · run #{c['run_id']} "
                         f"· `{c['status']}` — {c['story'] or ''}")
             # Show the rendered slides only for carousels that need a decision
             # (keeps the tab fast — posted ones just show a link).
-            if actionable and SLIDE_BASE:
-                pos_rows = q("SELECT DISTINCT position FROM carousel_slides WHERE carousel_id=%(i)s ORDER BY position", {"i": cid})
-                positions = [r["position"] for r in pos_rows][:10]
-                if positions:
-                    cols = st.columns(min(len(positions), 5))
-                    for idx, pos in enumerate(positions):
-                        with cols[idx % 5]:
-                            st.image(f"{SLIDE_BASE}/carousel_{cid}_{pos}.png", use_container_width=True)
-                    st.caption(f"{len(positions)} slide(s)")
+            positions = _slide_pos.get(cid, [])[:10]
+            if actionable and SLIDE_BASE and positions:
+                cols = st.columns(min(len(positions), 5))
+                for idx, pos in enumerate(positions):
+                    with cols[idx % 5]:
+                        st.image(f"{SLIDE_BASE}/carousel_{cid}_{pos}.png", use_container_width=True)
+                st.caption(f"{len(positions)} slide(s)")
+
+            # Approving an article only QUEUES the carousel — composing the slide
+            # copy is a model stage. While the quota breaker is open that stage is
+            # skipped, so the carousel sits here with zero slides. Posting it then
+            # fails deep in publish.py with "no hosted slide images", which reads
+            # like a hosting bug and isn't one. Say what's actually happening.
+            not_composed = actionable and not positions
+            if not_composed:
+                try:
+                    import shared.quota as _quota
+                    _why = _quota.is_blocked()
+                    _until = _quota.blocked_until()
+                except Exception:
+                    _why, _until = None, None
+                if _why:
+                    _t = f" — retries ~{_until.strftime('%H:%M UTC')}" if _until else ""
+                    # `./attend cycle` runs run_daily_cycle, which never touches
+                    # carousels — only the tick and `attend carousel` call
+                    # process_queued_carousels. Naming the wrong command here sent
+                    # Anil down a dead end on 2026-07-23.
+                    st.warning(f"⏳ Slides not composed yet. The compose stage needs a "
+                               f"model and the quota breaker is open: {_why}{_t}. "
+                               f"It composes itself once credit is back, or build it "
+                               f"now with `./attend carousel {cid}`.")
+                else:
+                    st.warning("⏳ Slides not composed yet — this carousel is still "
+                               "waiting for the compose stage. Nothing to post.")
+
             with st.expander("Caption"):
                 st.text(c["caption"] or "(none)")
             if actionable:
                 pc1, pc2 = st.columns(2)
-                if pc1.button("📤 Post to Instagram", key=f"cpost_{cid}", type="primary", use_container_width=True):
+                if pc1.button("📤 Post to Instagram", key=f"cpost_{cid}", type="primary",
+                              use_container_width=True, disabled=not_composed,
+                              help="No slides composed yet" if not_composed else None):
                     st.toast(f"Posting carousel #{cid}…", icon="📤")  # instant feedback
                     from publishing.publish import post_carousel_run
                     with st.status(f"Posting carousel #{cid} to Instagram…", expanded=True) as status:
@@ -735,6 +854,33 @@ with t_carousels:
                 if pc2.button("✗ Kill", key=f"ckill_{cid}", use_container_width=True):
                     execute("UPDATE carousel_runs SET status='killed' WHERE id=%s", (cid,))
                     st.cache_data.clear(); st.rerun()
+
+                # Rebuild the slides. Deliberately does NOT delete the existing
+                # ones: process_queued_carousels calls clear_carousel_slides itself
+                # right before it writes the new set, so the old slides survive
+                # until a compose actually succeeds. The first version deleted here
+                # and requeued — which, with the breaker open, threw away a good
+                # carousel and left nothing to post (hit on carousel #14,
+                # 2026-07-23). Never destroy the current artefact to request a new
+                # one that may not be buildable.
+                rc1, _rc2 = st.columns(2)
+                if rc1.button("🔄 Rebuild slides", key=f"crc_{cid}", use_container_width=True,
+                              help="Queue this carousel to compose again (existing slides "
+                                   "stay until the new ones are ready)"):
+                    try:
+                        import shared.quota as _q
+                        _blocked = _q.is_blocked()
+                    except Exception:
+                        _blocked = None
+                    execute("UPDATE carousel_runs SET status='queued' WHERE id=%s", (cid,))
+                    if _blocked:
+                        st.warning(f"Queued to rebuild — but composing needs a model and the "
+                                   f"breaker is open ({_blocked}). Your current slides are "
+                                   f"untouched. Build it now with `./attend carousel {cid}`, "
+                                   f"or wait for credit.")
+                    else:
+                        st.success("Queued to rebuild — new slides appear within ~2 min.")
+                    st.cache_data.clear()
             elif c["status"] == "posted" and c["ig_permalink"]:
                 st.markdown(f"▸ [View on Instagram]({c['ig_permalink']})")
 

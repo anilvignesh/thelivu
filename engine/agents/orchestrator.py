@@ -10,6 +10,7 @@ Agents can use web_search to verify claims and create_skill to add new skills
 when they identify recurring editorial patterns.
 """
 
+import difflib
 import hashlib
 import json
 import logging
@@ -947,6 +948,41 @@ def _parse_selected_lead(text, n_leads):
     return ("ok", idx) if 0 <= idx < n_leads else ("unparsed", None)
 
 
+def _norm_line(s):
+    return re.sub(r"\s+", " ", (s or "").strip().lower())
+
+
+def _resolve_selected_lead(text, all_leads, idx):
+    """Map news-monitor's pick back to an INPUT lead. Returns (lead, how).
+
+    Two numbering schemes collide here. We hand the monitor leads numbered
+    'Lead 1..N' in INPUT order, but SKILL.md tells it to emit its own queue
+    '## Lead 1..n' in RANKED order after dropping exclusions. Indexing all_leads
+    by the output's number is therefore only correct by accident: on 2026-07-22 a
+    monitor that had chosen an Andhra land-records story emitted SELECTED_LEAD: 1
+    and the cycle went off to investigate 'Chemical leak after truck overturns on
+    Tumakuru-Bengaluru highway' — input lead 1 — which the skill's own hard
+    exclusions would have dropped on sight.
+
+    So the number is no longer authoritative: the monitor must echo the
+    throughline it picked, and we match on that. The index is the fallback for
+    output that predates the contract.
+    """
+    m = re.search(r"SELECTED_THROUGHLINE:\s*(.+)", text)
+    want = _norm_line(m.group(1)) if m else ""
+    if not want:
+        return all_leads[idx], "index (no SELECTED_THROUGHLINE)"
+
+    best, score = None, 0.0
+    for lead in all_leads:
+        s = difflib.SequenceMatcher(None, want, _norm_line(lead.get("throughline"))).ratio()
+        if s > score:
+            best, score = lead, s
+    if best is not None and score >= 0.60:
+        return best, f"throughline match {score:.2f}"
+    return all_leads[idx], f"index (throughline unmatched, best {score:.2f})"
+
+
 def _newsworthiness_verdict(selected):
     """Absolute-floor gate on the selected lead, run before the expensive
     investigation spine. Returns (pursue: bool, reason: str). Fails OPEN — a gate
@@ -1258,7 +1294,20 @@ def run_daily_cycle():
     # Archive context so the monitor doesn't re-select a story we've already run.
     published_ctx = _published_context(
         header="ALREADY PUBLISHED — do not pick a lead that merely repeats one of these:")
-    leads_text = published_ctx + reliability_ctx + "LEADS TO EVALUATE:\n\n" + "\n\n---\n\n".join(
+    # The skill's generic output format numbers leads by RANK in its own queue.
+    # This pipeline resolves the pick against the INPUT list below, so the two
+    # numberings must be disambiguated explicitly or the wrong story gets
+    # investigated (see _resolve_selected_lead).
+    selection_contract = (
+        "SELECTION CONTRACT (this pipeline — overrides the skill's generic numbering):\n"
+        "  SELECTED_LEAD must be the **input** Lead number from the list below\n"
+        "  (e.g. `SELECTED_LEAD: 51`), NOT the position in your own ranked output.\n"
+        "  Immediately after it, emit one more line:\n"
+        "    SELECTED_THROUGHLINE: <that input lead's Throughline, copied exactly>\n"
+        "  The orchestrator matches on the throughline, so the two must agree.\n"
+        "  For SELECTED_LEAD: NONE, omit SELECTED_THROUGHLINE.\n\n"
+    )
+    leads_text = published_ctx + reliability_ctx + selection_contract + "LEADS TO EVALUATE:\n\n" + "\n\n---\n\n".join(
         f"**Lead {i+1}** (source: {item['source']})\n"
         f"Throughline: {item['throughline']}\n"
         f"URL: {item['video_url']}\n"
@@ -1289,9 +1338,14 @@ def run_daily_cycle():
         _notify("Thelivu daily cycle: news-monitor picked an out-of-range lead — skipping this cycle.")
         log.error("Selection out of range. Raw: %s", monitor_output[:200])
         return
-    selected = all_leads[idx]
+    selected, how = _resolve_selected_lead(monitor_output, all_leads, idx)
+    if selected is not all_leads[idx]:
+        log.warning("SELECTED_LEAD said input lead %d (%s) but SELECTED_THROUGHLINE "
+                    "resolved to '%s' — trusting the throughline (%s).",
+                    idx + 1, all_leads[idx]["throughline"][:50],
+                    selected["throughline"][:50], how)
 
-    log.info("Selected: %s", selected["throughline"][:80])
+    log.info("Selected: %s  [%s]", selected["throughline"][:80], how)
 
     # Absolute-floor newsworthiness gate BEFORE the expensive investigation spine:
     # one cheap call that drops commodity / routine-process news so the engine
