@@ -268,3 +268,86 @@ Liberation Mono lacks the ₹ glyph.
   Vizhinjam/Adani dig (watchlist); media-lawyer review before going public;
   Instagram ingestion path decision. Phase 2 (automation, tip line) is
   deferred — see `engine/DEPLOYMENT.md`.
+
+---
+
+## 9. Reels — the voice/video layer (built 2026-07-23/24)
+
+A `<60s`, 1080×1920 Instagram Reel per story, **narrated in Anil's own cloned
+voice**, over the Dossier caption frames. Reels are IG's reach surface (pushed to
+non-followers). Built local + free — the reel voice/video needs **no API credit**;
+only the script is a model step. Research/plan: `docs/video-reels-research.md`,
+`docs/reels-v1-build.md`.
+
+**The voice (Anil's clone, LOCAL only):**
+- Engine: **Chatterbox Turbo (350M)** via `chatterbox-tts` in a separate venv
+  `~/cbx` (CPU torch — do NOT let it pull CUDA torch). Reference clip
+  `~/thelivu_voice_ref2.wav` (a clean 30s recording; the WhatsApp-compressed first
+  attempt was too thin). Settings: `temperature=0.7` (Turbo **ignores**
+  `exaggeration`/`cfg_weight` — a harmless warning; only temperature + reference
+  matter).
+- Served by `publishing/chatterbox_server.py` on `127.0.0.1:3901` (loads the model
+  once, POST `/synth`). Runs in the `~/cbx` venv. **On-demand, not autostart** —
+  the model sits ~2GB resident and this laptop is RAM-tight. Launcher:
+  `~/.jarvis/reel-voice.sh {start|stop|status}`.
+- **Railway CANNOT run this** — no GPU, and PyTorch TTS is too heavy for the
+  services. Reel generation is therefore a **local/attended** step on Anil's
+  laptop. (OmniVoice Studio's flagship was tried and **OOM'd on this 14GB CPU-only
+  box — do not retry it**. Chatterbox 350M is the one that fits.)
+
+**The pipeline (`publishing/reel.py`, runs in the `thelivu` venv, HTTP-calls :3901):**
+- `TTS_BACKEND` = `piper` | `omnivoice` | **`chatterbox`** (Anil's voice; the one to use).
+- Two formats: narrated highlight reel (`--script`) and carousel-slides-video
+  (`--carousel-slides`, silent, for adding trending audio in-app).
+- Slides: consistent **highlight** captions; numbers, ₹-amounts and ALL-CAPS
+  acronyms auto-render in the accent colour (`_is_highlight_token`); `KICKER`
+  context tag; progress bar; `_font_safe` glyph guard (fonts lack ≈, smart quotes,
+  → — they'd tofu). **Acronyms are written out of the *spoken* lines** (voice never
+  says "KIIFB" raw) and shown on the slide instead.
+- The IG **description = the full narration** (`parse_script` → `narration`), so the
+  whole story + every acronym is in the caption text.
+- One command to make a reel (server up):
+  `TTS_BACKEND=chatterbox venv/bin/python -m publishing.reel --script S.md --out O.mp4 --dark`
+
+**Hosting + posting (this DOES run on Railway):**
+- Reels are stored in the DB and served by the fileserver, same survive-redeploys
+  design as slides (the MP4 is generated locally, so it can't be regenerated on
+  Railway). Table **`reels`** (`mp4` BYTEA); helpers `save_reel`, `get_reel`,
+  `get_reel_bytes`, `update_reel`. Route **`GET/HEAD /reel/<id>.mp4`** with HTTP
+  Range (IG's video ingestion probes with it).
+- `publishing/instagram.publish_reel()` — the 3-step REELS API flow (create
+  container from `video_url` → wait for the slow transcode ~2min → publish), reusing
+  the transient-retry + 2207085 verify. `publishing/publish.post_reel_run(reel_id)`
+  mirrors `post_carousel_run` (double-post guard, human gate).
+- Posted so far: reel #2 (masala-bond `run 110`, Anil's voice) live on
+  @thelivu.reports. Reel #1 (an earlier Piper/robotic-voice version) was deleted
+  in-app by Anil.
+
+**Cleanup done this era:** OmniVoice Studio removed; `~/cbx` CUDA torch slimmed to
+CPU (~6.7GB reclaimed total). `articles/reels/` and `articles/slides/` are
+gitignored (generated media).
+
+## 10. Next build — command center + reels integration (PLANNED, not built)
+
+Verified 2026-07-24: the **reel is NOT wired into the pipeline.** The
+`video-script` skill exists but is called nowhere; `build_reel`/`save_reel`/
+`post_reel_run` are triggered by nothing. Story→approval→carousel is fully auto
+(with credit); the reel is entirely manual today. Closing that gap is the next job:
+
+1. **Engine:** wire the `video-script` skill into the tick so an approved article
+   **auto-generates its reel script** and stores it on the run (needs API credit).
+   Then the script is ready before Anil sits down — no model call at reel time.
+2. **Command center (`dashboard.py`) rework** — the app needs to grow into reels:
+   - a **Reels tab** + a **"Make reel" / "Convert to reel"** button on each
+     published article/carousel → the *local* dashboard runs the Chatterbox
+     pipeline (voice + assemble) from the pre-made script, stores the reel, shows a
+     preview with **Approve → post**.
+   - a **voice-server status** indicator (is `:3901` up?).
+   - target UX: the "1 hour/day" loop — open command center → published articles
+     each have a ready script → click Make reel → preview → approve → posted. The
+     carousel is already auto-made; the reel is one click + the render wait.
+3. Anil may run this build session on **Fable** (the $100 Fable/Claude-Code credit)
+   — fine for interactive building; it does NOT power the unattended engine.
+
+Design spec for the current dashboard: `docs/command-center.md`. This rework should
+extend it, not replace the working carousel/approval surfaces.
