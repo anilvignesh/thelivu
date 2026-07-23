@@ -36,6 +36,9 @@ PIPER_VOICE = os.path.expanduser("~/.jarvis/voices/en_GB-alan-medium.onnx")
 OMNIVOICE_URL = os.environ.get("OMNIVOICE_URL", "http://127.0.0.1:3900")
 OMNIVOICE_MODEL = os.environ.get("OMNIVOICE_MODEL", "kittentts")
 OMNIVOICE_VOICE = os.environ.get("OMNIVOICE_VOICE", "default")
+# chatterbox: Anil's cloned voice via the persistent Chatterbox server
+# (publishing/chatterbox_server.py, runs in the ~/cbx venv). Local, free, CPU.
+CHATTERBOX_URL = os.environ.get("CHATTERBOX_URL", "http://127.0.0.1:3901")
 GAP_SECS = 0.35          # silence between beats; also the caption hold padding
 FPS = 30
 
@@ -136,11 +139,22 @@ def _render_frame(caption, dark, idx, total, kicker, out_png):
 # ── TTS ─────────────────────────────────────────────────────────────────────────
 def _synth(text, wav_path):
     """Synthesize one line to a wav via the configured backend. Returns seconds."""
-    if TTS_BACKEND == "omnivoice":
+    if TTS_BACKEND == "chatterbox":
+        _synth_chatterbox(text, wav_path)
+    elif TTS_BACKEND == "omnivoice":
         _synth_omnivoice(text, wav_path)
     else:
         _synth_piper(text, wav_path)
     return _duration(wav_path)
+
+
+def _synth_chatterbox(text, wav_path):
+    """POST to the Chatterbox voice server (Anil's cloned voice) → write a wav.
+    Generation is ~5x realtime on CPU, so the timeout is generous."""
+    import requests
+    r = requests.post(f"{CHATTERBOX_URL}/synth", json={"text": text}, timeout=600)
+    r.raise_for_status()
+    Path(wav_path).write_bytes(r.content)
 
 
 def _synth_piper(text, wav_path):
