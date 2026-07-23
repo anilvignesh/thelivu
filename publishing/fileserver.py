@@ -77,6 +77,19 @@ def _make_handler(slides_dir):
                 self.end_headers()
                 self.wfile.write(page)
                 return
+            # Reel MP4s: /reel/<id>.mp4 — served from the DB (Piper/ffmpeg run on
+            # Anil's laptop, so Railway can't regenerate them; the bytes live in the
+            # reels table). Range + HEAD supported because Instagram's video
+            # ingestion probes with them.
+            m = re.match(r"^reel/(\d+)\.mp4$", name)
+            if m:
+                from shared.db import get_reel_bytes
+                data = get_reel_bytes(int(m.group(1)))
+                if data is None:
+                    self.send_response(404); self.end_headers(); return
+                self._serve_bytes(data, "video/mp4")
+                return
+
             # Bare filename only, inside slides_dir — no path traversal, no
             # directory listing, nothing else on disk is reachable. Serve PNG
             # (legacy) and JPG (Instagram prefers JPEG — see below).
@@ -116,6 +129,55 @@ def _make_handler(slides_dir):
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
+
+        def _serve_bytes(self, data, content_type):
+            """Serve an in-memory blob with HTTP Range support (Instagram's video
+            fetcher issues ranged GETs). Full 200 when no Range header."""
+            total = len(data)
+            rng = self.headers.get("Range")
+            if rng:
+                m = re.match(r"bytes=(\d*)-(\d*)", rng)
+                if m:
+                    start = int(m.group(1)) if m.group(1) else 0
+                    end = int(m.group(2)) if m.group(2) else total - 1
+                    end = min(end, total - 1)
+                    if start > end or start >= total:
+                        self.send_response(416)
+                        self.send_header("Content-Range", f"bytes */{total}")
+                        self.end_headers()
+                        return
+                    chunk = data[start:end + 1]
+                    self.send_response(206)
+                    self.send_header("Content-Type", content_type)
+                    self.send_header("Content-Range", f"bytes {start}-{end}/{total}")
+                    self.send_header("Accept-Ranges", "bytes")
+                    self.send_header("Content-Length", str(len(chunk)))
+                    self.end_headers()
+                    self.wfile.write(chunk)
+                    return
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Content-Length", str(total))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_HEAD(self):
+            name = self.path.lstrip("/").split("?")[0]
+            m = re.match(r"^reel/(\d+)\.mp4$", name)
+            if m:
+                from shared.db import get_reel_bytes
+                data = get_reel_bytes(int(m.group(1)))
+                if data is None:
+                    self.send_response(404); self.end_headers(); return
+                self.send_response(200)
+                self.send_header("Content-Type", "video/mp4")
+                self.send_header("Accept-Ranges", "bytes")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                return
+            self.send_response(404)
+            self.end_headers()
 
         def log_message(self, *args):
             pass  # keep Railway deploy logs to what the app itself logs

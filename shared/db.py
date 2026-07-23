@@ -136,6 +136,19 @@ CREATE TABLE IF NOT EXISTS carousel_slides (
     image_url      TEXT
 );
 
+CREATE TABLE IF NOT EXISTS reels (
+    id             SERIAL PRIMARY KEY,
+    run_id         INTEGER REFERENCES pipeline_runs(id),
+    kind           TEXT DEFAULT 'narrated',
+    caption        TEXT,
+    mp4            BYTEA,
+    status         TEXT DEFAULT 'ready',
+    ig_media_id    TEXT,
+    ig_permalink   TEXT,
+    created_at     TIMESTAMP DEFAULT NOW(),
+    posted_at      TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS bio_links (
     id          SERIAL PRIMARY KEY,
     title       TEXT,
@@ -299,6 +312,19 @@ CREATE TABLE IF NOT EXISTS carousel_slides (
     headline       TEXT,
     image_path     TEXT,
     image_url      TEXT
+);
+
+CREATE TABLE IF NOT EXISTS reels (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id         INTEGER REFERENCES pipeline_runs(id),
+    kind           TEXT DEFAULT 'narrated',
+    caption        TEXT,
+    mp4            BLOB,
+    status         TEXT DEFAULT 'ready',
+    ig_media_id    TEXT,
+    ig_permalink   TEXT,
+    created_at     TEXT DEFAULT (datetime('now')),
+    posted_at      TEXT
 );
 
 CREATE TABLE IF NOT EXISTS bio_links (
@@ -1351,6 +1377,77 @@ def get_carousel_run(carousel_id):
         ph = "%s" if _is_postgres() else "?"
         cur.execute("SELECT * FROM carousel_runs WHERE id = " + ph, (carousel_id,))
         return _fetchone(cur)
+    finally:
+        conn.close()
+
+
+def save_reel(run_id, mp4_bytes, caption, kind="narrated"):
+    """Store a locally-generated reel MP4 in the DB so the Railway fileserver can
+    serve it at a public URL for Instagram to fetch (Piper/ffmpeg run on Anil's
+    laptop; Railway can't regenerate it — so the bytes live in the DB, same
+    survive-redeploys philosophy as slides). Returns the reel id."""
+    ph = "%s" if _is_postgres() else "?"
+    if _is_postgres():
+        import psycopg2 as _pg
+        blob = _pg.Binary(mp4_bytes)
+    else:
+        import sqlite3 as _sq
+        blob = _sq.Binary(mp4_bytes)
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            f"INSERT INTO reels (run_id, kind, caption, mp4, status) "
+            f"VALUES ({ph},{ph},{ph},{ph},'ready')",
+            (run_id, kind, caption, blob),
+        )
+        if _is_postgres():
+            cur.execute("SELECT lastval()"); rid = cur.fetchone()[0]
+        else:
+            rid = cur.lastrowid
+        conn.commit()
+        return rid
+    finally:
+        conn.close()
+
+
+def get_reel(reel_id):
+    """Reel metadata WITHOUT the mp4 blob (cheap)."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(
+            "SELECT id, run_id, kind, caption, status, ig_media_id, ig_permalink, "
+            "created_at, posted_at FROM reels WHERE id = " + ph, (reel_id,))
+        return _fetchone(cur)
+    finally:
+        conn.close()
+
+
+def get_reel_bytes(reel_id):
+    """The raw MP4 bytes for the fileserver to serve. None if absent."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute("SELECT mp4 FROM reels WHERE id = " + ph, (reel_id,))
+        row = cur.fetchone()
+        if not row or row[0] is None:
+            return None
+        return bytes(row[0])
+    finally:
+        conn.close()
+
+
+def update_reel(reel_id, **kwargs):
+    ph = "%s" if _is_postgres() else "?"
+    sets = ", ".join(f"{k} = {ph}" for k in kwargs)
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(f"UPDATE reels SET {sets} WHERE id = {ph}", (*kwargs.values(), reel_id))
+        conn.commit()
     finally:
         conn.close()
 

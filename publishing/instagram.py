@@ -264,6 +264,39 @@ def publish_photo(image_url, caption=""):
     return media_id, _permalink(media_id)
 
 
+def publish_reel(video_url, caption="", progress=None):
+    """Publish a single vertical video as an Instagram Reel. Returns
+    (media_id, permalink). Three steps: create a REELS container from a public
+    video_url, wait for Meta to ingest+transcode it (much slower than an image —
+    up to ~2 min), then publish. Raises IGNotConfigured / IGPublishError.
+
+    `video_url` must be a public, range-capable URL (our /reel/<id>.mp4 fileserver
+    route). `progress(frac, msg)` is an optional UI callback."""
+    def _p(frac, msg):
+        if progress:
+            try: progress(min(max(frac, 0.0), 1.0), msg)
+            except Exception: pass
+
+    _require_config()
+    _p(0.1, "Sending the reel to Instagram…")
+    data = _graph_post(f"{IG_USER_ID}/media", {
+        "media_type": "REELS",
+        "video_url": video_url,
+        "caption": caption,
+        "access_token": IG_ACCESS_TOKEN,
+    })
+    if "id" not in data:
+        raise IGPublishError(f"Reel container creation failed: {data}")
+    container_id = data["id"]
+    _p(0.4, "Instagram is processing the video…")
+    # Reels transcode is slow and variable — poll longer than images do.
+    _wait_until_ready(container_id, attempts=40, delay=4)
+    _p(0.85, "Publishing the reel…")
+    media_id = _publish_container(container_id, caption=caption)
+    _p(1.0, "Posted ✓")
+    return media_id, _permalink(media_id)
+
+
 def publish_carousel(image_urls, caption="", progress=None):
     """Publish up to 10 images (already at public image_urls) as one
     Instagram carousel post. Returns (media_id, permalink). Raises

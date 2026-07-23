@@ -196,3 +196,33 @@ def post_carousel_run(carousel_id, progress=None):
         return {"ok": False, "error": str(e)}
     update_carousel_run(carousel_id, status="posted", ig_media_id=media_id, ig_permalink=permalink)
     return {"ok": True, "media_id": media_id, "permalink": permalink, "count": len(image_urls)}
+
+
+def post_reel_run(reel_id, progress=None):
+    """Post a stored reel to Instagram as a Reel — the video is served from our own
+    fileserver (/reel/<id>.mp4) so Meta can fetch it. Returns {ok, media_id,
+    permalink, needs_config, error}. Same double-post guard + human-gate model as
+    the carousel path: this only executes an already-approved post."""
+    from shared.db import get_reel, update_reel
+    from shared.config import IG_USER_ID, IG_ACCESS_TOKEN, SLIDE_SERVER_BASE_URL
+    r = get_reel(reel_id)
+    if not r:
+        return {"ok": False, "error": f"reel #{reel_id} not found"}
+    if r.get("status") == "posted" and r.get("ig_media_id"):
+        return {"ok": True, "media_id": r["ig_media_id"], "permalink": r.get("ig_permalink"),
+                "already_posted": True}
+    if not SLIDE_SERVER_BASE_URL:
+        return {"ok": False, "error": "SLIDE_SERVER_BASE_URL not set — no public host for the reel"}
+    if not IG_USER_ID or not IG_ACCESS_TOKEN:
+        update_reel(reel_id, status="approved_manual")
+        return {"ok": False, "needs_config": True,
+                "error": "Instagram not configured (IG_USER_ID / IG_ACCESS_TOKEN)"}
+    video_url = f"{SLIDE_SERVER_BASE_URL.rstrip('/')}/reel/{reel_id}.mp4"
+    from publishing.instagram import publish_reel
+    try:
+        media_id, permalink = publish_reel(video_url, r.get("caption") or "", progress=progress)
+    except Exception as e:
+        log.error("Instagram reel post failed for #%s: %s", reel_id, e)
+        return {"ok": False, "error": str(e)}
+    update_reel(reel_id, status="posted", ig_media_id=media_id, ig_permalink=permalink)
+    return {"ok": True, "media_id": media_id, "permalink": permalink}
