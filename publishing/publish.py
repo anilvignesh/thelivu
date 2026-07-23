@@ -95,6 +95,14 @@ def publish_run(run_id):
     prepared = prepare_for_publish(draft, CONTACT_HANDLE)
     how, article_url, slug = "teaser", "", None
 
+    # Build the teaser and post it. The plain-text fallback exists for when the
+    # article path can't be BUILT or Telegram *rejects* the HTML (bad entity → 400,
+    # which means it did NOT post). It must NOT fire when the send itself failed
+    # ambiguously — a dropped connection mid-send may have posted, and re-posting as
+    # plain text would duplicate the story on the channel (the Telegram analogue of
+    # the Instagram 2207085 double-post). So: build errors and HTTP rejections fall
+    # back; network/ambiguous errors return without a second post.
+    teaser_html = None
     try:
         if not SLIDE_SERVER_BASE_URL:
             raise RuntimeError("SLIDE_SERVER_BASE_URL not set — no domain to host the article")
@@ -102,15 +110,30 @@ def publish_run(run_id):
         slug = make_slug(run_id, article.title)
         set_run_slug(run_id, slug)
         article_url = f"{SLIDE_SERVER_BASE_URL}/a/{slug}"
-        msg_ids = _post_html(build_teaser(article, article_url, CONTACT_HANDLE))
-        log.info("Published run #%d at %s", run_id, article_url)
-        try:
-            add_bio_link(article.title, f"/a/{slug}")  # deduped; relative URL
-        except Exception as e:
-            log.warning("Bio page update failed for run #%d: %s", run_id, e)
+        teaser_html = build_teaser(article, article_url, CONTACT_HANDLE)
     except Exception as e:
-        log.warning("Article-page path failed for run #%d (%s) — plain-text fallback", run_id, e)
+        log.warning("Article-page build failed for run #%d (%s) — plain-text fallback", run_id, e)
         how = "plain-text"
+
+    if teaser_html is not None:
+        try:
+            msg_ids = _post_html(teaser_html)
+            log.info("Published run #%d at %s", run_id, article_url)
+            try:
+                add_bio_link(article.title, f"/a/{slug}")  # deduped; relative URL
+            except Exception as e:
+                log.warning("Bio page update failed for run #%d: %s", run_id, e)
+        except requests.HTTPError as e:
+            # Telegram rejected the HTML (4xx/5xx) — it did not post. Safe to fall back.
+            log.warning("Teaser rejected by Telegram for run #%d (%s) — plain-text fallback", run_id, e)
+            how, teaser_html = "plain-text", None
+        except Exception as e:
+            # Connection reset / timeout / malformed 2xx body: the send is AMBIGUOUS,
+            # the message may already be on the channel. Do not post again.
+            log.error("Publish send ambiguous for run #%d (%s) — not retrying to avoid a duplicate", run_id, e)
+            return {"ok": False, "error": f"send failed ambiguously (not retried to avoid duplicate): {e}"}
+
+    if teaser_html is None:
         try:
             msg_ids = _post_plain(prepared)
         except Exception as e2:
@@ -133,8 +156,8 @@ def publish_run(run_id):
 def carousel_image_urls(carousel_id):
     """The deduped, ordered, ≤10 slide image URLs for a carousel — exactly one per
     position, capped at Instagram's carousel limit so a stray duplicate can never
-    make us post 20 (which Meta rejects). The slide server renders any missing PNG
-    on demand, so every hosted URL resolves."""
+    make us post 20 (which Meta rejects). The slide server renders any missing slide
+    (JPEG) on demand, so every hosted URL resolves."""
     from shared.db import get_carousel_slides
     by_pos = {}
     for s in get_carousel_slides(carousel_id):

@@ -2,8 +2,8 @@
 
 Two-step publish: create a media container from a public image_url, then
 publish the container. Instagram's API only accepts a fetchable URL, not a
-file upload — publishing.telegraph.upload_image() is used as the public host
-for the locally-rendered slide PNG.
+file upload — the slide fileserver (SLIDE_SERVER_BASE_URL) is the public host
+for the rendered slide JPEGs, re-rendering any missing one from the DB on demand.
 
 Uses graph.instagram.com, not graph.facebook.com — the app was set up via
 Meta's newer "Instagram API with Instagram Login" flow (no Facebook Page
@@ -159,12 +159,20 @@ def _wait_until_ready(container_id, attempts=10, delay=2):
         time.sleep(delay)
 
 
-def _recent_media_matching(caption, within_secs=180):
-    """Return (media_id, permalink) of a just-published post whose caption matches
+def _recent_media_matching(caption, within_secs=600):
+    """Return (media_id, permalink) of a JUST-published post whose caption matches
     `caption` — used to detect the case where media_publish RETURNS an error but
-    Instagram actually published anyway (the 2207085 lie). Matches on the caption's
-    first line within the last few minutes."""
-    import time as _t
+    Instagram actually published anyway (the 2207085 lie).
+
+    The recency window is load-bearing, not optional. Matching on caption alone is
+    unsafe: if the same throughline is ever posted twice (a recheck, a re-run, a
+    manual repost) a transient publish error would match the OLD post and report it
+    as this one — a silently dropped publish pointing at the wrong permalink. So we
+    only accept a match published within `within_secs`. This fired for real on
+    2026-07-23 (carousel #15: a 2207051 rate-limit tripped the verify path); it was
+    correct only because that throughline happened to be unique. The window makes it
+    correct by construction, not by luck."""
+    from datetime import datetime, timezone
     key = (caption or "").strip().splitlines()[0].strip()[:60] if caption else ""
     if not key:
         return None
@@ -174,12 +182,28 @@ def _recent_media_matching(caption, within_secs=180):
                           "access_token": IG_ACCESS_TOKEN})
     except Exception:
         return None
-    now = _t.time()
+    now = datetime.now(timezone.utc)
     for m in out.get("data", []):
         cap = (m.get("caption") or "")
-        if key and key in cap:
-            # optional recency guard
-            return (m.get("id"), m.get("permalink"))
+        if not (key and key in cap):
+            continue
+        ts = m.get("timestamp")
+        if ts:
+            try:
+                # IG returns e.g. 2026-07-23T04:11:04+0000
+                posted = datetime.fromisoformat(ts.replace("+0000", "+00:00"))
+                if (now - posted).total_seconds() > within_secs:
+                    log.warning("Caption match on media %s but it is %.0fs old (> %ds) "
+                                "— NOT treating it as this publish.", m.get("id"),
+                                (now - posted).total_seconds(), within_secs)
+                    continue
+            except (ValueError, TypeError):
+                # Unparseable timestamp: fail closed — don't claim a match we can't date.
+                continue
+        else:
+            # No timestamp to verify recency: fail closed rather than risk a stale match.
+            continue
+        return (m.get("id"), m.get("permalink"))
     return None
 
 
