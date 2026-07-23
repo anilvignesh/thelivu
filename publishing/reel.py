@@ -55,6 +55,7 @@ def parse_script(text):
         return m.group(1).strip() if m else ""
 
     title = one("TITLE")
+    kicker = one("KICKER")   # small context tag shown on every slide
     beats = []
 
     hook, hook_cap = one("HOOK"), one("HOOK_CAPTION")
@@ -74,17 +75,79 @@ def parse_script(text):
         beats.append((close, close_cap or close))
 
     hashtags = one("HASHTAGS")
-    return {"title": title, "beats": beats, "hashtags": hashtags}
+    # The Instagram description = the FULL narration (all spoken lines as prose),
+    # so the whole story is in the caption for readers/muted viewers and every
+    # acronym/number is correct in text. Built here so post-time can reuse it.
+    narration = " ".join(sp for sp, _ in beats)
+    return {"title": title, "kicker": kicker, "beats": beats,
+            "hashtags": hashtags, "narration": narration}
 
 
 # ── frame rendering (Dossier look, 9:16) ────────────────────────────────────────
+def _is_highlight_token(tok):
+    """A token to render in the accent colour: a number, a ₹-amount, or an
+    ALL-CAPS acronym (KIIFB, CAG, RBI…). These are exactly the things the voice
+    can mangle, so showing them — emphasised — on the slide is the fix."""
+    core = tok.strip('.,;:!?—-–"\'()')
+    if not core:
+        return False
+    if "₹" in tok or any(c.isdigit() for c in tok):
+        return True
+    letters = [c for c in core if c.isalpha()]
+    return len(letters) >= 2 and all(c.isupper() for c in letters)
+
+
+def _draw_emph_block(d, caption, font, line_h, max_w, top_y, fg, accent):
+    """Word-wrap `caption` to max_w and draw it centred from top_y, colouring
+    highlight tokens (numbers/₹/acronyms) in `accent`. Returns block height."""
+    space = d.textlength(" ", font=font)
+    words = caption.split()
+    lines, cur, cur_w = [], [], 0.0
+    for wtok in words:
+        wtw = d.textlength(wtok, font=font)
+        add = wtw + (space if cur else 0)
+        if cur and cur_w + add > max_w:
+            lines.append(cur); cur, cur_w = [wtok], wtw
+        else:
+            cur.append(wtok); cur_w += add
+    if cur:
+        lines.append(cur)
+    y = top_y
+    for ln in lines:
+        line_w = sum(d.textlength(w, font=font) for w in ln) + space * (len(ln) - 1)
+        x = (W - line_w) / 2
+        for w in ln:
+            d.text((x, y), w, font=font, fill=accent if _is_highlight_token(w) else fg)
+            x += d.textlength(w, font=font) + space
+        y += line_h
+    return line_h * len(lines)
+
+
+# Symbols the Noto Serif / DejaVu Mono bundle can't render (they'd show as an
+# empty "tofu" box) mapped to safe equivalents. ₹, ×, — and · ARE in the fonts.
+_GLYPH_SUB = {
+    "≈": "~", "≤": "<=", "≥": ">=", "≠": "!=", "→": "->", "←": "<-",
+    "…": "...", "’": "'", "‘": "'", "“": '"', "”": '"', "–": "-",
+}
+
+
+def _font_safe(text):
+    for bad, good in _GLYPH_SUB.items():
+        text = text.replace(bad, good)
+    return text
+
+
 def _render_frame(caption, dark, idx, total, kicker, out_png):
+    caption = _font_safe(caption)
+    kicker = _font_safe(kicker or "")
     pal = PALETTE["dark" if dark else "light"]
     bg, fg, accent = pal["bg"], pal["fg"], pal["accent"]
+    muted = (150, 138, 110) if dark else (150, 136, 104)
     img = Image.new("RGB", (W, H), bg)
     d = ImageDraw.Draw(img)
 
     pad_x = 96
+    max_w = W - 2 * pad_x
     # top: THELIVU wordmark + a thin rule
     mark_f = _font(MONO_BOLD, 40)
     d.text((pad_x, 150), "THELIVU", font=mark_f, fill=accent)
@@ -92,46 +155,61 @@ def _render_frame(caption, dark, idx, total, kicker, out_png):
            "· reel", font=_font(MONO, 32), fill=fg)
     d.line([(pad_x, 235), (W - pad_x, 235)], fill=accent, width=3)
 
-    # centre band: the caption, big serif, wrapped, vertically centred
-    max_w = W - 2 * pad_x
-    size = 118
+    # optional kicker: a small uppercase tag under the rule (story context)
+    if kicker:
+        kf = _font(MONO_BOLD, 34)
+        d.text((pad_x, 270), kicker.upper(), font=kf, fill=muted)
+
+    # centre band: the highlight, big serif, wrapped, emphasis on numbers/acronyms
+    size = 122
     while size >= 60:
         f = _font(SERIF_BOLD, size)
-        lines = _wrap_to_width(d, caption, f, max_w)
-        line_h = int(size * 1.16)
-        block_h = line_h * len(lines)
-        if block_h <= 900 and all(d.textlength(ln, font=f) <= max_w for ln in lines):
+        line_h = int(size * 1.14)
+        # measure wrapped height by a dry run at this size
+        words, cur, cur_w, nlines = caption.split(), [], 0.0, 0
+        space = d.textlength(" ", font=f)
+        fits = True
+        for wtok in words:
+            wtw = d.textlength(wtok, font=f)
+            if wtw > max_w:
+                fits = False; break
+            add = wtw + (space if cur else 0)
+            if cur and cur_w + add > max_w:
+                nlines += 1; cur, cur_w = [wtok], wtw
+            else:
+                cur.append(wtok); cur_w += add
+        if cur:
+            nlines += 1
+        if fits and line_h * nlines <= 920:
             break
         size -= 4
     f = _font(SERIF_BOLD, size)
-    line_h = int(size * 1.16)
-    lines = _wrap_to_width(d, caption, f, max_w)
-    block_h = line_h * len(lines)
-    y = (H - block_h) // 2 - 60
-    for ln in lines:
-        w = d.textlength(ln, font=f)
-        d.text(((W - w) // 2, y), ln, font=f, fill=fg)
-        y += line_h
-
-    # bottom: kicker/source line + progress dots (kept above IG's bottom UI band)
-    foot_y = H - 360
-    kf = _font(MONO, 30)
-    if kicker:
-        kw = d.textlength(kicker, font=kf)
-        d.text(((W - kw) // 2, foot_y), kicker, font=kf, fill=fg)
-    # progress dots
-    dot_r, gap = 7, 34
-    total_w = (total - 1) * gap
-    dx = (W - total_w) // 2
-    dy = foot_y + 70
-    for i in range(total):
-        col = accent if i == idx else (fg if not dark else (110, 100, 80))
-        fill = accent if i == idx else None
-        if i == idx:
-            d.ellipse([dx - dot_r, dy - dot_r, dx + dot_r, dy + dot_r], fill=accent)
+    line_h = int(size * 1.14)
+    # vertically centre the block
+    tmp_words, tmp_cur, tmp_w, nlines = caption.split(), [], 0.0, 0
+    space = d.textlength(" ", font=f)
+    for wtok in tmp_words:
+        add = d.textlength(wtok, font=f) + (space if tmp_cur else 0)
+        if tmp_cur and tmp_w + add > max_w:
+            nlines += 1; tmp_cur, tmp_w = [wtok], d.textlength(wtok, font=f)
         else:
-            d.ellipse([dx - dot_r, dy - dot_r, dx + dot_r, dy + dot_r], outline=fg, width=2)
-        dx += gap
+            tmp_cur.append(wtok); tmp_w += add
+    if tmp_cur:
+        nlines += 1
+    top_y = (H - line_h * nlines) // 2 - 40
+    _draw_emph_block(d, caption, f, line_h, max_w, top_y, fg, accent)
+
+    # bottom: thin progress bar (cleaner than dots) + source line
+    bar_y = H - 300
+    bar_w = W - 2 * pad_x
+    d.line([(pad_x, bar_y), (pad_x + bar_w, bar_y)],
+           fill=muted, width=3)
+    if total > 1:
+        filled = bar_w * (idx + 1) / total
+        d.line([(pad_x, bar_y), (pad_x + filled, bar_y)], fill=accent, width=7)
+    src = "thelivu.reports · sources in bio"
+    sf = _font(MONO, 28)
+    d.text(((W - d.textlength(src, font=sf)) / 2, bar_y + 34), src, font=sf, fill=muted)
 
     img.save(out_png)
 
@@ -188,12 +266,14 @@ def _duration(path):
 
 
 # ── assembly ──────────────────────────────────────────────────────────────────
-def build_reel(fields, dark, out_mp4, kicker="thelivu.reports · sources in bio"):
+def build_reel(fields, dark, out_mp4, kicker=None):
     """Render frames + VO for each beat, animate with a gentle zoom, mux to MP4.
     `fields` is parse_script() output. Returns the out path."""
     beats = fields["beats"]
     if not beats:
         raise ValueError("no beats in script")
+    if kicker is None:
+        kicker = fields.get("kicker", "")
     out_mp4 = Path(out_mp4)
     out_mp4.parent.mkdir(parents=True, exist_ok=True)
     work = Path(tempfile.mkdtemp(prefix="reel_"))
