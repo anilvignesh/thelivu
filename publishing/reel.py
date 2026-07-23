@@ -27,8 +27,15 @@ from publishing.slides import (
 
 # 9:16 for Reels. IG overlays UI on the bottom ~15% and right edge — keep text out.
 W, H = 1080, 1920
+# TTS backend is pluggable: 'piper' (local, robotic, zero-setup) or 'omnivoice'
+# (OmniVoice Studio's OpenAI-compatible sidecar on :3900 — better voice, still
+# local/free; run KittenTTS there for CPU-realtime English narration).
+TTS_BACKEND = os.environ.get("TTS_BACKEND", "piper")
 PIPER_BIN = os.path.expanduser("~/.local/bin/piper")
 PIPER_VOICE = os.path.expanduser("~/.jarvis/voices/en_GB-alan-medium.onnx")
+OMNIVOICE_URL = os.environ.get("OMNIVOICE_URL", "http://127.0.0.1:3900")
+OMNIVOICE_MODEL = os.environ.get("OMNIVOICE_MODEL", "kittentts")
+OMNIVOICE_VOICE = os.environ.get("OMNIVOICE_VOICE", "default")
 GAP_SECS = 0.35          # silence between beats; also the caption hold padding
 FPS = 30
 
@@ -128,13 +135,33 @@ def _render_frame(caption, dark, idx, total, kicker, out_png):
 
 # ── TTS ─────────────────────────────────────────────────────────────────────────
 def _synth(text, wav_path):
-    """Piper TTS one line to a wav. Returns duration in seconds."""
+    """Synthesize one line to a wav via the configured backend. Returns seconds."""
+    if TTS_BACKEND == "omnivoice":
+        _synth_omnivoice(text, wav_path)
+    else:
+        _synth_piper(text, wav_path)
+    return _duration(wav_path)
+
+
+def _synth_piper(text, wav_path):
     subprocess.run(
         [PIPER_BIN, "--model", PIPER_VOICE, "--output_file", str(wav_path)],
         input=text.encode("utf-8"), check=True,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
-    return _duration(wav_path)
+
+
+def _synth_omnivoice(text, wav_path):
+    """POST to OmniVoice Studio's OpenAI-compatible sidecar → write a wav."""
+    import requests
+    r = requests.post(
+        f"{OMNIVOICE_URL}/v1/audio/speech",
+        json={"model": OMNIVOICE_MODEL, "voice": OMNIVOICE_VOICE,
+              "input": text, "response_format": "wav"},
+        timeout=120,
+    )
+    r.raise_for_status()
+    Path(wav_path).write_bytes(r.content)
 
 
 def _duration(path):
@@ -217,12 +244,76 @@ def build_reel(fields, dark, out_mp4, kicker="thelivu.reports · sources in bio"
         shutil.rmtree(work, ignore_errors=True)
 
 
+# ── carousel-to-video (the trending-audio workhorse) ────────────────────────────
+def build_carousel_reel(image_paths, dark, out_mp4, secs_per=2.8):
+    """Animate existing carousel slides into a 9:16 SILENT motion video, for posting
+    in the IG app with a trending sound added there (the API can't attach library
+    audio; see docs/reels-v1-build.md). Each 4:5 slide is centred on a 9:16 canvas
+    in the slide's own bg colour with a gentle zoom, cut to the next. Silent by
+    design — you add the sound at post time.
+
+    A silent AAC track is muxed in anyway: some uploaders/players reject a
+    video-only MP4, and IG replaces the audio when you pick a sound regardless."""
+    if not image_paths:
+        raise ValueError("no slide images")
+    out_mp4 = Path(out_mp4)
+    out_mp4.parent.mkdir(parents=True, exist_ok=True)
+    bg = "0x171410" if dark else "0xE6DCC3"   # matches PALETTE ink / kraft
+    y_off = (H - 1350) // 2                     # centre the 1080x1350 slide vertically
+    work = Path(tempfile.mkdtemp(prefix="creel_"))
+    try:
+        seg_paths = []
+        frames = max(int(round(secs_per * FPS)), 1)
+        for i, img in enumerate(image_paths):
+            seg = work / f"s{i}.mp4"
+            # zoom within the slide, then pad to 9:16 with the slide's bg (static letterbox)
+            vf = (f"scale=1080:1350,"
+                  f"zoompan=z='min(zoom+0.0007,1.09)':d={frames}"
+                  f":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1350:fps={FPS},"
+                  f"pad={W}:{H}:0:{y_off}:color={bg},format=yuv420p")
+            subprocess.run(
+                ["ffmpeg", "-y", "-loop", "1", "-i", str(img), "-t", f"{secs_per:.3f}",
+                 "-vf", vf, "-r", str(FPS), "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                 str(seg)],
+                check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            seg_paths.append(seg)
+
+        concat_list = work / "segs.txt"
+        concat_list.write_text("".join(f"file '{s}'\n" for s in seg_paths))
+        video = work / "video.mp4"
+        subprocess.run(
+            ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat_list),
+             "-c", "copy", str(video)],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        total = len(image_paths) * secs_per
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", str(video),
+             "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", "-t", f"{total:.3f}",
+             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "96k",
+             "-shortest", "-movflags", "+faststart", str(out_mp4)],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        return str(out_mp4)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--script", required=True, help="path to a video-script output file")
+    ap.add_argument("--script", help="path to a video-script output file (narrated reel)")
+    ap.add_argument("--carousel-slides", nargs="+", help="slide image paths (carousel reel)")
     ap.add_argument("--out", required=True)
     ap.add_argument("--dark", action="store_true")
+    ap.add_argument("--secs-per", type=float, default=2.8)
     a = ap.parse_args()
-    fields = parse_script(Path(a.script).read_text())
-    path = build_reel(fields, a.dark, a.out)
-    print("reel:", path)
+    if a.carousel_slides:
+        path = build_carousel_reel(a.carousel_slides, a.dark, a.out, secs_per=a.secs_per)
+        print("carousel reel:", path)
+    elif a.script:
+        fields = parse_script(Path(a.script).read_text())
+        path = build_reel(fields, a.dark, a.out)
+        print("narrated reel:", path)
+    else:
+        ap.error("give --script or --carousel-slides")
