@@ -27,3 +27,6 @@ Thumbs.db
 
 # Attended-mode handoff files (can contain draft material)
 .attend/
+
+# Rendered reel MP4s — generated media, not source (like articles/slides)
+articles/reels/

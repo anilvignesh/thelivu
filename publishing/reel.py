@@ -1,0 +1,228 @@
+"""Reels V1 — a captioned, voiceover-only vertical reel from a video-script.
+
+Local and free: Piper TTS for the voice, Pillow for the Dossier-look frames (same
+palette/fonts as publishing.slides), ffmpeg to animate + mux. No avatar, no paid
+API. Output is a 1080x1920 H.264+AAC MP4, 5-90s, Instagram-Reel eligible. See
+docs/reels-v1-build.md.
+
+The human gate is unchanged: this only RENDERS the MP4. Posting a reel is a gated
+action (same as a carousel) and happens elsewhere, on approval.
+
+CLI:
+  python -m publishing.reel --script path/to/script.md --out articles/reels/r.mp4 [--dark]
+"""
+import argparse
+import os
+import re
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
+
+from PIL import Image, ImageDraw
+
+from publishing.slides import (
+    SERIF_BOLD, MONO, MONO_BOLD, PALETTE, _font, _wrap_to_width,
+)
+
+# 9:16 for Reels. IG overlays UI on the bottom ~15% and right edge — keep text out.
+W, H = 1080, 1920
+PIPER_BIN = os.path.expanduser("~/.local/bin/piper")
+PIPER_VOICE = os.path.expanduser("~/.jarvis/voices/en_GB-alan-medium.onnx")
+GAP_SECS = 0.35          # silence between beats; also the caption hold padding
+FPS = 30
+
+
+# ── script parsing ────────────────────────────────────────────────────────────
+def parse_script(text):
+    """Parse the video-script skill output into ordered (spoken, caption) beats.
+
+    Returns {"title", "stamp"?, "beats": [(spoken, caption), ...], "hashtags"}.
+    Hook and close are just the first/last beats — same rendering, so they collapse
+    into one ordered list."""
+    def one(label):
+        m = re.search(rf"^{label}:\s*(.+)$", text, re.IGNORECASE | re.MULTILINE)
+        return m.group(1).strip() if m else ""
+
+    title = one("TITLE")
+    beats = []
+
+    hook, hook_cap = one("HOOK"), one("HOOK_CAPTION")
+    if hook:
+        beats.append((hook, hook_cap or hook))
+
+    # BEAT 1 / BEAT 1 CAPTION, BEAT 2 / ... in order
+    spoken = {int(m.group(1)): m.group(2).strip()
+              for m in re.finditer(r"^BEAT\s+(\d+):\s*(.+)$", text, re.IGNORECASE | re.MULTILINE)}
+    caps = {int(m.group(1)): m.group(2).strip()
+            for m in re.finditer(r"^BEAT\s+(\d+)\s+CAPTION:\s*(.+)$", text, re.IGNORECASE | re.MULTILINE)}
+    for i in sorted(spoken):
+        beats.append((spoken[i], caps.get(i, spoken[i])))
+
+    close, close_cap = one("CLOSE"), one("CLOSE_CAPTION")
+    if close:
+        beats.append((close, close_cap or close))
+
+    hashtags = one("HASHTAGS")
+    return {"title": title, "beats": beats, "hashtags": hashtags}
+
+
+# ── frame rendering (Dossier look, 9:16) ────────────────────────────────────────
+def _render_frame(caption, dark, idx, total, kicker, out_png):
+    pal = PALETTE["dark" if dark else "light"]
+    bg, fg, accent = pal["bg"], pal["fg"], pal["accent"]
+    img = Image.new("RGB", (W, H), bg)
+    d = ImageDraw.Draw(img)
+
+    pad_x = 96
+    # top: THELIVU wordmark + a thin rule
+    mark_f = _font(MONO_BOLD, 40)
+    d.text((pad_x, 150), "THELIVU", font=mark_f, fill=accent)
+    d.text((pad_x + d.textlength("THELIVU", font=mark_f) + 22, 158),
+           "· reel", font=_font(MONO, 32), fill=fg)
+    d.line([(pad_x, 235), (W - pad_x, 235)], fill=accent, width=3)
+
+    # centre band: the caption, big serif, wrapped, vertically centred
+    max_w = W - 2 * pad_x
+    size = 118
+    while size >= 60:
+        f = _font(SERIF_BOLD, size)
+        lines = _wrap_to_width(d, caption, f, max_w)
+        line_h = int(size * 1.16)
+        block_h = line_h * len(lines)
+        if block_h <= 900 and all(d.textlength(ln, font=f) <= max_w for ln in lines):
+            break
+        size -= 4
+    f = _font(SERIF_BOLD, size)
+    line_h = int(size * 1.16)
+    lines = _wrap_to_width(d, caption, f, max_w)
+    block_h = line_h * len(lines)
+    y = (H - block_h) // 2 - 60
+    for ln in lines:
+        w = d.textlength(ln, font=f)
+        d.text(((W - w) // 2, y), ln, font=f, fill=fg)
+        y += line_h
+
+    # bottom: kicker/source line + progress dots (kept above IG's bottom UI band)
+    foot_y = H - 360
+    kf = _font(MONO, 30)
+    if kicker:
+        kw = d.textlength(kicker, font=kf)
+        d.text(((W - kw) // 2, foot_y), kicker, font=kf, fill=fg)
+    # progress dots
+    dot_r, gap = 7, 34
+    total_w = (total - 1) * gap
+    dx = (W - total_w) // 2
+    dy = foot_y + 70
+    for i in range(total):
+        col = accent if i == idx else (fg if not dark else (110, 100, 80))
+        fill = accent if i == idx else None
+        if i == idx:
+            d.ellipse([dx - dot_r, dy - dot_r, dx + dot_r, dy + dot_r], fill=accent)
+        else:
+            d.ellipse([dx - dot_r, dy - dot_r, dx + dot_r, dy + dot_r], outline=fg, width=2)
+        dx += gap
+
+    img.save(out_png)
+
+
+# ── TTS ─────────────────────────────────────────────────────────────────────────
+def _synth(text, wav_path):
+    """Piper TTS one line to a wav. Returns duration in seconds."""
+    subprocess.run(
+        [PIPER_BIN, "--model", PIPER_VOICE, "--output_file", str(wav_path)],
+        input=text.encode("utf-8"), check=True,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    return _duration(wav_path)
+
+
+def _duration(path):
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "default=nk=1:nw=1", str(path)],
+        capture_output=True, text=True, check=True,
+    )
+    return float(out.stdout.strip())
+
+
+# ── assembly ──────────────────────────────────────────────────────────────────
+def build_reel(fields, dark, out_mp4, kicker="thelivu.reports · sources in bio"):
+    """Render frames + VO for each beat, animate with a gentle zoom, mux to MP4.
+    `fields` is parse_script() output. Returns the out path."""
+    beats = fields["beats"]
+    if not beats:
+        raise ValueError("no beats in script")
+    out_mp4 = Path(out_mp4)
+    out_mp4.parent.mkdir(parents=True, exist_ok=True)
+    work = Path(tempfile.mkdtemp(prefix="reel_"))
+    try:
+        seg_paths, wav_paths = [], []
+        n = len(beats)
+        for i, (spoken, caption) in enumerate(beats):
+            png = work / f"f{i}.png"
+            wav = work / f"a{i}.wav"
+            _render_frame(caption, dark, i, n, kicker, png)
+            dur = _synth(spoken, wav) + GAP_SECS  # hold the frame through the gap too
+            wav_paths.append((wav, dur))
+            seg = work / f"s{i}.mp4"
+            frames = max(int(round(dur * FPS)), 1)
+            # gentle Ken-Burns zoom-in on the still (retention on a static frame)
+            vf = (f"zoompan=z='min(zoom+0.0006,1.08)':d={frames}"
+                  f":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={W}x{H}:fps={FPS},"
+                  f"format=yuv420p")
+            subprocess.run(
+                ["ffmpeg", "-y", "-loop", "1", "-i", str(png), "-t", f"{dur:.3f}",
+                 "-vf", vf, "-r", str(FPS), "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                 str(seg)],
+                check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            seg_paths.append(seg)
+
+        # concat video segments
+        concat_list = work / "segs.txt"
+        concat_list.write_text("".join(f"file '{s}'\n" for s in seg_paths))
+        video = work / "video.mp4"
+        subprocess.run(
+            ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat_list),
+             "-c", "copy", str(video)],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+
+        # build the VO track: each line's wav + a gap of silence, concatenated
+        a_list = work / "aud.txt"
+        silence = work / "gap.wav"
+        subprocess.run(
+            ["ffmpeg", "-y", "-f", "lavfi", "-i",
+             f"anullsrc=r=22050:cl=mono", "-t", f"{GAP_SECS:.3f}", str(silence)],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        a_list.write_text("".join(f"file '{w}'\nfile '{silence}'\n" for w, _ in wav_paths))
+        vo = work / "vo.wav"
+        subprocess.run(
+            ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(a_list),
+             str(vo)],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+
+        # mux
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", str(video), "-i", str(vo),
+             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
+             "-shortest", "-movflags", "+faststart", str(out_mp4)],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        return str(out_mp4)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--script", required=True, help="path to a video-script output file")
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--dark", action="store_true")
+    a = ap.parse_args()
+    fields = parse_script(Path(a.script).read_text())
+    path = build_reel(fields, a.dark, a.out)
+    print("reel:", path)
