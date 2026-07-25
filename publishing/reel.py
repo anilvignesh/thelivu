@@ -215,11 +215,15 @@ def _render_frame(caption, dark, idx, total, kicker, out_png):
 
 
 # ── TTS ─────────────────────────────────────────────────────────────────────────
-def _synth(text, wav_path):
-    """Synthesize one line to a wav via the configured backend. Returns seconds."""
-    if TTS_BACKEND == "chatterbox":
+def _synth(text, wav_path, backend=None):
+    """Synthesize one line to a wav via the configured backend. Returns seconds.
+    `backend` overrides the module-level TTS_BACKEND (env is bound at import time,
+    so a caller that only sets os.environ afterwards can't change it — passing it
+    explicitly is how the dashboard forces 'chatterbox')."""
+    backend = backend or TTS_BACKEND
+    if backend == "chatterbox":
         _synth_chatterbox(text, wav_path)
-    elif TTS_BACKEND == "omnivoice":
+    elif backend == "omnivoice":
         _synth_omnivoice(text, wav_path)
     else:
         _synth_piper(text, wav_path)
@@ -266,9 +270,10 @@ def _duration(path):
 
 
 # ── assembly ──────────────────────────────────────────────────────────────────
-def build_reel(fields, dark, out_mp4, kicker=None):
+def build_reel(fields, dark, out_mp4, kicker=None, backend=None):
     """Render frames + VO for each beat, animate with a gentle zoom, mux to MP4.
-    `fields` is parse_script() output. Returns the out path."""
+    `fields` is parse_script() output. `backend` overrides the module TTS_BACKEND
+    for the voice (see _synth). Returns the out path."""
     beats = fields["beats"]
     if not beats:
         raise ValueError("no beats in script")
@@ -284,7 +289,7 @@ def build_reel(fields, dark, out_mp4, kicker=None):
             png = work / f"f{i}.png"
             wav = work / f"a{i}.wav"
             _render_frame(caption, dark, i, n, kicker, png)
-            dur = _synth(spoken, wav) + GAP_SECS  # hold the frame through the gap too
+            dur = _synth(spoken, wav, backend) + GAP_SECS  # hold the frame through the gap too
             wav_paths.append((wav, dur))
             seg = work / f"s{i}.mp4"
             frames = max(int(round(dur * FPS)), 1)

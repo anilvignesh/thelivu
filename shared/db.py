@@ -1425,6 +1425,23 @@ def get_reel(reel_id):
         conn.close()
 
 
+def get_reel_for_run(run_id):
+    """The most recent reel for a run (metadata only, no mp4 blob) — the dashboard
+    uses it to tell whether a carousel's story already has a reel built, and to show
+    its status / preview / Post button. None if no reel exists for the run yet."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(
+            "SELECT id, run_id, kind, caption, status, ig_media_id, ig_permalink, "
+            "created_at, posted_at FROM reels WHERE run_id = " + ph +
+            " ORDER BY id DESC LIMIT 1", (run_id,))
+        return _fetchone(cur)
+    finally:
+        conn.close()
+
+
 def get_reel_bytes(reel_id):
     """The raw MP4 bytes for the fileserver to serve. None if absent."""
     conn = _conn()

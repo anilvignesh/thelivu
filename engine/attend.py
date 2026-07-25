@@ -160,6 +160,56 @@ def cmd_carousel(args):
     _postamble()
 
 
+def cmd_reel(args):
+    """Build a narrated reel (Anil's cloned voice) for a published run — attended.
+
+    Reels are attended-only for now (config.REEL_MODE='attended'): the video-script
+    is a model step, and instead of the API it's handed to this terminal session.
+    The voice + ffmpeg render locally, the MP4 is stored in the DB, and the reel
+    lands as 'ready' for preview + the gated Post in the dashboard. Nothing posts.
+
+    The dashboard's "Make reel" button, being non-attended, deliberately can't do
+    the model step — it points you here. This is the path that actually builds it.
+    """
+    from publishing.make_reel import make_narrated_reel
+    from shared.db import get_reel_for_run
+
+    run_id = args.run_id
+    _preamble(f"reel for run #{run_id}")
+
+    # Reuse the story's carousel mood (dark/light) so the reel matches its carousel.
+    dark, article_url = None, None
+    try:
+        with _conn() as c:
+            cur = c.cursor()
+            cur.execute("SELECT dark, article_url FROM carousel_runs WHERE run_id=%s "
+                        "ORDER BY id DESC LIMIT 1", (run_id,))
+            row = _fetchall(cur)
+            if row:
+                dark = row[0].get("dark")
+                article_url = row[0].get("article_url")
+    except Exception as e:
+        log.warning("Could not read the carousel mood for run #%s: %s", run_id, e)
+
+    def _p(frac, msg):
+        print(f"    [{int(frac*100):3d}%] {msg}", flush=True)
+
+    res = make_narrated_reel(run_id, dark=bool(dark), article_url=article_url,
+                             progress=_p, mode="attended")
+
+    if res.get("ok"):
+        rid = res["reel_id"]
+        print(f"\n  ✓ reel #{rid} built — {res['beats']} beats, {res['size_kb']} KB.")
+        print(f"    preview : {os.environ.get('SLIDE_SERVER_BASE_URL','').rstrip('/')}/reel/{rid}.mp4")
+        print(f"    then approve + post it from the dashboard (Carousels tab) — "
+              f"posting is still yours alone.")
+    elif res.get("voice_down"):
+        print(f"\n  ✗ voice server is down. Start it with `{res.get('hint')}` and re-run.")
+    else:
+        print(f"\n  ✗ could not build the reel: {res.get('error')}")
+    _postamble()
+
+
 def cmd_clear(_args):
     quota.clear()
     print("  breaker closed — the agent will resume automated cycles within 2 minutes.")
@@ -196,6 +246,9 @@ def main():
     c.add_argument("carousel_id", nargs="?", type=int,
                    help="carousel id; omit to do every queued one")
     c.set_defaults(fn=cmd_carousel)
+    rl = sub.add_parser("reel", help="build a narrated reel for a run attended (no API)")
+    rl.add_argument("run_id", type=int, help="published run id to make a reel for")
+    rl.set_defaults(fn=cmd_reel)
     sub.add_parser("clear", help="close the breaker early (after a top-up)").set_defaults(fn=cmd_clear)
     args = p.parse_args()
     args.fn(args)

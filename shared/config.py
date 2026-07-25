@@ -23,6 +23,16 @@ IG_ACCESS_TOKEN = os.environ.get("IG_ACCESS_TOKEN", "")
 SLIDE_SERVER_BASE_URL = os.environ.get("SLIDE_SERVER_BASE_URL", "")
 SLIDE_SERVER_PORT = int(os.environ.get("PORT", "8080"))
 
+# --- Reels ---
+# How the reel's video-script (a model step) is produced:
+#   "attended" — hand it to the human-driven terminal session (./attend reel <id>);
+#                no API is used. This is the ACTIVE mode for the foreseeable future.
+#   "api"      — call the Claude API directly (run_structured_skill). KEPT but
+#                INACTIVE — flip REEL_MODE=api (or pass mode="api") to re-enable it.
+# The API route was deliberately not deleted, only switched off (owner's call,
+# 2026-07-25): reels stay attended-only until credit is a non-issue.
+REEL_MODE = os.environ.get("THELIVU_REEL_MODE", "attended").strip().lower()
+
 # --- Telegram ---
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 # Anil's private chat with the bot (for draft review)

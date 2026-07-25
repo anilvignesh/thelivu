@@ -116,9 +116,22 @@ Also fixed: `_last_rss_run` was only stamped on **success**, so a failing cycle
 stayed permanently "due" and retried every 2 minutes. That was the actual engine of
 the 22-hour loop. It now stamps on failure too, with a 30-minute backoff.
 
+### Reels wired into the command center — added 2026-07-25
+The "reels built but not wired in" gap is closed. A **Reels row on every carousel
+card** builds + posts a narrated reel (Anil's cloned voice) of the same story:
+🎬 Make reel (create + preview) → 📤 Post reel (the gated tap). `save_reel` finally
+has a caller — `publishing/make_reel.py` — shared by the dashboard and `./attend reel`.
+**Reels are attended-only for now** (`config.REEL_MODE='attended'`): the script step
+never touches the API — the dashboard button hands you `./attend reel <run_id>`, which
+renders locally (voice + ffmpeg) and stores it `ready` for preview + post. The **API
+route is kept but inactive** (flip `THELIVU_REEL_MODE=api`), owner's call. First one
+built this way: reel #3 (Varkala cliff, run 111). Full detail: `docs/reel-button.md`.
+**Next visual upgrade under discussion:** replace pure text-slides with AI-generated
+images / editorial cartoons per beat (see `docs/video-reels-research.md`).
+
 ### Parked (not built — pick up post-20-posts)
-- Marketing/reach push: **Reels generator** + repurpose one verified story to
-  X/WhatsApp; a political-cartoon prototype (concept via LLM → image model → gate).
+- Marketing/reach push: repurpose one verified story to X/WhatsApp; a political-cartoon
+  prototype (concept via LLM → image model → gate).
 - **Kiln** (`~/kiln`, separate repo) — a generator that turns this framework into
   clone-and-deploy Instagram content engines for any niche. Spec written; for Anil's
   wife + her brother. See `~/kiln/docs/kiln-spec.md`.

@@ -757,6 +757,7 @@ with t_carousels:
         st.warning("SLIDE_SERVER_BASE_URL not set in this dashboard's env — slide "
                    "previews won't load. (Relaunch with it exported.)")
     cars = q("""SELECT cr.id, cr.run_id, cr.status, cr.caption, cr.ig_permalink,
+                       cr.dark, cr.article_url,
                        LEFT(r.throughline,80) AS story
                 FROM carousel_runs cr LEFT JOIN pipeline_runs r ON r.id=cr.run_id
                 ORDER BY cr.id DESC LIMIT 10""")
@@ -778,6 +779,14 @@ with t_carousels:
                    "GROUP BY carousel_id, position "
                    "ORDER BY carousel_id, position", {"ids": _ids}):
             _slide_pos.setdefault(r["carousel_id"], []).append(r["position"])
+    # Latest reel per run, in ONE query (same batch-not-per-card discipline as the
+    # slide positions above). ASC id → last write wins = newest reel for the run.
+    _reel_by_run = {}
+    _run_ids = [c["run_id"] for c in cars if c["run_id"]]
+    if _run_ids:
+        for rr in q("SELECT run_id, id, status, ig_permalink FROM reels "
+                    "WHERE run_id = ANY(%(ids)s) ORDER BY id ASC", {"ids": _run_ids}):
+            _reel_by_run[rr["run_id"]] = rr
     for c in cars:
         cid = c["id"]
         actionable = c["status"] in _ACTIONABLE
@@ -889,6 +898,81 @@ with t_carousels:
                     st.cache_data.clear()
             elif c["status"] == "posted" and c["ig_permalink"]:
                 st.markdown(f"▸ [View on Instagram]({c['ig_permalink']})")
+
+            # ── Reel (narrated, Anil's cloned voice) ──────────────────────────
+            # A <60s vertical reel of the SAME story, voiced. Built LOCALLY on this
+            # laptop (script = a model call, voice = Chatterbox on :3901, ffmpeg
+            # renders on CPU — Railway can't do any of it) then stored in the DB.
+            # Making a reel is not public; POSTING is — so posting stays the gated
+            # tap, exactly like the carousel: you preview the reel, then click Post.
+            st.divider()
+            reel = _reel_by_run.get(c["run_id"])
+            if reel and reel["status"] == "posted" and reel.get("ig_permalink"):
+                st.markdown(f"🎬 **Reel #{reel['id']}** · `posted` — "
+                            f"[View on Instagram]({reel['ig_permalink']})")
+            elif reel:
+                rid = reel["id"]
+                st.markdown(f"🎬 **Reel #{rid}** · `{reel['status']}` — preview, then post.")
+                if SLIDE_BASE:
+                    st.video(f"{SLIDE_BASE}/reel/{rid}.mp4")
+                else:
+                    st.caption("Set SLIDE_SERVER_BASE_URL to preview the reel here.")
+                if st.button("📤 Post reel to Instagram", key=f"rpost_{rid}", type="primary",
+                             use_container_width=True):
+                    st.toast(f"Posting reel #{rid}…", icon="📤")
+                    from publishing.publish import post_reel_run
+                    with st.status(f"Posting reel #{rid} to Instagram…", expanded=True) as rs:
+                        rbar = st.progress(0.0, text="Starting…")
+                        def _rprog(frac, msg, _b=rbar, _s=rs):
+                            _b.progress(frac, text=msg); _s.update(label=msg)
+                        rres = post_reel_run(rid, progress=_rprog)
+                        if rres.get("ok"):
+                            rbar.progress(1.0, text="Posted ✓")
+                            rs.update(label="Reel posted to Instagram ✓", state="complete")
+                            if rres.get("permalink"):
+                                st.markdown(f"▸ [View on Instagram]({rres['permalink']})")
+                            tg_notify(f"✅ Posted reel #{rid} to Instagram.")
+                        elif rres.get("needs_config"):
+                            rs.update(label="Instagram not configured", state="error")
+                            st.warning("Instagram not configured (IG_USER_ID / IG_ACCESS_TOKEN not set).")
+                        else:
+                            rs.update(label="Reel post failed", state="error")
+                            st.error(f"Post failed: {rres.get('error')}")
+                    if rres.get("ok"):
+                        st.balloons(); time.sleep(2.5); st.cache_data.clear(); st.rerun()
+            else:
+                # Reels are ATTENDED-ONLY for now (config.REEL_MODE='attended'): the
+                # script step never touches the API. From the dashboard (a non-attended
+                # process) make_narrated_reel returns needs_terminal — so this button
+                # hands you the exact terminal command instead of ever calling Claude.
+                if st.button("🎬 Make reel (your voice)", key=f"rmake_{c['run_id']}",
+                             use_container_width=True,
+                             help="Narrated <60s reel of this story — attended-only for now: "
+                                  "the script is done in your terminal (no API), the voice + "
+                                  "video render locally. You preview before it can post."):
+                    from publishing.make_reel import make_narrated_reel
+                    mres = make_narrated_reel(c["run_id"], dark=bool(c.get("dark")),
+                                              article_url=c.get("article_url"))
+                    if mres.get("needs_terminal"):
+                        st.info("🖥️ Reels are attended-only right now — no API is used. "
+                                "Run this in your laptop terminal, then hit refresh:")
+                        st.code(mres.get("hint"), language="bash")
+                        st.caption("Make sure your voice server is up first: "
+                                   "`~/.jarvis/reel-voice.sh start`")
+                    elif mres.get("ok"):  # api mode (only if REEL_MODE=api)
+                        st.success(f"Reel #{mres['reel_id']} built ({mres['beats']} beats, "
+                                   f"{mres['size_kb']} KB). Preview it below, then post.")
+                        st.cache_data.clear(); time.sleep(1.0); st.rerun()
+                    elif mres.get("blocked"):
+                        _u = mres.get("until")
+                        _t = f" — retries ~{_u.strftime('%H:%M UTC')}" if _u else ""
+                        st.warning(f"⏳ The reel script needs a model and the quota breaker is "
+                                   f"open: {mres['blocked']}{_t}.")
+                    elif mres.get("voice_down"):
+                        st.warning(f"🔇 Your voice server is down. Start it on the laptop with "
+                                   f"`{mres.get('hint')}`, then try again.")
+                    else:
+                        st.error(f"Couldn't build the reel: {mres.get('error')}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
