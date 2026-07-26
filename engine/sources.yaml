@@ -229,3 +229,196 @@ sources:
 #     reports, established dailies across the spectrum.
 #   - Adversarial/cross-spectrum leads: credible sources that would DISAGREE with
 #     the lineup above, so verification isn't consensus inside a bubble.
+
+
+  # ── Scout candidates (source-scout, 2026-07-26) — VET before flipping to active. ──
+  # Fills the documented gap: dedicated VERIFICATION sources (Tier 1-2, primary/
+  # established) so leads aren't checked against other leads. status: candidate.
+
+  - id: thenewsminute
+    name: The News Minute
+    platform: rss
+    feed: "https://www.thenewsminute.com/feed"
+    role: lead
+    tier: 2
+    lean: "independent digital; left-of-centre story selection; original reporting + corrections"
+    status: candidate
+    added: 2026-07-26
+    notes: "Kerala/South core beat — strongest English outlet close to Thelivu's ground. Lead; corroborate vs primary."
+
+  - id: onmanorama_kerala
+    name: Onmanorama — Kerala
+    platform: rss
+    feed: "https://www.onmanorama.com/kerala.feeds.onmrss.xml"
+    role: lead
+    tier: 2
+    lean: "Malayala Manorama group (English); historically UDF/Congress-sympathetic — note lean"
+    status: candidate
+    added: 2026-07-26
+    notes: "High-volume Kerala primary reporting; establishment counterweight to activist leads."
+
+  - id: thefederal
+    name: The Federal
+    platform: rss
+    feed: "https://thefederal.com/feed/"
+    role: lead
+    tier: 2
+    lean: "independent; centrist-to-left"
+    status: candidate
+    added: 2026-07-26
+    notes: "South India + national desk; corroboration layer for Kerala/TN."
+
+  - id: maktoob
+    name: Maktoob Media
+    platform: web
+    feed: null
+    role: lead
+    tier: 3
+    lean: "openly advocacy for marginalised communities — NOT neutral"
+    status: candidate
+    added: 2026-07-26
+    notes: "Surfaces under-covered rights leads; LEAD-GENERATION ONLY, never sole verification. Feed 403s to bots — needs UA/manual."
+
+  - id: livelaw
+    name: LiveLaw
+    platform: rss
+    feed: "https://www.livelaw.in/feed"
+    role: verification
+    tier: 2
+    lean: "non-partisan court reporting"
+    status: candidate
+    added: 2026-07-26
+    notes: "Verification-grade for court orders — reports the actual filing/judgment. Feed intermittent; verify on ingest."
+
+  - id: barandbench
+    name: Bar and Bench
+    platform: rss
+    feed: "https://www.barandbench.com/feed"
+    role: verification
+    tier: 2
+    lean: "non-partisan legal desk"
+    status: candidate
+    added: 2026-07-26
+    notes: "Second independent court source to cross-check LiveLaw."
+
+  - id: scobserver
+    name: Supreme Court Observer
+    platform: rss
+    feed: "https://www.scobserver.in/feed/"
+    role: verification
+    tier: 1
+    lean: "non-partisan, document-driven (CLPR)"
+    status: candidate
+    added: 2026-07-26
+    notes: "Constitutional-case tracking to primary record — verify SC claims."
+
+  - id: article14
+    name: Article 14
+    platform: web
+    feed: null
+    role: verification
+    tier: 2
+    lean: "rights-focused, left-of-centre selection; built on RTI/documents"
+    status: candidate
+    added: 2026-07-26
+    notes: "RTI/document-driven investigations — high verification value. No RSS (JS app) — manual submission."
+
+  - id: mongabay_india
+    name: Mongabay-India
+    platform: rss
+    feed: "https://india.mongabay.com/feed/"
+    role: verification
+    tier: 2
+    lean: "non-partisan science/environment nonprofit"
+    status: candidate
+    added: 2026-07-26
+    notes: "Verification-grade environment desk (Western Ghats, wetlands, coastal Kerala) — fills a gap."
+
+  - id: downtoearth
+    name: Down To Earth (CSE)
+    platform: web
+    feed: null
+    role: verification
+    tier: 2
+    lean: "CSE-published; non-partisan, science-led"
+    status: candidate
+    added: 2026-07-26
+    notes: "Deep climate/pollution policy. Public RSS not confirmed — verify a live feed before activating."
+
+  - id: theprint
+    name: ThePrint
+    platform: rss
+    feed: "https://theprint.in/feed/"
+    role: lead
+    tier: 2
+    lean: "centrist w/ market/right-of-centre tilt; corrections culture"
+    status: candidate
+    added: 2026-07-26
+    notes: "DELIBERATE cross-spectrum ballast — a credible source that disagrees with the mostly-left lineup. Feed renders HTML to bots; verify on ingest."
+
+  - id: rbi
+    name: Reserve Bank of India
+    platform: web
+    feed: null
+    role: verification
+    tier: 1
+    lean: "government primary record"
+    status: candidate
+    added: 2026-07-26
+    notes: "Primary record for any banking/fintech/forex claim. No reliable RSS — press releases on rbi.org.in."
+
+  - id: cag
+    name: Comptroller & Auditor General
+    platform: web
+    feed: null
+    role: verification
+    tier: 1
+    lean: "constitutional audit body"
+    status: candidate
+    added: 2026-07-26
+    notes: "Primary record to verify govt-spending/scam/leakage claims. No RSS — reports on cag.gov.in."
+
+  - id: prs
+    name: PRS Legislative Research
+    platform: web
+    feed: null
+    role: verification
+    tier: 1
+    lean: "non-partisan think tank"
+    status: candidate
+    added: 2026-07-26
+    notes: "Neutral primary reference for what a bill/budget/law actually says. No RSS — prsindia.org."
+
+  - id: icij
+    name: ICIJ
+    platform: rss
+    feed: "https://www.icij.org/feed/"
+    role: verification
+    tier: 2
+    lean: "non-partisan international investigative consortium"
+    status: candidate
+    added: 2026-07-26
+    notes: "Cross-border corruption/offshore with India angles — complements OCCRP."
+
+  - id: propublica
+    name: ProPublica
+    platform: rss
+    feed: "https://www.propublica.org/feeds/propublica/main"
+    role: verification
+    tier: 2
+    lean: "non-partisan US investigative nonprofit"
+    status: candidate
+    added: 2026-07-26
+    notes: "Gold-standard method + occasional India-relevant threads."
+
+  - id: bellingcat
+    name: Bellingcat
+    platform: rss
+    feed: "https://www.bellingcat.com/feed/"
+    role: verification
+    tier: 2
+    lean: "non-partisan OSINT collective"
+    status: candidate
+    added: 2026-07-26
+    notes: "OSINT verification of images/video/geolocation — directly serves the verification mandate."
+
