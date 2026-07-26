@@ -138,13 +138,13 @@ def sources_state(request, data):
     )
     yaml_sources = []
     try:
-        import yaml
-        from shared.config import REPO_ROOT
-        p = REPO_ROOT / "engine" / "sources.yaml"
-        if p.exists():
-            for s in (yaml.safe_load(p.read_text()).get("sources", []) or []):
-                yaml_sources.append({k: s.get(k) for k in
-                                     ("name", "platform", "tier", "role", "lean", "status")})
+        approved_names = {a["name"] for a in r["approved"]}
+        for s in _load_yaml_sources():
+            row = {k: s.get(k) for k in
+                   ("id", "name", "platform", "tier", "role", "lean", "status")}
+            row["has_feed"] = bool(s.get("feed"))
+            row["activated"] = s.get("name") in approved_names
+            yaml_sources.append(row)
     except Exception:
         pass
     return J({"performance": r["perf"], "yaml_sources": yaml_sources,
@@ -168,6 +168,47 @@ def source_action(request, data):
         from shared.db import deactivate_approved_source
         return J({"ok": deactivate_approved_source(sid)})
     return err("action must be approve|skip|deactivate")
+
+
+def _load_yaml_sources():
+    import yaml
+    from shared.config import REPO_ROOT
+    p = REPO_ROOT / "engine" / "sources.yaml"
+    if not p.exists():
+        return []
+    return yaml.safe_load(p.read_text()).get("sources", []) or []
+
+
+@endpoint
+def candidate_activate(request, data):
+    """Activate a sources.yaml candidate from the dashboard: copy it into
+    approved_sources, which the engine ingests on its next cycle (any platform
+    with a feed). No repo edit, no deploy. Feed-less candidates (X/IG/web
+    reference sources) still join the pool as context for source-scout /
+    verification, but nothing auto-ingests from them."""
+    cand_id = (data.get("id") or "").strip()
+    cand = next((s for s in _load_yaml_sources()
+                 if s.get("id") == cand_id and s.get("status") == "candidate"), None)
+    if not cand:
+        return err(f"no candidate '{cand_id}' in sources.yaml", 404)
+    name = cand.get("name") or cand_id
+    dup = db.q("SELECT id FROM approved_sources WHERE name = %s AND status='active'", (name,))
+    if dup:
+        return err(f"{name} is already active (approved_sources #{dup[0]['id']})")
+    feed = cand.get("feed") or None
+    db.execute(
+        "INSERT INTO approved_sources (name, platform, handle, feed_url, lean, tier, role, notes) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+        (name, cand.get("platform") or "web", cand.get("handle") or "",
+         feed, (cand.get("lean") or "")[:300], int(cand.get("tier") or 3),
+         cand.get("role") or "lead", (cand.get("notes") or "")[:300]))
+    if feed:
+        note = f"{name} activated — the engine ingests its feed on the next cycle."
+    else:
+        note = (f"{name} activated as a reference source (no feed) — it joins the "
+                f"source pool for scouting/verification context, but nothing "
+                f"auto-ingests from it.")
+    return J({"ok": True, "note": note, "ingests": bool(feed)})
 
 
 @endpoint
@@ -264,6 +305,7 @@ routes = [
     Route("/cos/run", cos_run, methods=["POST"]),
     Route("/sources", sources_state, methods=["GET"]),
     Route("/sources", source_add, methods=["POST"]),
+    Route("/sources/candidates/activate", candidate_activate, methods=["POST"]),
     Route("/sources/{sid:int}/action", source_action, methods=["POST"]),
     Route("/ingest", ingest_state, methods=["GET"]),
     Route("/ingest", ingest_add, methods=["POST"]),

@@ -1165,14 +1165,17 @@ def run_daily_cycle():
         s for s in sources_data.get("sources", [])
         if s.get("status") == "active" and s.get("feed")
     ]
-    db_sources = [
-        s for s in get_approved_sources()
-        if s.get("platform") == "youtube" and s.get("feed_url")
-    ]
+    # Any DB-approved source with a feed ingests — ingest_source() handles both
+    # youtube and web/rss platforms. The old platform=='youtube' filter silently
+    # dropped every RSS source approved via bot/dashboard (found 2026-07-26 when
+    # the command center grew candidate activation).
+    db_sources = [s for s in get_approved_sources() if s.get("feed_url")]
     # Normalise db sources to match yaml shape
     for s in db_sources:
         s["feed"] = s.pop("feed_url", None)
-        s["id"] = s.get("handle", str(s["id"]))
+        # handle is often "" for RSS sources added via dashboard — fall through
+        # to name/id rather than tagging their leads with an empty source id.
+        s["id"] = s.get("handle") or s.get("name") or str(s["id"])
     active_sources = yaml_sources + db_sources
     log.info("Active sources: %s", [s["id"] for s in active_sources])
 

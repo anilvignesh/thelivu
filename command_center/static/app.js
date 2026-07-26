@@ -741,9 +741,22 @@ async function vSources(main) {
     L.appendChild(el(`<div class="small">${s.platform === 'youtube' ? '🎬' : '📰'} <b>${esc(s.name)}</b> · T${s.tier} · ${esc((s.lean || '').slice(0, 50))}</div>`));
   const cand = d.yaml_sources.filter(s => s.status === 'candidate');
   if (cand.length) {
-    const det = el(`<details><summary>Candidates (${cand.length}) — activation is a repo edit (sources.yaml → status: active)</summary><div></div></details>`);
-    for (const s of cand)
-      det.querySelector('div').appendChild(el(`<div class="small">${s.platform === 'youtube' ? '🎬' : '📰'} <b>${esc(s.name)}</b> · T${s.tier} · ${esc(s.role || '')} — ${esc((s.lean || '').slice(0, 60))}</div>`));
+    const det = el(`<details open><summary>Candidates (${cand.length}) — activate straight from here, live on the next cycle</summary><div></div></details>`);
+    for (const s of cand) {
+      const row = el(`<div class="row between small" style="margin:5px 0;gap:8px">
+        <span style="min-width:0">${s.platform === 'youtube' ? '🎬' : s.has_feed ? '📰' : '🔖'}
+          <b>${esc(s.name)}</b> · T${s.tier} · ${esc(s.role || '')}
+          <span class="muted">— ${esc((s.lean || '').slice(0, 55))}</span>
+          ${s.has_feed ? '' : '<span class="muted">(no feed — reference only)</span>'}</span>
+        <span data-x="b" style="flex:none"></span></div>`);
+      const slot = row.querySelector('[data-x=b]');
+      if (s.activated) slot.innerHTML = '<span class="pill published">active</span>';
+      else addBtn(slot, 'Activate', 'small', async () => {
+        const r = await api('/sources/candidates/activate', { method: 'POST', body: { id: s.id } });
+        toast(r.note, 'ok', 9000); route();
+      });
+      det.querySelector('div').appendChild(row);
+    }
     L.appendChild(det);
   }
   L.appendChild(el(`<div class="eyebrow">Approved via bot / command center</div>`));
