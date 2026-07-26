@@ -750,9 +750,32 @@ with t_pipeline:
 # ══════════════════════════════════════════════════════════════════════════════
 with t_carousels:
     st.subheader("🖼️ Instagram carousels")
-    st.caption("Review the rendered slides and post to Instagram — the same gated "
-               "action as the bot (dedupe + capped at 10). Slides render on demand "
-               "from the DB, so they survive redeploys.")
+    st.caption("Carousels are OPTIONAL now — reels are the reach default, carousels are "
+               "the 'receipts' deep-dive for the stories that merit it. Make one on demand "
+               "below; review + post is the same gated action as the bot.")
+    # On-demand carousel: publishing no longer auto-creates one, so make it here for a
+    # published run when the receipts are worth a carousel.
+    with st.expander("➕ Make a carousel for a published story"):
+        mc1, mc2 = st.columns([3, 1])
+        _mc_rid = mc1.number_input("Published run #", min_value=1, step=1, value=None,
+                                   placeholder="run id", key="mk_car_rid")
+        if mc2.button("Make carousel", use_container_width=True, key="mk_car_btn"):
+            if _mc_rid:
+                _run = q("SELECT id, status, slug FROM pipeline_runs WHERE id=%(i)s",
+                         {"i": int(_mc_rid)})
+                if not _run:
+                    st.error(f"No run #{int(_mc_rid)}.")
+                elif _run[0]["status"] != "published":
+                    st.warning(f"Run #{int(_mc_rid)} is '{_run[0]['status']}', not published. "
+                               "Publish it first, then make its carousel.")
+                else:
+                    from shared.db import queue_carousel_run
+                    _url = f"{SLIDE_BASE}/a/{_run[0]['slug']}" if SLIDE_BASE and _run[0]["slug"] else ""
+                    queue_carousel_run(int(_mc_rid), article_url=_url)
+                    st.success(f"Queued a carousel for run #{int(_mc_rid)} — it composes on the "
+                               "next tick (or `./attend carousel` if the breaker's open). "
+                               "It'll appear below to review + post.")
+                    st.cache_data.clear()
     if not SLIDE_BASE:
         st.warning("SLIDE_SERVER_BASE_URL not set in this dashboard's env — slide "
                    "previews won't load. (Relaunch with it exported.)")

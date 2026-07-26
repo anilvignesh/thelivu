@@ -43,6 +43,13 @@ SLIDE_SERVER_PORT = int(os.environ.get("PORT", "8080"))
 # fallback the charter forbids. Model id overridable via NVIDIA_SCRIPT_MODEL.
 REEL_MODE = os.environ.get("THELIVU_REEL_MODE", "nvidia").strip().lower()
 
+# Publishing behaviour — reels are the reach default; carousels are OPTIONAL, made
+# on demand only for the stories where the receipts are the story (owner's call,
+# 2026-07-26). So publishing no longer auto-queues a carousel. Flip to "1"/"true" to
+# restore the old auto-carousel-on-every-publish behaviour.
+AUTO_CAROUSEL_ON_PUBLISH = os.environ.get(
+    "THELIVU_AUTO_CAROUSEL", "false").strip().lower() in ("1", "true", "yes")
+
 # --- Telegram ---
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 # Anil's private chat with the bot (for draft review)

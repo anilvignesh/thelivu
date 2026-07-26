@@ -143,11 +143,15 @@ def publish_run(run_id):
     save_publication(run_id, msg_ids, "Confirmed")
     update_run(run_id, status="published")
 
-    # Queue the Instagram carousel; the orchestrator composes/renders it next tick.
-    try:
-        queue_carousel_run(run_id, article_url=article_url)
-    except Exception as e:
-        log.error("Failed to queue carousel for run #%d: %s", run_id, e)
+    # Reels are the reach default; carousels are OPTIONAL now (owner's call 2026-07-26)
+    # — made on demand for the stories where the receipts are the story, not auto on
+    # every publish. Set THELIVU_AUTO_CAROUSEL=1 to restore the old behaviour.
+    from shared.config import AUTO_CAROUSEL_ON_PUBLISH
+    if AUTO_CAROUSEL_ON_PUBLISH:
+        try:
+            queue_carousel_run(run_id, article_url=article_url)
+        except Exception as e:
+            log.error("Failed to queue carousel for run #%d: %s", run_id, e)
 
     return {"ok": True, "how": how, "msg_ids": msg_ids,
             "article_url": article_url, "slug": slug, "error": None}
