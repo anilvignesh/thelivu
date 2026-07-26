@@ -422,3 +422,201 @@ sources:
     added: 2026-07-26
     notes: "OSINT verification of images/video/geolocation — directly serves the verification mandate."
 
+
+  # ── Social-source-scout candidates (2026-07-26) — credible fact-checkers,
+  # journalists & channels. Source credibility (not platform) sets the tier: an
+  # identified fact-checker on X/YouTube is a real source; anonymous/viral is not.
+  # Ingested via engine/social_desk.py (YouTube/web/RSS, no account-scraping).
+
+  - id: boom
+    name: BOOM
+    platform: x+youtube
+    handle: "@boomlive_in"
+    feed: null
+    role: verification
+    tier: 2
+    lean: "IFCN signatory; oldest India media-literacy desk; centrist-secular"
+    status: candidate
+    added: 2026-07-26
+    notes: "Strongest India fact-check follow — viral-claim debunks, strong correction record. FOLLOW-FIRST."
+
+  - id: afpfactcheck
+    name: AFP Fact Check
+    platform: x
+    handle: "@AFPFactCheck"
+    feed: null
+    role: verification
+    tier: 2
+    lean: "largest global fact-check network; non-partisan, wire-grade"
+    status: candidate
+    added: 2026-07-26
+    notes: "Fast on visual misinformation that spills into India. FOLLOW-FIRST."
+
+  - id: fullfact
+    name: Full Fact
+    platform: x
+    handle: "@FullFact"
+    feed: null
+    role: verification
+    tier: 2
+    lean: "independent UK charity, IFCN, rigorous method; non-partisan"
+    status: candidate
+    added: 2026-07-26
+    notes: "World/UK claim-checking."
+
+  - id: geoconfirmed
+    name: GeoConfirmed
+    platform: x
+    handle: "@GeoConfirmed"
+    feed: null
+    role: verification
+    tier: 2
+    lean: "100+ volunteer OSINT collective; apolitical, method-transparent"
+    status: candidate
+    added: 2026-07-26
+    notes: "Geolocates/verifies (or kills) 'where/when did this video happen' claims. FOLLOW-FIRST."
+
+  - id: bendobrown
+    name: Benjamin Strick / CIR
+    platform: x+youtube
+    handle: "@BenDoBrown"
+    feed: null
+    role: verification
+    tier: 2
+    lean: "Dir. Investigations, Centre for Information Resilience; ex-BBC/Bellingcat; apolitical"
+    status: candidate
+    added: 2026-07-26
+    notes: "Teaches + supplies OSINT method; world investigations."
+
+  - id: newschecker
+    name: Newschecker
+    platform: x+youtube
+    handle: "@NewscheckerIn"
+    feed: null
+    role: verification
+    tier: 3
+    lean: "IFCN signatory; multilingual India desks; broadly non-partisan"
+    status: candidate
+    added: 2026-07-26
+    notes: "Multilingual India fact-check."
+
+  - id: newsmeter
+    name: NewsMeter
+    platform: x
+    handle: "@newsmeter_in"
+    feed: null
+    role: verification
+    tier: 3
+    lean: "Hyderabad; IFCN signatory; non-partisan"
+    status: candidate
+    added: 2026-07-26
+    notes: "South India (Telangana/AP) fact-check."
+
+  - id: reporters_collective
+    name: The Reporters' Collective
+    platform: x
+    handle: "@reporters_co"
+    feed: null
+    role: verification
+    tier: 3
+    lean: "Sethi/Sambhav; electoral-bonds exposés; evidence-heavy, left-of-centre accountability lean"
+    status: candidate
+    added: 2026-07-26
+    notes: "India's best evidence-first investigations feed; lead-rich + corroboration-worthy. FOLLOW-FIRST."
+
+  - id: scroll
+    name: Scroll.in
+    platform: x
+    handle: "@scroll_in"
+    feed: null
+    role: lead
+    tier: 3
+    lean: "co-ran Project Electoral Bond; solid reporting; liberal lean (flag)"
+    status: candidate
+    added: 2026-07-26
+    notes: "National reporting/politics."
+
+  - id: newslaundry
+    name: Newslaundry
+    platform: x+youtube
+    handle: "@newslaundry"
+    feed: null
+    role: lead
+    tier: 3
+    lean: "reader-funded, no ads; real reporting but opinion-heavy; left-of-centre adversarial (flag)"
+    status: candidate
+    added: 2026-07-26
+    notes: "Media criticism + subscriber reporting — lead + limited corroboration."
+
+  - id: fayedsouza
+    name: Faye D'Souza
+    platform: youtube
+    handle: "@FayeDsouza"
+    feed: null
+    role: verification
+    tier: 3
+    lean: "ex-Mirror Now; RedInk 2018; fact-based sourced bulletins; centrist"
+    status: candidate
+    added: 2026-07-26
+    notes: "Daily news explainer."
+
+  - id: ajitanjum
+    name: Ajit Anjum
+    platform: youtube+x
+    handle: "@ajitanjum"
+    feed: null
+    role: lead
+    tier: 3
+    lean: "Ramnath Goenka awardee; real on-ground video; anti-incumbent lean (flag) — verify claims"
+    status: candidate
+    added: 2026-07-26
+    notes: "Ground reporting/elections/rural India — lead (video)."
+
+  - id: truecopythink
+    name: Truecopy Think
+    platform: x+youtube
+    handle: "@truecopythink"
+    feed: null
+    role: lead
+    tier: 3
+    lean: "woman-led Malayalam subscription webzine; credible long-form; left-liberal lean (flag)"
+    status: candidate
+    added: 2026-07-26
+    notes: "Malayalam long-form politics/culture — lead."
+
+  - id: mediaonetv
+    name: MediaOne TV
+    platform: youtube+x
+    handle: "@MediaOneTVLive"
+    feed: null
+    role: lead
+    tier: 3
+    lean: "Kozhikode (Madhyamam group); SC-restored after 2022 ban (press-freedom cred); ownership lean (flag)"
+    status: candidate
+    added: 2026-07-26
+    notes: "Kerala/Malayalam news TV — lead, corroborate."
+
+  - id: vishvasnews
+    name: Vishvas News
+    platform: x
+    handle: "@newsvishvas"
+    feed: null
+    role: lead
+    tier: 4
+    lean: "IFCN badge BUT Jagran-owned + documented methodology lapses (Alt News/Hindutva Watch)"
+    status: candidate
+    added: 2026-07-26
+    notes: "Hindi/regional fact-check — corroborate cautiously, NEVER standalone."
+
+  - id: sauravdas
+    name: Saurav Das
+    platform: x
+    handle: "@OfficialSauravD"
+    feed: null
+    role: lead
+    tier: 4
+    lean: "strong past RTI/court reporting BUT became CJP-protest Chief Spokesperson 2026 — independence compromised"
+    status: candidate
+    added: 2026-07-26
+    notes: "RTI/judiciary — LEAD-ONLY now (activist role, flag)."
+
