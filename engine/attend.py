@@ -199,7 +199,8 @@ def cmd_reel(args):
 
     if res.get("ok"):
         rid = res["reel_id"]
-        print(f"\n  ✓ reel #{rid} built — {res['beats']} beats, {res['size_kb']} KB.")
+        print(f"\n  ✓ reel #{rid} built — {res.get('kind', 'narrated')}, "
+              f"{res['beats']} beats, {res['size_kb']} KB.")
         print(f"    preview : {os.environ.get('SLIDE_SERVER_BASE_URL','').rstrip('/')}/reel/{rid}.mp4")
         print(f"    then approve + post it from the dashboard (Carousels tab) — "
               f"posting is still yours alone.")

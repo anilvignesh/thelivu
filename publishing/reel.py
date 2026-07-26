@@ -57,29 +57,38 @@ def parse_script(text):
     title = one("TITLE")
     kicker = one("KICKER")   # small context tag shown on every slide
     beats = []
+    # Optional per-beat scene description for the illustrated look. Absent in
+    # older scripts (and when a model skips it) — publishing.illustrate falls
+    # back to deriving a scene from the caption.
+    images = []
 
     hook, hook_cap = one("HOOK"), one("HOOK_CAPTION")
     if hook:
         beats.append((hook, hook_cap or hook))
+        images.append(one("HOOK_IMAGE"))
 
-    # BEAT 1 / BEAT 1 CAPTION, BEAT 2 / ... in order
+    # BEAT 1 / BEAT 1 CAPTION / BEAT 1 IMAGE, BEAT 2 / ... in order
     spoken = {int(m.group(1)): m.group(2).strip()
               for m in re.finditer(r"^BEAT\s+(\d+):\s*(.+)$", text, re.IGNORECASE | re.MULTILINE)}
     caps = {int(m.group(1)): m.group(2).strip()
             for m in re.finditer(r"^BEAT\s+(\d+)\s+CAPTION:\s*(.+)$", text, re.IGNORECASE | re.MULTILINE)}
+    imgs = {int(m.group(1)): m.group(2).strip()
+            for m in re.finditer(r"^BEAT\s+(\d+)\s+IMAGE:\s*(.+)$", text, re.IGNORECASE | re.MULTILINE)}
     for i in sorted(spoken):
         beats.append((spoken[i], caps.get(i, spoken[i])))
+        images.append(imgs.get(i, ""))
 
     close, close_cap = one("CLOSE"), one("CLOSE_CAPTION")
     if close:
         beats.append((close, close_cap or close))
+        images.append(one("CLOSE_IMAGE"))
 
     hashtags = one("HASHTAGS")
     # The Instagram description = the FULL narration (all spoken lines as prose),
     # so the whole story is in the caption for readers/muted viewers and every
     # acronym/number is correct in text. Built here so post-time can reuse it.
     narration = " ".join(sp for sp, _ in beats)
-    return {"title": title, "kicker": kicker, "beats": beats,
+    return {"title": title, "kicker": kicker, "beats": beats, "images": images,
             "hashtags": hashtags, "narration": narration}
 
 
@@ -215,11 +224,29 @@ def _render_frame(caption, dark, idx, total, kicker, out_png):
 
 
 # ── TTS ─────────────────────────────────────────────────────────────────────────
+SILENT_BEAT_SECONDS = 2.8   # how long a no-speech beat (the sign-off card) holds
+
+
+def _write_silence(wav_path, secs):
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono",
+         "-t", f"{secs:.2f}", str(wav_path)],
+        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+
+
 def _synth(text, wav_path, backend=None):
     """Synthesize one line to a wav via the configured backend. Returns seconds.
     `backend` overrides the module-level TTS_BACKEND (env is bound at import time,
     so a caller that only sets os.environ afterwards can't change it — passing it
     explicitly is how the dashboard forces 'chatterbox')."""
+    # An empty beat is a deliberate SILENT hold, not a mistake: the sign-off card
+    # is shown with no speech over it (the cloned voice can't say "തെളിവ്" and a
+    # spliced real-voice read failed badly — reel #8 was pulled over it). Writing
+    # the silence here keeps the frame/audio timing in one place.
+    if not (text or "").strip():
+        _write_silence(wav_path, SILENT_BEAT_SECONDS)
+        return SILENT_BEAT_SECONDS
     backend = backend or TTS_BACKEND
     if backend == "chatterbox":
         _synth_chatterbox(text, wav_path)
@@ -270,10 +297,13 @@ def _duration(path):
 
 
 # ── assembly ──────────────────────────────────────────────────────────────────
-def build_reel(fields, dark, out_mp4, kicker=None, backend=None):
+def build_reel(fields, dark, out_mp4, kicker=None, backend=None, render_frame=None):
     """Render frames + VO for each beat, animate with a gentle zoom, mux to MP4.
     `fields` is parse_script() output. `backend` overrides the module TTS_BACKEND
-    for the voice (see _synth). Returns the out path."""
+    for the voice (see _synth). `render_frame` overrides the frame renderer —
+    `reel_illustrated.make_renderer()` passes the illustrated look; the default is
+    the text-slide frame. Returns the out path."""
+    draw_frame = render_frame or _render_frame
     beats = fields["beats"]
     if not beats:
         raise ValueError("no beats in script")
@@ -288,7 +318,7 @@ def build_reel(fields, dark, out_mp4, kicker=None, backend=None):
         for i, (spoken, caption) in enumerate(beats):
             png = work / f"f{i}.png"
             wav = work / f"a{i}.wav"
-            _render_frame(caption, dark, i, n, kicker, png)
+            draw_frame(caption, dark, i, n, kicker, png)
             dur = _synth(spoken, wav, backend) + GAP_SECS  # hold the frame through the gap too
             wav_paths.append((wav, dur))
             seg = work / f"s{i}.mp4"

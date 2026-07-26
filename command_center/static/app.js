@@ -565,7 +565,7 @@ async function vReels(main) {
     const card = el(`<div class="item">
       <div class="row between"><div>
         <span class="id">🎬 #${r.id}</span> · run #${r.run_id || '—'} — ${esc((r.story || '').slice(0, 75))}
-        <div class="meta">${fdate(r.created_at)} · ${size}${r.posted_at ? ' · posted ' + fdate(r.posted_at) : ''}</div>
+        <div class="meta">${fdate(r.created_at)} · ${size}${r.kind ? ' · ' + esc(r.kind) : ''}${r.posted_at ? ' · posted ' + fdate(r.posted_at) : ''}</div>
       </div>${pill(r.status)}</div>
       <details><summary>Preview</summary><div>
         <video class="reel" controls preload="none" src="/api/reels/${r.id}.mp4"></video>

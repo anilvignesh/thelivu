@@ -100,12 +100,46 @@ def _build_caption(fields, article_url):
     return "\n\n".join(b for b in bits if b)[:2200]
 
 
-def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None, mode=None):
+def _illustrate(fields, out_dir, _p):
+    """One illustration per beat, or None if any beat failed.
+
+    All-or-nothing on purpose: a reel with three illustrated frames and two text
+    slides reads as a bug, not a style. The caller falls back to the text-slide
+    look for the whole reel.
+    """
+    from publishing.illustrate import generate_beat_images, scene_from_beat
+    from publishing.reel_illustrated import malayalam_fonts_available
+
+    if not malayalam_fonts_available():
+        log.warning("Malayalam fonts missing — the sign-off card can't render; "
+                    "using text-slide frames")
+        return None
+
+    beats = fields["beats"]
+    prompts = fields.get("images") or []
+    scenes = []
+    for i, (spoken, caption) in enumerate(beats):
+        given = prompts[i].strip() if i < len(prompts) and prompts[i] else ""
+        scenes.append(given or scene_from_beat(caption, spoken))
+
+    def _step(i, total):
+        _p(0.15 + 0.35 * (i / max(total, 1)), f"Illustrating beat {i + 1}/{total}…")
+
+    images = generate_beat_images(scenes, out_dir, progress=_step)
+    if any(p is None for p in images):
+        missing = [i for i, p in enumerate(images) if p is None]
+        log.warning("illustrations missing for beats %s — text-slide fallback", missing)
+        return None
+    return images
+
+
+def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
+                       mode=None, illustrated=True):
     """Generate a narrated reel (Anil's cloned voice) for an approved run and store
     it. Returns a result dict — never raises for the expected failure modes so the
     dashboard can render a clean message:
 
-      {ok:True,  reel_id, caption, beats, size_kb}
+      {ok:True,  reel_id, caption, kind, beats, size_kb}
       {ok:False, needs_terminal:True, hint:<cmd>}      attended-only, run it in the terminal
       {ok:False, blocked:<reason>, until:<dt|None>}    api mode + quota breaker open
       {ok:False, voice_down:True, hint:<cmd>}          Chatterbox server not running
@@ -121,6 +155,11 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None, mo
     `progress(fraction, message)` is an optional UI callback (the dashboard passes one
     for its progress bar). `dark` picks the frame palette (reuse the carousel's mood);
     default light. Does NOT post — see module docstring.
+
+    `illustrated` (default True) renders the ink-dark illustrated look: one
+    conceptual FLUX illustration per beat plus the silent sign-off card. If any
+    illustration fails it falls back to text-slide frames for the whole reel, so
+    this never turns a working reel into a failed job.
     """
     from shared.db import get_run, save_reel
     from shared import quota
@@ -194,14 +233,40 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None, mo
     fields = parse_script(script)
     if not fields.get("beats"):
         return {"ok": False, "error": "video-script produced no usable beats"}
+    # Captured before the silent sign-off beat is appended below.
+    narration = fields.get("narration") or ""
 
-    # 4) Render — local Chatterbox voice + ffmpeg. Force the chatterbox backend
-    #    explicitly (the module TTS_BACKEND defaults to piper unless env-set).
-    _p(0.35, f"Voicing {len(fields['beats'])} beats + rendering…")
+    # 4) Illustrations — one conceptual image per beat (FLUX.1-dev on the free
+    #    NVIDIA key). All-or-nothing: a reel that mixes illustrated and text-slide
+    #    frames looks broken, so any missing image drops the WHOLE reel back to the
+    #    text-slide look rather than shipping something half-styled.
     with tempfile.TemporaryDirectory(prefix="mkreel_") as tmp:
-        out_mp4 = Path(tmp) / f"reel_run{run_id}.mp4"
+        tmpdir = Path(tmp)
+        render_frame, kind, n_frames = None, "narrated", len(fields["beats"])
+        if illustrated:
+            _p(0.15, f"Illustrating {len(fields['beats'])} beats…")
+            try:
+                images = _illustrate(fields, tmpdir / "ill", _p)
+            except Exception as e:
+                log.warning("illustration step failed for run #%s: %s", run_id, e)
+                images = None
+            if images:
+                from publishing.reel_illustrated import make_renderer
+                render_frame = make_renderer(images)
+                kind = "illustrated"
+                # One extra beat with no spoken text = the silent sign-off hold.
+                fields = dict(fields, beats=list(fields["beats"]) + [("", "")])
+                n_frames = len(fields["beats"])
+            else:
+                log.info("run #%s: falling back to text-slide frames", run_id)
+
+        # 5) Render — local Chatterbox voice + ffmpeg. Force the chatterbox backend
+        #    explicitly (the module TTS_BACKEND defaults to piper unless env-set).
+        _p(0.55 if illustrated else 0.35, f"Voicing {n_frames} beats + rendering…")
+        out_mp4 = tmpdir / f"reel_run{run_id}.mp4"
         try:
-            build_reel(fields, bool(dark), out_mp4, backend="chatterbox")
+            build_reel(fields, bool(dark), out_mp4, backend="chatterbox",
+                       render_frame=render_frame)
         except Exception as e:
             log.error("build_reel failed for run #%s: %s", run_id, e)
             return {"ok": False, "error": f"reel render failed: {e}"}
@@ -214,9 +279,10 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None, mo
         from shared.config import SLIDE_SERVER_BASE_URL
         article_url = (f"{SLIDE_SERVER_BASE_URL.rstrip('/')}/a/{slug}"
                        if slug and SLIDE_SERVER_BASE_URL else "")
-    caption = _build_caption(fields, article_url)
-    reel_id = save_reel(run_id, mp4_bytes, caption, kind="narrated")
+    # The silent sign-off beat is not narration — keep it out of the description.
+    caption = _build_caption(dict(fields, narration=narration), article_url)
+    reel_id = save_reel(run_id, mp4_bytes, caption, kind=kind)
 
     _p(1.0, "Reel ready ✓")
-    return {"ok": True, "reel_id": reel_id, "caption": caption,
-            "beats": len(fields["beats"]), "size_kb": len(mp4_bytes) // 1024}
+    return {"ok": True, "reel_id": reel_id, "caption": caption, "kind": kind,
+            "beats": n_frames, "size_kb": len(mp4_bytes) // 1024}

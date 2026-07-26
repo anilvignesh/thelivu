@@ -23,6 +23,34 @@ chat. To bootstrap it:
 
 ---
 
+## Illustrated reels (productionized 2026-07-26 — plan 02)
+
+`make_narrated_reel()` now produces the **ink-dark illustrated** reel (the reel #9
+look) by default, end to end from the CC's "Make reel" button. This was a
+scratchpad prototype that built one published reel by monkeypatching
+`reel._render_frame`; it is now real code.
+
+- `publishing/illustrate.py` — one conceptual illustration per beat via
+  **FLUX.1-dev on the free NVIDIA key**. Serial (14 GB box), dark-ground house
+  style, and it defends against the two known failure shapes: the NIM safety
+  filter returning a black frame with `finishReason=CONTENT_FILTERED` (checked)
+  and sub-50KB blanks (rejected). Journalism vocabulary that trips the filter
+  ('somber', 'grave', 'victim'…) is softened **in the image prompt only** — never
+  in the story.
+- `publishing/reel_illustrated.py` — the frame builders and the sign-off card,
+  ported verbatim in geometry from the prototype.
+- **`reel.build_reel` takes a `render_frame`**, and `_synth` treats an empty beat
+  as a deliberate **silent hold** — that's how the sign-off card gets its ~2.8s
+  with no speech over it. No monkeypatching anywhere.
+- The **video-script skill now emits an `IMAGE:` line per beat** (`HOOK_IMAGE`,
+  `BEAT n IMAGE`, `CLOSE_IMAGE`) — a conceptual scene, with the non-photoreal
+  rule stated as a brand rule. `parse_script` returns `images` aligned with
+  `beats`; older scripts without them fall back to a scene derived from the
+  caption.
+- **All-or-nothing fallback:** if any beat's illustration fails, the whole reel
+  renders as text slides. A reel mixing both looks like a bug, not a style.
+  Stored `kind` is `illustrated` or `narrated`, shown on the CC reel card.
+
 ## Cost control (added 2026-07-26 — plan 01)
 
 The engine now runs to a budget instead of running until the balance dies.
