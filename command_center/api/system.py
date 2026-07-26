@@ -6,7 +6,9 @@ import subprocess
 from starlette.routing import Route
 
 from command_center import db, jobs
-from command_center.api.util import J, endpoint, err, cost_usd, INR, breaker_state
+from command_center.api.util import (J, endpoint, err, cost_usd, INR,
+                                     breaker_state, budget_state)
+from shared import budget
 from shared.db import kv_set, list_digs
 
 VOICE_SCRIPT = os.path.expanduser("~/.jarvis/reel-voice.sh")
@@ -67,6 +69,7 @@ def overview(request, data):
         digs=safe_digs,
         daily=lambda: get_daily_costs(days=1),
         breaker=breaker_state,
+        cap=budget.cap_usd,
     )
     now = datetime.datetime.now(datetime.timezone.utc)
     for a in r["agents"]:
@@ -97,6 +100,10 @@ def overview(request, data):
         "voice_up": voice_status(),
         "published": counts.get("published", 0),
         "today_cost": {"usd": round(today_usd, 4), "inr": round(today_usd * INR, 2)},
+        # Cap came from the fan-out and today's spend is already computed —
+        # the banner costs no extra round trip.
+        "budget": {"cap_usd": r["cap"], "spent_today_usd": round(today_usd, 4),
+                   "over": r["cap"] is not None and today_usd >= r["cap"]},
     })
 
 
@@ -108,6 +115,7 @@ def system_status(request, data):
                            "FROM pending_topics WHERE status IN ('queued','running') "
                            "ORDER BY id"),
         breaker=breaker_state,
+        budget=budget_state,
     )
     scheds = []
     for label, key, cadence, sig, sigval in SCHEDULES:
@@ -124,6 +132,7 @@ def system_status(request, data):
     }
     return J({
         "breaker": r["breaker"],
+        "budget": r["budget"],
         "voice_up": voice_status(),
         "schedules": scheds,
         "queue": r["queue"],
@@ -172,6 +181,20 @@ def jobs_recent(request, data):
 
 
 @endpoint
+def set_budget(request, data):
+    """Set the daily spend cap. 0 disables the governor entirely."""
+    try:
+        usd = float(data.get("usd"))
+    except (TypeError, ValueError):
+        return err("usd must be a number")
+    try:
+        budget.set_cap_usd(usd)
+    except ValueError as e:
+        return err(str(e))
+    return J({"ok": True, "budget": budget_state()})
+
+
+@endpoint
 def clear_breaker(request, data):
     """Close the quota breaker (same as `./attend clear`) — after a top-up."""
     from shared import quota
@@ -185,6 +208,7 @@ routes = [
     Route("/system/signal", send_signal, methods=["POST"]),
     Route("/system/voice", voice_control, methods=["POST"]),
     Route("/system/breaker/clear", clear_breaker, methods=["POST"]),
+    Route("/system/budget", set_budget, methods=["POST"]),
     Route("/jobs", jobs_recent, methods=["GET"]),
     Route("/jobs/{jid}", job_status, methods=["GET"]),
 ]

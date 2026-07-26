@@ -221,6 +221,13 @@ async function vOverview(main) {
       <span class="muted small">Model stages are parked. Run attended (<code>./attend cycle</code>) or wait for credit.
       ${d.breaker.until ? 'Auto-retry ' + ago(d.breaker.until).replace(' ago', '') : ''}</span></div></div>`));
 
+  // Gold, not red: hitting the cap is the governor working, not an outage.
+  if (d.budget && d.budget.over)
+    main.appendChild(el(`<div class="banner"><span class="big">💰</span><div>
+      <b>Daily budget reached</b> — $${(d.budget.spent_today_usd).toFixed(2)} of $${Number(d.budget.cap_usd).toFixed(2)}<br>
+      <span class="muted small">Model stages are parked until midnight UTC. Publishing and approvals still work.
+      Change the cap in <a href="#/system">System</a>.</span></div></div>`));
+
   main.appendChild(el(d.gate.length
     ? `<div class="banner"><span class="big">📬</span><div><b>${d.gate.length}</b> draft${d.gate.length > 1 ? 's' : ''} waiting at your gate
        — <a href="#/gate">review now</a></div></div>`
@@ -850,6 +857,22 @@ async function vSystem(main) {
       toast('Breaker closed.', 'ok'); route();
     });
   main.appendChild(bk);
+
+  const bg = d.budget || {};
+  const capTxt = bg.cap_usd == null ? 'disabled (no cap)' : `$${Number(bg.cap_usd).toFixed(2)}/day`;
+  const bd = el(`<div class="card">
+    <b>Daily budget:</b> ${capTxt}
+    <span class="muted small">— spent today $${Number(bg.spent_today_usd || 0).toFixed(4)}${bg.over ? ' · <b>cap reached, model stages parked</b>' : ''}</span>
+    <div class="muted small">Parks model stages at the cap and resumes at midnight UTC — the engine can't drain the balance mid-story. 0 disables it.</div>
+    <div class="actions" data-x="a"><input data-x="usd" type="number" step="0.05" min="0" max="20"
+      value="${bg.cap_usd == null ? 0 : bg.cap_usd}" style="width:90px"></div></div>`);
+  addBtn(bd.querySelector('[data-x=a]'), 'Set cap', '', async () => {
+    const v = bd.querySelector('[data-x=usd]').value;
+    const r = await api('/system/budget', { method: 'POST', body: { usd: v } });
+    toast(r.budget.cap_usd == null ? 'Budget governor disabled.' : `Cap set to $${r.budget.cap_usd}/day.`, 'ok');
+    route();
+  });
+  main.appendChild(bd);
 
   const vc = el(`<div class="card"><b>Voice server (:3901):</b> ${d.voice_up ? '<span style="color:var(--good)">up</span>' : '<span style="color:var(--brick)">down</span>'}
     <span class="muted small">— Chatterbox holds ~2 GB RAM; stop it when idle.</span>

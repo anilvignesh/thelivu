@@ -485,6 +485,7 @@ FYI ONLY (the engine explaining itself, no action needed):
 📡 Source silent — a feed has gone quiet for 3+ cycles.
 📋 Story tracker / 🧭 Meta-synthesis — periodic reviews of published work.
 💰 Cost report — daily spend summary (change time with /setcost).
+/setbudget <usd> — daily spend cap; model stages park at it, resume at midnight UTC.
 
 KEY COMMANDS:
 /pending — everything waiting on you, one card
@@ -865,6 +866,31 @@ async def cmd_sources(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 InlineKeyboardButton("✗ Deactivate", callback_data=f"deactivatesrc_{src_id}")
             ]])
             await update.message.reply_text(text, reply_markup=keyboard)
+
+
+async def cmd_setbudget(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Set the daily spend cap in USD. Usage: /setbudget 0.75 (0 disables)"""
+    from shared import budget
+
+    if not context.args:
+        spent, cap, over = budget.status()
+        await update.message.reply_text(
+            f"Daily budget: {'disabled (no cap)' if cap is None else f'${cap:.2f}'}\n"
+            f"Spent today: ${spent:.4f}{'  ⚠️ cap reached — model stages parked' if over else ''}\n\n"
+            "Usage: /setbudget <usd>  (e.g. /setbudget 0.75, or 0 to disable)"
+        )
+        return
+    try:
+        cap = budget.set_cap_usd(float(context.args[0].strip()))
+    except ValueError as e:
+        await update.message.reply_text(f"Invalid: {e}")
+        return
+    await update.message.reply_text(
+        "Budget governor disabled — no daily cap." if cap is None
+        else f"Daily budget cap set to ${cap:.2f}. Model stages park at the cap "
+             f"and resume at midnight UTC."
+    )
+    log.info("Daily budget cap set to %s", cap)
 
 
 async def cmd_setcost(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1442,6 +1468,7 @@ def main():
     app.add_handler(CommandHandler("kill", cmd_kill))
     app.add_handler(CommandHandler("sources", cmd_sources))
     app.add_handler(CommandHandler("setcost", cmd_setcost))
+    app.add_handler(CommandHandler("setbudget", cmd_setbudget))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("search", cmd_search))
     app.add_handler(CommandHandler("watchlist", cmd_watchlist))

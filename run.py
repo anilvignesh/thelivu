@@ -8,7 +8,7 @@ if service == "thelivu-agent":
     from datetime import datetime, timezone, timedelta
     from shared.config import ANTHROPIC_API_KEY, APPROVAL_MODE, TELEGRAM_BOT_TOKEN, TELEGRAM_DRAFT_CHAT_ID, CHECK_INTERVAL_HOURS, REPO_ROOT, SLIDE_SERVER_BASE_URL, SLIDE_SERVER_PORT
     from shared.db import init_db, kv_get, kv_set, update_run, get_due_digs
-    from shared import quota
+    from shared import quota, budget
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", stream=sys.stdout)
     log = logging.getLogger("orchestrator")
@@ -47,6 +47,7 @@ if service == "thelivu-agent":
     except Exception:
         pass
     _breaker_logged_at = None  # throttle the "paused" log to twice an hour
+    _budget_logged_at = None   # same throttle for the spend cap
     TOPIC_POLL_SECONDS = 120  # check for owner topics every 2 minutes
 
     # How long a FAILED rss cycle waits before retrying. The full interval would
@@ -130,6 +131,43 @@ if service == "thelivu-agent":
             time.sleep(TOPIC_POLL_SECONDS)
             continue
         _breaker_logged_at = None
+
+        # ── Budget governor ───────────────────────────────────────────────────
+        # Spend cap for the UTC day. Sits BELOW the breaker (a dry provider takes
+        # precedence — its `continue` already covers that case) and ABOVE every
+        # model stage, mirroring the breaker's shape: the non-model work above
+        # has already run, so publishing and approvals stay alive at the cap.
+        # Self-expiring — daily_spend_usd() only counts today, so midnight UTC
+        # releases it with no timer to manage.
+        try:
+            over = budget.is_over_budget()
+        except Exception as e:
+            # Never let a cost-query blip halt the engine — that would be the
+            # governor causing the outage it exists to prevent.
+            log.warning("Budget check failed (assuming under): %s", e)
+            over = None
+
+        if over:
+            spent, cap = over
+            if _budget_logged_at is None or (now_utc - _budget_logged_at).total_seconds() >= 1800:
+                _budget_logged_at = now_utc
+                log.warning("Model stages paused — daily budget $%.2f reached "
+                            "($%.4f spent). Resumes at midnight UTC.", cap, spent)
+            # One Telegram alert per day, the first time the cap trips.
+            try:
+                if kv_get("last_budget_alert_at") != today.isoformat():
+                    kv_set("last_budget_alert_at", today.isoformat())
+                    _tg_notify(
+                        f"💰 Daily budget cap ${cap:.2f} reached (~${spent:.2f} spent).\n"
+                        f"Model stages are parked; publishing and approvals still work.\n"
+                        f"Engine resumes at midnight UTC. Change the cap with "
+                        f"/setbudget <usd> or in the command center."
+                    )
+            except Exception as e:
+                log.warning("Budget alert failed: %s", e)
+            time.sleep(TOPIC_POLL_SECONDS)
+            continue
+        _budget_logged_at = None
 
         # Weekly: source scout + story scout + story tracker
         try:

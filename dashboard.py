@@ -36,12 +36,7 @@ SLIDE_BASE     = os.environ.get("SLIDE_SERVER_BASE_URL", "").rstrip("/")
 TG_API        = f"https://api.telegram.org/bot{BOT_TOKEN}"
 REPO_ROOT     = Path(__file__).parent
 
-_INR = 84
-_MODEL_COSTS = {
-    "claude":     {"in": 3.00, "out": 15.00},
-    "gemini":     {"in": 0.30, "out": 1.00},
-    "gemini-pro": {"in": 1.25, "out": 10.00},
-}
+from shared.costs import USD_TO_INR as _INR  # rate table: shared/costs.py
 
 st.set_page_config(page_title="Thelivu — Command Center", page_icon="📰", layout="wide")
 
@@ -265,13 +260,7 @@ def read_toggle(ns, run_id, label="📖 Read"):
         st.rerun()
     return False
 
-def cost(model, i, o):
-    m = (model or "").lower()
-    if "gemini" in m and "pro" in m: tier = "gemini-pro"
-    elif "gemini" in m: tier = "gemini"
-    else: tier = "claude"
-    c = _MODEL_COSTS[tier]
-    return (i/1e6 * c["in"]) + (o/1e6 * c["out"])
+from shared.costs import cost_usd as cost
 
 def signal(key, value="1"):
     """Write a kv_store signal the orchestrator tick loop reads."""

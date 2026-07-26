@@ -41,28 +41,26 @@ def endpoint(fn):
     return wrapper
 
 
-# Cost model — mirrors the Streamlit dashboard's numbers.
-INR = 84
-_MODEL_COSTS = {
-    "claude":     {"in": 3.00, "out": 15.00},
-    "gemini":     {"in": 0.30, "out": 1.00},
-    "gemini-pro": {"in": 1.25, "out": 10.00},
-    "nvidia":     {"in": 0.00, "out": 0.00},
-}
+# Cost model — one table for the whole repo, in shared/costs.py.
+from shared.costs import cost_usd, USD_TO_INR as INR  # noqa: F401 (re-exported)
 
 
-def cost_usd(model, in_tok, out_tok):
-    m = (model or "").lower()
-    if "gemma" in m or "nvidia" in m or m == "attended":
-        tier = "nvidia"
-    elif "gemini" in m and "pro" in m:
-        tier = "gemini-pro"
-    elif "gemini" in m:
-        tier = "gemini"
+def budget_state(spent_usd=None):
+    """Cap + today's spend + whether the governor is parking model stages.
+
+    Pass `spent_usd` when the caller already computed today's cost (the
+    overview does) — that turns this into a single kv read. Cap parsing lives
+    in shared.budget so the UI and the engine can never disagree about it.
+    """
+    from shared import budget
+
+    if spent_usd is None:
+        spent, cap, _ = budget.status()
     else:
-        tier = "claude"
-    c = _MODEL_COSTS[tier]
-    return ((in_tok or 0) / 1e6 * c["in"]) + ((out_tok or 0) / 1e6 * c["out"])
+        spent, cap = spent_usd, budget.cap_usd()
+    return {"cap_usd": cap,
+            "spent_today_usd": round(spent, 4),
+            "over": cap is not None and spent >= cap}
 
 
 def breaker_state():

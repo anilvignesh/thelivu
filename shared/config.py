@@ -80,8 +80,13 @@ APPROVAL_MODE = os.environ.get("APPROVAL_MODE", "file")
 CHECK_INTERVAL_HOURS = int(os.environ.get("CHECK_INTERVAL_HOURS", "6"))
 
 # --- Models ---
-CLAUDE_MODEL    = "claude-sonnet-4-6"
-GEMINI_MODEL    = "gemini-2.5-flash"
+# Env-overridable so a routing change is a Railway variable, not a code push
+# (the tech steward's recommendations apply this way).
+CLAUDE_MODEL    = os.environ.get("THELIVU_CLAUDE_MODEL", "claude-sonnet-4-6")
+# Triage/selection/gating runs here — same Claude family, ~1/3 the price.
+# Journalism (writing, editorial, verification) never routes to it.
+HAIKU_MODEL     = os.environ.get("THELIVU_HAIKU_MODEL", "claude-haiku-4-5")
+GEMINI_MODEL    = os.environ.get("THELIVU_GEMINI_MODEL", "gemini-2.5-flash")
 # Stronger Gemini for the highest-stakes search-grounded stage (the trust gate).
 GEMINI_PRO_MODEL = os.environ.get("GEMINI_PRO_MODEL", "gemini-2.5-pro")
 

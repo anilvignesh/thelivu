@@ -23,6 +23,44 @@ chat. To bootstrap it:
 
 ---
 
+## Cost control (added 2026-07-26 — plan 01)
+
+The engine now runs to a budget instead of running until the balance dies.
+
+- **One cost model: `shared/costs.py`.** The USD-per-MTok table used to be
+  triplicated (orchestrator report, Streamlit, command center) and had already
+  diverged — gemini-pro output was priced at $5 in one place and $10 in the
+  others, and neither the report nor the dashboard knew NVIDIA Gemma is free,
+  so free presentation calls were billed at Claude rates. All three import from
+  here now. `cost_usd()` resolves a raw model string to a tier; `RATES` is the
+  introspectable table.
+- **Triage runs on Haiku 4.5.** `_HAIKU_SKILLS` in `engine/agents/skill_runner.py`
+  = `news-monitor`, `topic-intake`, `chief-of-staff`, `newsworthiness-gate` —
+  measured 2026-07-26 as ~$20 of the ~$34/mo burn, against ~$5.4 for the writing
+  core. They sift against a strict output contract; they don't write prose and
+  don't touch the trust gate. **The trust-critical chain stays on `CLAUDE_MODEL`**
+  (article-writer, editorial-reviewer, pattern-synthesizer, meta-synthesizer,
+  source-ingestor) and research stays on Gemini. `record_usage` logs the model
+  actually called, so cost accounting stays truthful.
+  *Watch after the first cycles with credit:* news-monitor has a selection
+  contract; if `_resolve_selected_lead` starts logging "throughline unmatched",
+  revert just news-monitor to `CLAUDE_MODEL` and leave the other three.
+- **Budget governor: `shared/budget.py` + the block in `run.py`.** Daily spend
+  cap (default **$0.75**, kv `daily_budget_usd`, 0 disables). Sits *below* the
+  quota breaker and *above* every model stage — so at the cap, model work parks
+  but publishing, approvals and cleanup keep working. Self-expiring: spend is
+  only ever counted for the current UTC day, so midnight releases it. One
+  Telegram alert the first time it trips each day.
+- **Controls:** command center System view (cap + today's spend + setter),
+  Overview banner in gold when parked (it's healthy behavior, not an outage),
+  `POST /api/system/budget`, and `/setbudget <usd>` in the bot.
+- **Model knobs are env-overridable** (`THELIVU_CLAUDE_MODEL`,
+  `THELIVU_HAIKU_MODEL`, `THELIVU_GEMINI_MODEL`) so a routing change is a
+  Railway variable, not a code push.
+- **Owner decision 2026-07-26:** stay on **Sonnet 4.6** for the writing core.
+  Sonnet 5's intro pricing ($2/$10 to 2026-08-31) is offset by a tokenizer that
+  uses ~30% more tokens, and it goes ~30% dearer after. Revisit 2026-09-01.
+
 ## Command Center v2 (added 2026-07-26 — the operations base)
 
 **The Streamlit dashboard has a successor: `command_center/`** — a proper web app

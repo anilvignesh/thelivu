@@ -244,6 +244,20 @@ grant) — everything else is autonomous.
   `force_meta_run`, `force_rss_run`, `recheck_note_<id>`; state stamps
   `last_cos_at`, `last_dig_sweep_at`, `latest_cos_brief`, `latest_cos_actions`,
   `latest_scout_brief`.
+- **Budget governor (2026-07-26):** kv `daily_budget_usd` is the daily spend
+  cap in USD (unset → $0.75; `''`/`0` → disabled); `last_budget_alert_at` is the
+  once-per-day Telegram alert stamp. The governor block in `run.py` sits BELOW
+  the quota breaker and ABOVE every model stage, so at the cap publishing and
+  approvals still work and model work parks until midnight UTC (spend is only
+  ever counted for the current UTC day — nothing to reset). Rates live in
+  `shared/costs.py`, the ONLY cost table; `shared/budget.py` owns cap parsing so
+  the UI and the engine can't disagree. Set it from the CC System view,
+  `POST /api/system/budget`, or `/setbudget <usd>`.
+- **Model routing knobs are env vars:** `THELIVU_CLAUDE_MODEL`,
+  `THELIVU_HAIKU_MODEL`, `THELIVU_GEMINI_MODEL` (see `shared/config.py`) — apply
+  a routing change with `railway variable set … --service thelivu-agent`, no
+  code push. Triage (`_HAIKU_SKILLS`: news-monitor, topic-intake,
+  chief-of-staff, newsworthiness-gate) runs on Haiku 4.5; journalism does not.
 - New code files: `publishing/publish.py` (shared publish/post), `ingestion/fetch.py`
   (link fetch), `engine/skills/chief-of-staff/`, `engine/skills/video-script/`
   (scaffold), `docs/command-center.md` (build spec), `docs/video-reels-research.md`.

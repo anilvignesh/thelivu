@@ -16,7 +16,7 @@ from datetime import date
 
 import anthropic
 from shared.config import (
-    CLAUDE_MODEL, GEMINI_MODEL, GEMINI_PRO_MODEL,
+    CLAUDE_MODEL, HAIKU_MODEL, GEMINI_MODEL, GEMINI_PRO_MODEL,
     ANTHROPIC_API_KEY, GEMINI_API_KEY,
     NVIDIA_API_KEY, NVIDIA_MODEL, NVIDIA_BASE_URL,
     TELEGRAM_BOT_TOKEN, TELEGRAM_DRAFT_CHAT_ID,
@@ -220,9 +220,17 @@ _GEMINI_PRO_SKILLS = {"source-verifier"}
 # best, no compromise); ONLY carousel + video ride on NVIDIA Gemma.
 _NVIDIA_SKILLS = {"carousel-composer", "video-script"}
 
+# TRIAGE — still Claude, but Haiku 4.5 ($1/$5 vs $3/$15). These skills sift and
+# select against a strict output contract: they don't write prose, don't reason
+# about trust, and nothing they emit reaches a reader unrouted. Measured
+# 2026-07-26: they were ~$20 of the ~$34/mo burn while the writing core was
+# ~$5.4. The trust-critical chain (article-writer, editorial-reviewer,
+# pattern-synthesizer, news-investigator, source-verifier) stays on CLAUDE_MODEL.
+_HAIKU_SKILLS = {"news-monitor", "topic-intake", "chief-of-staff", "newsworthiness-gate"}
+
 # Everything else routes to Claude (judgment / structured decisions / writing):
-# news-monitor, newsworthiness-gate, topic-intake, pattern-synthesizer,
-# meta-synthesizer, article-writer, editorial-reviewer, source-ingestor.
+# pattern-synthesizer, meta-synthesizer, article-writer, editorial-reviewer,
+# source-ingestor.
 
 # topic-intake gets web search to gauge "already saturated?" at the front gate.
 # (Research skills run only on Gemini and never reach the Claude path, so they
@@ -389,7 +397,9 @@ def _cache_growing_context(messages):
         last[-1]["cache_control"] = {"type": "ephemeral"}
 
 
-def _run_claude(skill_name, input_text, system_prompt, extra_tools, max_tokens, run_id=None):
+def _run_claude(skill_name, input_text, system_prompt, extra_tools, max_tokens,
+                run_id=None, model=None):
+    model = model or CLAUDE_MODEL
     tools = _CLAUDE_SKILL_TOOLS.get(skill_name, []) + (extra_tools or [])
     messages = [{"role": "user", "content": input_text}]
     client = _get_claude()
@@ -404,14 +414,14 @@ def _run_claude(skill_name, input_text, system_prompt, extra_tools, max_tokens, 
     system_blocks = [{"type": "text", "text": system_prompt,
                       "cache_control": {"type": "ephemeral"}}]
 
-    log.info("Running %s via Claude", skill_name)
+    log.info("Running %s via Claude (%s)", skill_name, model)
 
     while True:
         # Once the round cap is reached, drop the tools so the model must answer
         # from what it has instead of searching forever (the cost runaway).
         call_tools = tools if rounds < _MAX_TOOL_ROUNDS else []
         response = client.messages.create(
-            model=CLAUDE_MODEL,
+            model=model,
             system=system_blocks,
             tools=call_tools,
             messages=messages,
@@ -421,7 +431,7 @@ def _run_claude(skill_name, input_text, system_prompt, extra_tools, max_tokens, 
         total_out += response.usage.output_tokens
 
         if response.stop_reason == "end_turn":
-            _record_claude(skill_name, total_in, total_out, run_id)
+            _record_claude(skill_name, total_in, total_out, run_id, model)
             return _extract_claude_text(response)
 
         if response.stop_reason == "tool_use":
@@ -454,10 +464,12 @@ def _run_claude(skill_name, input_text, system_prompt, extra_tools, max_tokens, 
         return _extract_claude_text(response)
 
 
-def _record_claude(skill_name, total_in, total_out, run_id):
+def _record_claude(skill_name, total_in, total_out, run_id, model=None):
     try:
         from shared.db import record_usage
-        record_usage(skill=skill_name, model=CLAUDE_MODEL,
+        # Record the model actually called, not the default — cost accounting
+        # (and the budget governor that reads it) has to stay truthful.
+        record_usage(skill=skill_name, model=model or CLAUDE_MODEL,
                      input_tokens=total_in, output_tokens=total_out, run_id=run_id)
     except Exception:
         pass
@@ -612,7 +624,8 @@ def run_skill(skill_name, input_text, extra_tools=None, max_tokens=4096,
         model_label = gemini_model
     else:
         preferred = "claude"
-        model_label = CLAUDE_MODEL
+        claude_model = HAIKU_MODEL if skill_name in _HAIKU_SKILLS else CLAUDE_MODEL
+        model_label = claude_model
 
     aid = agent_start(skill_name, model_label, topic=topic, run_id=run_id)
 
@@ -646,7 +659,8 @@ def run_skill(skill_name, input_text, extra_tools=None, max_tokens=4096,
                 raise
 
         try:
-            return _run_claude(skill_name, input_text, system_prompt, extra_tools, max_tokens, run_id)
+            return _run_claude(skill_name, input_text, system_prompt, extra_tools,
+                               max_tokens, run_id, model=claude_model)
         except Exception as e:
             _send_quota_alert("claude", skill_name, e)
             raise

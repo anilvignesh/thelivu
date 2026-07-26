@@ -2044,22 +2044,10 @@ def run_meta_synthesis():
 # Daily cost report (sent at 8pm IST / 14:30 UTC)
 # ---------------------------------------------------------------------------
 
-_CLAUDE_IN_PER_M      = 3.00
-_CLAUDE_OUT_PER_M     = 15.00
-_GEMINI_FLASH_IN      = 0.30   # gemini-2.5-flash
-_GEMINI_FLASH_OUT     = 1.00
-_GEMINI_PRO_IN        = 1.25   # gemini-2.5-pro (verifier only)
-_GEMINI_PRO_OUT       = 5.00
-_USD_TO_INR           = 84
-
-
-def _calc_cost(model, in_tok, out_tok):
-    m = model.lower()
-    if "gemini" in m:
-        if "pro" in m:
-            return (in_tok / 1_000_000 * _GEMINI_PRO_IN) + (out_tok / 1_000_000 * _GEMINI_PRO_OUT)
-        return (in_tok / 1_000_000 * _GEMINI_FLASH_IN) + (out_tok / 1_000_000 * _GEMINI_FLASH_OUT)
-    return (in_tok / 1_000_000 * _CLAUDE_IN_PER_M) + (out_tok / 1_000_000 * _CLAUDE_OUT_PER_M)
+# Rates live in shared/costs.py — one table for the report, the dashboard and
+# the command center. (This copy had gemini-pro output at $5 instead of $10 and
+# billed free NVIDIA Gemma calls at Claude rates.)
+from shared.costs import cost_usd as _calc_cost, USD_TO_INR as _USD_TO_INR
 
 
 def send_cost_report():
