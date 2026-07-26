@@ -559,20 +559,32 @@ def get_run(run_id):
         conn.close()
 
 
-def get_held_runs(older_than_days=3):
+def get_held_runs(older_than_days=3, limit=None):
+    """Held stories untouched for older_than_days, oldest first.
+
+    Covers BOTH 'held' (owner/dashboard) and 'hold' (the verifier's gate
+    verdict, gate.lower()) — the old status='held' filter matched zero rows in
+    prod, so the daily auto-recheck was a silent no-op (audit 2026-07-26).
+    Filters on updated_at, not created_at: a story rechecked and held again
+    yesterday was 'created weeks ago' and would have re-rechecked every single
+    day forever. `limit` lets the auto-recheck cap its daily spend instead of
+    queueing the whole backlog in one wave."""
     conn = _conn()
     try:
         cur = conn.cursor()
+        lim = f" LIMIT {int(limit)}" if limit else ""
         if _is_postgres():
             cur.execute(
-                "SELECT * FROM pipeline_runs WHERE status = 'held' "
-                "AND created_at < NOW() - INTERVAL '%s days'",
+                "SELECT * FROM pipeline_runs WHERE status IN ('held', 'hold') "
+                "AND updated_at < NOW() - INTERVAL '%s days' "
+                "ORDER BY updated_at" + lim,
                 (older_than_days,),
             )
         else:
             cur.execute(
-                "SELECT * FROM pipeline_runs WHERE status = 'held' "
-                "AND created_at < datetime('now', ?)",
+                "SELECT * FROM pipeline_runs WHERE status IN ('held', 'hold') "
+                "AND updated_at < datetime('now', ?) "
+                "ORDER BY updated_at" + lim,
                 (f"-{older_than_days} days",),
             )
         return _fetchall(cur)

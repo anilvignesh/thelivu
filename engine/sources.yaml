@@ -121,9 +121,12 @@ sources:
     role: verification
     tier: 2
     lean: "data journalism; non-partisan"
-    status: active
+    status: inactive
     added: 2026-06-23
-    notes: "Data-driven verification source. Strong on health, education, economy numbers."
+    notes: "Data-driven verification source. Strong on health, education, economy numbers.
+      DEACTIVATED 2026-07-26: their feed is served but EMPTY (well-formed channel,
+      zero items, any UA) — 751 silent cycles of dead fetches. Site itself works;
+      re-activate if/when the feed carries items again."
 
   - id: medianama
     name: Medianama

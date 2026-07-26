@@ -209,7 +209,14 @@ API** — stubs are the only retirement).
     The owner then runs the cycle by hand: `./attend cycle`. **`engine/attend.py`
     is human-operated and must never be automated** (no cron, no Railway, no
     `claude -p`) — see `docs/attended-mode.md` for why that boundary matters.
-18. **YouTube `channel_id`s go stale/get repurposed.** Verify a feed resolves
+18. **A feed can be valid-but-empty: 200 OK, well-formed channel, zero items.**
+    IndiaSpend's rss did exactly this for ~751 silent cycles (audit
+    2026-07-26) — no error anywhere, the silent counter just climbed while the
+    one-shot ==3 alert had long scrolled by. Now: silent alerts repeat every
+    100 cycles, `ingest_source` sends a browser UA (some publishers do
+    UA-block), and the command center shows per-source silent counts. When a
+    counter climbs, parse the feed yourself — HTTP 200 proves nothing.
+19. **YouTube `channel_id`s go stale/get repurposed.** Verify a feed resolves
     (`feedparser.parse` returns entries) before trusting it. Johnny Harris's id was
     wrong; `@perfectunion` now resolves to a different channel (deactivated).
     Confirmed working: ColdFusion, Coffeezilla, FYI.

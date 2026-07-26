@@ -135,7 +135,10 @@ def sources_state(request, data):
                               "FROM approved_sources WHERE status='active' ORDER BY id DESC"),
         proposals=lambda: db.q("SELECT id, name, platform, lean, tier, role, notes "
                                "FROM source_proposals WHERE status='pending' ORDER BY id DESC"),
+        silent=lambda: db.q("SELECT key, value FROM kv_store WHERE key LIKE 'src_silent_%'"),
     )
+    silent = {row["key"][len("src_silent_"):]: int(row["value"] or 0)
+              for row in r["silent"] if str(row["value"] or "0").isdigit()}
     yaml_sources = []
     try:
         approved_names = {a["name"] for a in r["approved"]}
@@ -144,6 +147,7 @@ def sources_state(request, data):
                    ("id", "name", "platform", "tier", "role", "lean", "status")}
             row["has_feed"] = bool(s.get("feed"))
             row["activated"] = s.get("name") in approved_names
+            row["silent_cycles"] = silent.get(str(s.get("id", "")).replace(" ", "_"), 0)
             yaml_sources.append(row)
     except Exception:
         pass

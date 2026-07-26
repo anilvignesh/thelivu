@@ -737,8 +737,11 @@ async function vSources(main) {
   const L = g.children[0], R = g.children[1];
 
   L.appendChild(el(`<div class="eyebrow">sources.yaml — active</div>`));
-  for (const s of d.yaml_sources.filter(s => s.status === 'active'))
-    L.appendChild(el(`<div class="small">${s.platform === 'youtube' ? '🎬' : '📰'} <b>${esc(s.name)}</b> · T${s.tier} · ${esc((s.lean || '').slice(0, 50))}</div>`));
+  for (const s of d.yaml_sources.filter(s => s.status === 'active')) {
+    const sil = s.silent_cycles >= 10
+      ? ` <span style="color:var(--brick)">⚠ silent ${s.silent_cycles} cycles</span>` : '';
+    L.appendChild(el(`<div class="small">${s.platform === 'youtube' ? '🎬' : '📰'} <b>${esc(s.name)}</b> · T${s.tier} · ${esc((s.lean || '').slice(0, 50))}${sil}</div>`));
+  }
   const cand = d.yaml_sources.filter(s => s.status === 'candidate');
   if (cand.length) {
     const det = el(`<details open><summary>Candidates (${cand.length}) — activate straight from here, live on the next cycle</summary><div></div></details>`);

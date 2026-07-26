@@ -183,7 +183,10 @@ def q(sql, params=()):
     conn = sdb._conn()
     try:
         cur = conn.cursor()
-        cur.execute(sql, params)
+        # Empty params → None for psycopg2 (it only interpolates when params
+        # is given, so literal % in LIKE patterns works) but () for sqlite
+        # (which rejects None).
+        cur.execute(sql, params or (None if _IS_PG else ()))
         return sdb._fetchall(cur)
     finally:
         conn.close()
@@ -195,7 +198,7 @@ def execute(sql, params=()):
     conn = sdb._conn()
     try:
         cur = conn.cursor()
-        cur.execute(sql, params)
+        cur.execute(sql, params or (None if _IS_PG else ()))
         conn.commit()
     finally:
         conn.close()

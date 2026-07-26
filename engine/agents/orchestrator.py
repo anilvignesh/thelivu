@@ -202,7 +202,12 @@ def ingest_source(source):
         return []
 
     platform = source.get("platform", "web")
-    feed = feedparser.parse(feed_url)
+    # Browser UA — some publishers UA-block feedparser's default agent. (Not a
+    # cure-all: IndiaSpend's feed turned out to be valid-but-EMPTY under any UA;
+    # see HANDOFF §5.18. This just removes one silent failure mode.)
+    feed = feedparser.parse(
+        feed_url,
+        agent="Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0")
     items = []
 
     for entry in feed.entries:
@@ -1193,7 +1198,10 @@ def run_daily_cycle():
             else:
                 n = int(kv_get(f"src_silent_{sid}") or 0) + 1
                 kv_set(f"src_silent_{sid}", str(n))
-                if n == 3:
+                # Alert at 3, then re-alert every 100 silent cycles — the
+                # one-shot ==3 alert let dead feeds sit unnoticed for weeks
+                # once the single ping scrolled by (audit 2026-07-26).
+                if n == 3 or n % 100 == 0:
                     _notify_card(
                         "📡", f"Source silent for 3+ cycles: {source['name']}",
                         body=f"No new items from <b>{_esc(source['name'])}</b> for 3 consecutive cycles.\n"

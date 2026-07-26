@@ -36,8 +36,16 @@ if service == "thelivu-agent":
 
     from shared.db import pop_next_topic, finish_topic
 
+    # Seed the RSS timer from the last completed cycle so a redeploy doesn't
+    # immediately run a fresh (token-spending) cycle — every push was
+    # triggering one because this lived only in process memory.
     _last_rss_run = None
-    _cost_report_sent_date = None
+    try:
+        _seed = kv_get("last_cycle_at")
+        if _seed:
+            _last_rss_run = datetime.fromisoformat(_seed)
+    except Exception:
+        pass
     _breaker_logged_at = None  # throttle the "paused" log to twice an hour
     TOPIC_POLL_SECONDS = 120  # check for owner topics every 2 minutes
 
@@ -82,16 +90,19 @@ if service == "thelivu-agent":
         except Exception as e:
             log.error("Carousel file cleanup failed: %s", e, exc_info=True)
 
-        # Auto-recheck held stories older than 3 days (once per day)
+        # Auto-recheck held stories older than 3 days (once per day). Capped at
+        # 3/day: a recheck is a full spine run, and with a 50-run held backlog
+        # the uncapped version would queue a multi-day token wave the moment
+        # credit returns. Oldest-first, so the whole backlog still drains.
         try:
             last_auto = kv_get("last_auto_recheck_at")
             auto_due = (not last_auto) or (now_utc - datetime.fromisoformat(last_auto)).total_seconds() >= 20 * 3600
             if auto_due:
                 kv_set("last_auto_recheck_at", now_utc.isoformat())
-                stale = get_held_runs(older_than_days=3)
+                stale = get_held_runs(older_than_days=3, limit=3)
                 for run in stale:
                     update_run(run["id"], status="recheck_requested")
-                    log.info("Auto-queued recheck for held run #%d (>3 days held)", run["id"])
+                    log.info("Auto-queued recheck for held run #%d (>3 days untouched)", run["id"])
                 if stale:
                     log.info("Auto-recheck: queued %d held story/stories", len(stale))
         except Exception as e:
