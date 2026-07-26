@@ -18,6 +18,7 @@ import anthropic
 from shared.config import (
     CLAUDE_MODEL, GEMINI_MODEL, GEMINI_PRO_MODEL,
     ANTHROPIC_API_KEY, GEMINI_API_KEY,
+    NVIDIA_API_KEY, NVIDIA_MODEL, NVIDIA_BASE_URL,
     TELEGRAM_BOT_TOKEN, TELEGRAM_DRAFT_CHAT_ID,
     SKILLS_DIR,
 )
@@ -212,6 +213,13 @@ _GEMINI_SKILLS = {
 # adversarial reasoning. The trust gate is the most consequential decision.
 _GEMINI_PRO_SKILLS = {"source-verifier"}
 
+# PRESENTATION-side skills → free NVIDIA-hosted Gemma 4. These package an ALREADY
+# verified + human-approved story into slides / a reel script — they are POST-GATE,
+# so a cheaper model here never touches journalism, research, or the trust gate.
+# Owner's rule (2026-07-26): research → Gemini, writing/editorial/gates → Claude (the
+# best, no compromise); ONLY carousel + video ride on NVIDIA Gemma.
+_NVIDIA_SKILLS = {"carousel-composer", "video-script"}
+
 # Everything else routes to Claude (judgment / structured decisions / writing):
 # news-monitor, newsworthiness-gate, topic-intake, pattern-synthesizer,
 # meta-synthesizer, article-writer, editorial-reviewer, source-ingestor.
@@ -323,6 +331,36 @@ def _run_openai_compat(client, model, skill_name, input_text, system_prompt,
     except Exception:
         pass
     return response.choices[0].message.content.strip()
+
+
+def _run_nvidia(skill_name, input_text, system_prompt, max_tokens, run_id=None):
+    """Presentation-side skills (carousel / video) via free NVIDIA-hosted Gemma 4.
+    OpenAI-compatible endpoint, called with plain requests (no extra SDK). NVIDIA has
+    its own key, so this is independent of the paid Anthropic/Gemini quota breaker and
+    a failure here does NOT trip it. Charter-safe: post-gate formatting only."""
+    import requests
+    from shared.db import record_usage
+    log.info("Running %s via NVIDIA %s", skill_name, NVIDIA_MODEL)
+    r = requests.post(
+        f"{NVIDIA_BASE_URL.rstrip('/')}/chat/completions",
+        headers={"Authorization": f"Bearer {NVIDIA_API_KEY}"},
+        json={"model": NVIDIA_MODEL,
+              "messages": [{"role": "system", "content": system_prompt},
+                           {"role": "user", "content": input_text}],
+              "max_tokens": max_tokens, "temperature": 0.4},
+        timeout=300,
+    )
+    r.raise_for_status()
+    data = r.json()
+    try:
+        u = data.get("usage", {}) or {}
+        record_usage(skill=skill_name, model=NVIDIA_MODEL,
+                     input_tokens=u.get("prompt_tokens", 0) or 0,
+                     output_tokens=u.get("completion_tokens", 0) or 0,
+                     run_id=run_id)
+    except Exception:
+        pass
+    return data["choices"][0]["message"]["content"].strip()
 
 
 # Hard cap on Claude tool-use (web-search) rounds. Each round re-sends the ENTIRE
@@ -540,6 +578,19 @@ def run_skill(skill_name, input_text, extra_tools=None, max_tokens=4096,
         f"recent events. If live sources and your memory disagree, the sources win.\n\n"
     )
     system_prompt = date_anchor + _PIPELINE_CONTRACT + _load_skill(skill_name)
+
+    # Presentation-side skills (carousel + video) → free NVIDIA-hosted Gemma 4.
+    # Checked BEFORE attended mode and BEFORE the paid providers: these are post-gate
+    # (they format an already verified + human-approved story), so they don't touch
+    # journalism/research/the trust gate, and NVIDIA's own free key means they render
+    # even when the paid APIs are dry — without bothering the attended human. If NVIDIA
+    # fails, it raises (caller pauses/requeues); it never trips the paid breaker.
+    if skill_name in _NVIDIA_SKILLS and NVIDIA_API_KEY:
+        aid = agent_start(skill_name, NVIDIA_MODEL, topic=topic, run_id=run_id)
+        try:
+            return _run_nvidia(skill_name, input_text, system_prompt, max_tokens, run_id)
+        finally:
+            agent_done(aid)
 
     # Attended mode — a human is running this cycle at the terminal because the
     # APIs are dry. Every skill call is handed to that session instead of an API.

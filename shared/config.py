@@ -1,9 +1,16 @@
 import os
 from pathlib import Path
 
-# --- Model API keys (pipeline runs on Gemini + Claude only) ---
+# --- Model API keys ---
+# Journalism/research runs on Gemini + Claude ONLY (no compromise). NVIDIA-hosted
+# Gemma is used exclusively for the PRESENTATION side (carousel + video) — see
+# skill_runner._NVIDIA_SKILLS.
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 GEMINI_API_KEY    = os.environ.get("GEMINI_API_KEY", "")
+# NVIDIA build.nvidia.com — free hosted Gemma 4, OpenAI-compatible. Presentation only.
+NVIDIA_API_KEY  = os.environ.get("NVIDIA_API_KEY", "")
+NVIDIA_MODEL    = os.environ.get("NVIDIA_MODEL", "google/gemma-4-31b-it")
+NVIDIA_BASE_URL = os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
 
 # --- Instagram (graph.instagram.com, Content Publishing) ---
 # IG_USER_ID: the Instagram professional account's numeric id. IG_ACCESS_TOKEN:
