@@ -541,7 +541,7 @@ async function makeReelFlow(rid) {
       if (j && j.state === 'done') { location.hash = '#/reels'; route(); }
       else if (j && j.result) {
         const res = j.result;
-        if (res.voice_down) toast(`Voice server is down — start it in System, or: ${res.hint}`, 'err', 12000);
+        if (res.voice_down) toast(`${res.error} — try ${res.hint} on the laptop.`, 'err', 12000);
         else if (res.needs_terminal) toast(`Attended mode: run ${res.hint} in a terminal.`, '', 12000);
       }
     } catch (e) { toast(e.message, 'err', 9000); }

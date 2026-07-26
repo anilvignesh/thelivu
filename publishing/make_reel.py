@@ -25,7 +25,10 @@ from pathlib import Path
 log = logging.getLogger("make_reel")
 
 CHATTERBOX_HEALTH = "http://127.0.0.1:3901/health"
+_VOICE_SCRIPT = os.path.expanduser("~/.jarvis/reel-voice.sh")
 _VOICE_LAUNCHER = "~/.jarvis/reel-voice.sh start"
+# The launcher polls for readiness itself (24 x 5s); give it room to finish.
+_VOICE_START_TIMEOUT = 180
 
 
 def _voice_up():
@@ -37,6 +40,40 @@ def _voice_up():
         return requests.get(CHATTERBOX_HEALTH, timeout=3).status_code == 200
     except Exception:
         return False
+
+
+def _ensure_voice(_p):
+    """Make sure the voice server is answering, starting it if it isn't.
+
+    The server is on-demand rather than boot-autostart because it holds ~2GB
+    resident on a 14GB laptop — but that is a RAM decision, not a reason to make
+    Anil go and start it by hand every time he asks for a reel. Triggering the
+    build IS the intent to use the voice, so the build starts it.
+
+    Returns (ok, error_message). The launcher blocks until /health answers, so a
+    clean return means the model is loaded and ready. It is a no-op when the
+    server is already up, and stays a clean error where the launcher doesn't
+    exist (Railway never renders reels).
+    """
+    import subprocess
+
+    if _voice_up():
+        return True, None
+    if not os.path.exists(_VOICE_SCRIPT):
+        return False, f"voice launcher not found at {_VOICE_SCRIPT}"
+
+    log.info("Voice server down — starting it")
+    _p(0.03, "Starting the voice server (loads the model, ~10-20s)…")
+    try:
+        r = subprocess.run([_VOICE_SCRIPT, "start"], capture_output=True,
+                           text=True, timeout=_VOICE_START_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return False, f"voice server did not start within {_VOICE_START_TIMEOUT}s"
+    if _voice_up():
+        log.info("Voice server ready")
+        return True, None
+    return False, ((r.stdout or "") + (r.stderr or "")).strip()[-400:] or \
+        "voice server did not come up — check ~/.jarvis/chatterbox_server.log"
 
 
 _NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
@@ -142,7 +179,7 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
       {ok:True,  reel_id, caption, kind, beats, size_kb}
       {ok:False, needs_terminal:True, hint:<cmd>}      attended-only, run it in the terminal
       {ok:False, blocked:<reason>, until:<dt|None>}    api mode + quota breaker open
-      {ok:False, voice_down:True, hint:<cmd>}          Chatterbox server not running
+      {ok:False, voice_down:True, hint:<cmd>}          voice server wouldn't start
       {ok:False, error:<str>}                          anything else
 
     `mode` is "attended" (active) or "api" (kept but inactive) — defaults to
@@ -206,11 +243,14 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
                 "error": "Reels are attended-only right now — run it in the terminal "
                          f"with `./attend reel {run_id}`, then refresh to preview + post."}
 
-    # 2) Voice server — fail fast with the exact launcher command rather than hang.
+    # 2) Voice server — start it if it's down. Asking for a reel is the intent to
+    #    use the voice, so don't bounce the request back with a command to run.
+    #    Only if it genuinely can't come up do we fail, and then with the reason.
     _p(0.02, "Checking the voice server…")
-    if not _voice_up():
+    ok, verr = _ensure_voice(_p)
+    if not ok:
         return {"ok": False, "voice_down": True, "hint": _VOICE_LAUNCHER,
-                "error": f"Chatterbox voice server is down — start it with `{_VOICE_LAUNCHER}`"}
+                "error": f"Chatterbox voice server could not be started: {verr}"}
 
     # 3) Script — video-script skill. run_structured_skill routes to the attended
     #    handoff automatically when THELIVU_ATTENDED=1 (the ./attend process), or to

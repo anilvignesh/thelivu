@@ -985,8 +985,9 @@ with t_carousels:
                         st.warning(f"⏳ The reel script needs Claude and the quota breaker is "
                                    f"open: {mres['blocked']}{_t}. (Switch to nvidia mode to skip this.)")
                     elif mres.get("voice_down"):
-                        st.warning(f"🔇 Your voice server is down. Start it on the laptop with "
-                                   f"`{mres.get('hint')}`, then try again.")
+                        st.warning(f"🔇 The voice server couldn't start: {mres.get('error')}. "
+                                   f"Try `{mres.get('hint')}` on the laptop and check "
+                                   f"~/.jarvis/chatterbox_server.log.")
                     else:
                         st.error(f"Couldn't build the reel: {mres.get('error')}")
 

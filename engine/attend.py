@@ -205,7 +205,8 @@ def cmd_reel(args):
         print(f"    then approve + post it from the dashboard (Carousels tab) — "
               f"posting is still yours alone.")
     elif res.get("voice_down"):
-        print(f"\n  ✗ voice server is down. Start it with `{res.get('hint')}` and re-run.")
+        print(f"\n  ✗ {res.get('error')}")
+        print(f"    Try `{res.get('hint')}` by hand and check ~/.jarvis/chatterbox_server.log.")
     else:
         print(f"\n  ✗ could not build the reel: {res.get('error')}")
     _postamble()
