@@ -23,6 +23,32 @@ chat. To bootstrap it:
 
 ---
 
+## Command Center v2 (added 2026-07-26 — the operations base)
+
+**The Streamlit dashboard has a successor: `command_center/`** — a proper web app
+(Starlette + uvicorn, hand-rolled SPA, zero new deps) that is now the intended main
+operations surface. Spec: `docs/command-center-v2.md` (read it before extending).
+
+- **Run:** `command_center/run.sh` (autostarts via
+  `~/.config/autostart/thelivu-command-center.desktop`) → **http://localhost:8600**,
+  phone via Tailscale `100.70.158.55:8600`. Password gate (`DASHBOARD_PASSWORD`).
+- **11 views:** Overview · Gate · Stories · Carousels · Reels · Digs · Chief of
+  staff · Sources · Ingest · System · Costs. Everything the Streamlit app did,
+  plus: inline draft editing (human edit), AI suggestions (quota-aware,
+  editorial-reviewer, pre-approval only), slide-headline editing (re-renders the
+  hosted image via the fileserver's new `?fresh=1`), reel previews streamed
+  locally, make/post reels and carousels as background jobs with live progress,
+  voice-server start/stop, breaker status + clear, bio-links manager, signal
+  triggers for every scheduled job.
+- **Gate unchanged:** approve/post go through the ONE shared
+  `publishing.publish` paths behind explicit confirm modals. No bypass.
+- **Perf discipline (hard-won, same day):** round trips to Railway dominate —
+  the CC pools connections (autocommit, dials outside the lock — see
+  `command_center/db.py` docstring), batches kv reads, and fans out independent
+  queries with `db.parallel`. Endpoints run 0.2–0.7s warm; a naive port ran 40s.
+- The Streamlit `dashboard.py` still autostarts on :8501 — retire it once the CC
+  has proven itself for a few days.
+
 ## Where things stand (updated 2026-07-20 — the "command center" era)
 
 **Live and running in production.** Deployed on Railway, publishing daily, with a

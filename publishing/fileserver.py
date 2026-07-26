@@ -98,7 +98,12 @@ def _make_handler(slides_dir):
                 self.end_headers()
                 return
             path = slides_dir / name
-            if not path.is_file():
+            # ?fresh=1 forces a re-render even when a cached file exists — the
+            # command center uses it after an owner edits a slide headline, so
+            # the file Meta fetches at post time matches the DB, not a stale
+            # pre-edit render. Idempotent (renders only what's in the DB).
+            force_fresh = "fresh=1" in (self.path.split("?", 1)[1] if "?" in self.path else "")
+            if force_fresh or not path.is_file():
                 # On-demand render: regenerate the slide from the DB so rendered
                 # PNGs never have to survive a redeploy or the cleanup sweep — same
                 # self-hosting philosophy as the /a/<slug> article pages. Rendered

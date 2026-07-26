@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Thelivu — Command Center</title>
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='18' fill='%2317140D'/><text x='50' y='68' font-size='52' text-anchor='middle' fill='%23D2AA6D' font-family='monospace' font-weight='bold'>ത</text></svg>">
+</head>
+<body>
+
+<div id="login" class="login hidden">
+  <div class="login-card">
+    <div class="login-mark">THELIVU <span class="mal">തെളിവ്</span></div>
+    <div class="login-sub">COMMAND CENTER</div>
+    <input id="login-pw" type="password" placeholder="Password" autocomplete="current-password">
+    <button id="login-btn" class="btn primary">Enter</button>
+    <div id="login-err" class="login-err"></div>
+  </div>
+</div>
+
+<div id="shell" class="shell hidden">
+  <nav id="nav" class="nav">
+    <div class="nav-brand">
+      <span class="mark">THELIVU</span><span class="mal">തെളിവ്</span>
+      <div class="nav-sub">command center</div>
+    </div>
+    <div id="nav-items" class="nav-items"></div>
+    <div class="nav-foot">
+      <span id="nav-breaker" class="nav-dot" title="quota breaker"></span>
+      <span id="nav-voice" class="nav-dot" title="voice server"></span>
+      <button id="nav-refresh" class="btn ghost small" title="Refresh">↻</button>
+    </div>
+  </nav>
+  <main id="main" class="main"></main>
+</div>
+
+<div id="modal-root"></div>
+<div id="toasts" class="toasts"></div>
+
+<script src="/assets/app.js"></script>
+</body>
+</html>
