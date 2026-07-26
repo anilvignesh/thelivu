@@ -18,6 +18,7 @@ finished MP4 bytes are stored in the DB for the Railway fileserver to serve.
 """
 
 import logging
+import os
 import tempfile
 from pathlib import Path
 
@@ -36,6 +37,51 @@ def _voice_up():
         return requests.get(CHATTERBOX_HEALTH, timeout=3).status_code == 200
     except Exception:
         return False
+
+
+_NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
+_NVIDIA_SCRIPT_MODEL = os.environ.get("NVIDIA_SCRIPT_MODEL", "google/gemma-4-31b-it")
+
+
+def _gen_script_nvidia(draft, run_id=None):
+    """Generate the video-script via NVIDIA-hosted Gemma 4 (free) instead of Claude.
+
+    Charter-safe because the script is a POST-GATE step — it transforms an already
+    verified + human-approved article, it does NOT touch the trust gate. So using a
+    cheaper/free model here is a deliberate engine choice, not the silent-fallback the
+    charter forbids. NVIDIA has its own key (NVIDIA_API_KEY), so this is independent of
+    the Anthropic/Gemini quota breaker — the whole point: reels without Claude credit.
+    Returns the raw script text (validated to contain a HOOK: line, one retry)."""
+    import requests
+    from shared.config import SKILLS_DIR
+    key = os.environ.get("NVIDIA_API_KEY", "")
+    if not key:
+        raise RuntimeError("NVIDIA_API_KEY not set — cannot use nvidia reel mode")
+    skill = (SKILLS_DIR / "video-script" / "SKILL.md").read_text(encoding="utf-8")
+    system = ("You are a pipeline function, not a chat assistant. Output ONLY the "
+              "structured script your instructions specify — no preamble, no commentary, "
+              "no markdown fences.\n\n" + skill)
+
+    def _call(extra=""):
+        r = requests.post(
+            _NVIDIA_URL,
+            headers={"Authorization": f"Bearer {key}"},
+            json={"model": _NVIDIA_SCRIPT_MODEL,
+                  "messages": [{"role": "system", "content": system},
+                               {"role": "user", "content": draft + extra}],
+                  "temperature": 0.5, "max_tokens": 1200},
+            timeout=300,
+        )
+        r.raise_for_status()
+        return r.json()["choices"][0]["message"]["content"].strip()
+
+    out = _call()
+    if "HOOK:" not in out.upper():
+        log.warning("nvidia video-script missing HOOK: — retrying once (run #%s)", run_id)
+        out = _call("\n\n---\nYour previous reply lacked the required HOOK: line. Output "
+                    "ONLY the structured script now, starting at TITLE:, no preamble.")
+    # strip stray code fences some models wrap around the block
+    return out.replace("```", "").strip()
 
 
 def _build_caption(fields, article_url):
@@ -90,6 +136,7 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None, mo
 
     mode = (mode or REEL_MODE or "attended").strip().lower()
     attended = mode == "attended"
+    nvidia = mode == "nvidia"
 
     run = get_run(run_id)
     if run is None:
@@ -98,14 +145,19 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None, mo
     if not draft:
         return {"ok": False, "error": f"run #{run_id} has no draft text to script from"}
 
-    # 1) Route the model step.
-    #  - api mode (INACTIVE by default): the script hits Claude, so the quota
-    #    breaker guards it — if it's open, don't hammer a dead API.
-    #  - attended mode (ACTIVE): no API at all; the script is a terminal handoff.
-    #    That handoff can only happen inside an attended process, where the blocking
-    #    wait is the compliance boundary. From the dashboard (non-attended) we must
-    #    NOT fall through to the API — return the command to run it in the terminal.
-    if not attended:
+    # 1) Route the model step (the video-script — a POST-GATE step; the article is
+    #    already verified + human-approved, so which model writes the script never
+    #    touches the trust gate).
+    #  - nvidia mode: free hosted Gemma 4. Own key, no Anthropic/Gemini credit → the
+    #    quota breaker doesn't apply; runs anywhere (dashboard included). No gate.
+    #  - api mode (inactive by default): the script hits Claude → the quota breaker
+    #    guards it; if open, don't hammer a dead API.
+    #  - attended mode: no API at all; the script is a terminal handoff, which can
+    #    only happen inside an attended process (the blocking wait is the compliance
+    #    boundary). From the dashboard (non-attended) return the command, never the API.
+    if nvidia:
+        pass  # free engine, own key — no breaker, no attended requirement
+    elif not attended:
         blocked = quota.is_blocked()
         if blocked:
             return {"ok": False, "blocked": blocked, "until": quota.blocked_until()}
@@ -124,13 +176,17 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None, mo
     # 3) Script — video-script skill. run_structured_skill routes to the attended
     #    handoff automatically when THELIVU_ATTENDED=1 (the ./attend process), or to
     #    Claude in api mode. Either way the parsing/marker check is identical.
-    _p(0.10, "Writing the reel script…" if not attended
+    _p(0.10, "Writing the reel script (free Gemma 4)…" if nvidia
+             else "Writing the reel script…" if not attended
              else "Waiting for the script (attended handoff)…")
-    from engine.agents.skill_runner import run_structured_skill
     from publishing.reel import parse_script, build_reel
     _M_SCRIPT = r"^HOOK:"  # the one line every valid video-script output must have
     try:
-        script = run_structured_skill("video-script", draft, marker=_M_SCRIPT, run_id=run_id)
+        if nvidia:
+            script = _gen_script_nvidia(draft, run_id=run_id)
+        else:
+            from engine.agents.skill_runner import run_structured_skill
+            script = run_structured_skill("video-script", draft, marker=_M_SCRIPT, run_id=run_id)
     except Exception as e:
         log.error("video-script failed for run #%s: %s", run_id, e)
         return {"ok": False, "error": f"script generation failed: {e}"}

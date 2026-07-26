@@ -24,14 +24,17 @@ SLIDE_SERVER_BASE_URL = os.environ.get("SLIDE_SERVER_BASE_URL", "")
 SLIDE_SERVER_PORT = int(os.environ.get("PORT", "8080"))
 
 # --- Reels ---
-# How the reel's video-script (a model step) is produced:
+# How the reel's video-script (a POST-GATE model step — the article is already
+# verified + human-approved, so this never touches the trust gate) is produced:
+#   "nvidia"   — free hosted Gemma 4 via NVIDIA (NVIDIA_API_KEY). No Anthropic/Gemini
+#                credit, independent of the quota breaker, runs anywhere incl. the
+#                dashboard. ACTIVE default (2026-07-26): reels without Claude credit.
 #   "attended" — hand it to the human-driven terminal session (./attend reel <id>);
-#                no API is used. This is the ACTIVE mode for the foreseeable future.
-#   "api"      — call the Claude API directly (run_structured_skill). KEPT but
-#                INACTIVE — flip REEL_MODE=api (or pass mode="api") to re-enable it.
-# The API route was deliberately not deleted, only switched off (owner's call,
-# 2026-07-25): reels stay attended-only until credit is a non-issue.
-REEL_MODE = os.environ.get("THELIVU_REEL_MODE", "attended").strip().lower()
+#                no API. Use when you want a human writing the script.
+#   "api"      — call the Claude API directly. KEPT but INACTIVE — flip to re-enable.
+# NVIDIA is a deliberate engine choice for a post-gate step, NOT the silent trust-gate
+# fallback the charter forbids. Model id overridable via NVIDIA_SCRIPT_MODEL.
+REEL_MODE = os.environ.get("THELIVU_REEL_MODE", "nvidia").strip().lower()
 
 # --- Telegram ---
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")

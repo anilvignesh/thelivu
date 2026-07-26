@@ -941,33 +941,37 @@ with t_carousels:
                     if rres.get("ok"):
                         st.balloons(); time.sleep(2.5); st.cache_data.clear(); st.rerun()
             else:
-                # Reels are ATTENDED-ONLY for now (config.REEL_MODE='attended'): the
-                # script step never touches the API. From the dashboard (a non-attended
-                # process) make_narrated_reel returns needs_terminal — so this button
-                # hands you the exact terminal command instead of ever calling Claude.
+                # Reel mode = config.REEL_MODE (default 'nvidia'): the video-script is
+                # written by free hosted Gemma 4 (post-gate step, no Claude credit), then
+                # voice + video render LOCALLY on this laptop — so the voice server must
+                # be up and it takes a few minutes. 'attended' mode instead returns
+                # needs_terminal (run ./attend reel <id>); 'api' would use Claude.
                 if st.button("🎬 Make reel (your voice)", key=f"rmake_{c['run_id']}",
                              use_container_width=True,
-                             help="Narrated <60s reel of this story — attended-only for now: "
-                                  "the script is done in your terminal (no API), the voice + "
-                                  "video render locally. You preview before it can post."):
+                             help="Narrated <60s reel of this story — free Gemma 4 writes the "
+                                  "script, your Chatterbox voice + video render locally (a few "
+                                  "minutes; voice server must be up). You preview before it posts."):
                     from publishing.make_reel import make_narrated_reel
-                    mres = make_narrated_reel(c["run_id"], dark=bool(c.get("dark")),
-                                              article_url=c.get("article_url"))
-                    if mres.get("needs_terminal"):
-                        st.info("🖥️ Reels are attended-only right now — no API is used. "
-                                "Run this in your laptop terminal, then hit refresh:")
-                        st.code(mres.get("hint"), language="bash")
-                        st.caption("Make sure your voice server is up first: "
-                                   "`~/.jarvis/reel-voice.sh start`")
-                    elif mres.get("ok"):  # api mode (only if REEL_MODE=api)
+                    with st.status(f"Building the reel for run #{c['run_id']}… (a few min)",
+                                   expanded=True) as ms:
+                        mbar = st.progress(0.0, text="Starting…")
+                        def _mprog(frac, msg, _b=mbar, _s=ms):
+                            _b.progress(frac, text=msg); _s.update(label=msg)
+                        mres = make_narrated_reel(c["run_id"], dark=bool(c.get("dark")),
+                                                  article_url=c.get("article_url"), progress=_mprog)
+                    if mres.get("ok"):
                         st.success(f"Reel #{mres['reel_id']} built ({mres['beats']} beats, "
                                    f"{mres['size_kb']} KB). Preview it below, then post.")
                         st.cache_data.clear(); time.sleep(1.0); st.rerun()
-                    elif mres.get("blocked"):
+                    elif mres.get("needs_terminal"):  # only if REEL_MODE=attended
+                        st.info("🖥️ Reels are set to attended mode — run this in your laptop "
+                                "terminal, then hit refresh:")
+                        st.code(mres.get("hint"), language="bash")
+                    elif mres.get("blocked"):  # only if REEL_MODE=api
                         _u = mres.get("until")
                         _t = f" — retries ~{_u.strftime('%H:%M UTC')}" if _u else ""
-                        st.warning(f"⏳ The reel script needs a model and the quota breaker is "
-                                   f"open: {mres['blocked']}{_t}.")
+                        st.warning(f"⏳ The reel script needs Claude and the quota breaker is "
+                                   f"open: {mres['blocked']}{_t}. (Switch to nvidia mode to skip this.)")
                     elif mres.get("voice_down"):
                         st.warning(f"🔇 Your voice server is down. Start it on the laptop with "
                                    f"`{mres.get('hint')}`, then try again.")

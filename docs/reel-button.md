@@ -13,25 +13,29 @@ it, `save_reel` had zero callers and every reel was a hand-built CLI one-off.
 
 Same shape as the carousel flow (compose → preview → post).
 
-## Attended-only for now (the model step never hits the API)
-`config.REEL_MODE` switches how the video-script (a model step) is produced:
+## How the script is produced — `config.REEL_MODE`
+The video-script is a **post-gate** model step (it transforms an already verified +
+human-approved article, so it never touches the trust gate — which is why a cheap/free
+model here is a deliberate engine choice, not the silent fallback the charter forbids).
+Three modes:
 
-- **`attended`** (default, ACTIVE) — the script is handed to the human-driven terminal
-  session; **no API is used.** Because that handoff can only happen inside an attended
-  process (where the blocking wait is the compliance boundary — see
-  `docs/attended-mode.md`), the dashboard button (a *non-attended* process) does **not**
-  run the model step. It returns the exact terminal command instead:
+- **`nvidia`** (default, ACTIVE since 2026-07-26) — free hosted **Gemma 4 31B** via
+  NVIDIA (`NVIDIA_API_KEY`; model overridable with `NVIDIA_SCRIPT_MODEL`). Own key, so
+  it's independent of the Anthropic/Gemini quota breaker and needs no attended process:
+  the **dashboard button just works** (script free, then voice + video render locally —
+  needs the voice server up, takes a few minutes). ~3-min cold-start on the free tier.
+  This is what took reels off "attended-only" — no Claude credit needed.
 
-      ./attend reel <run_id>
+- **`attended`** — the script is handed to the human-driven terminal session (`./attend
+  reel <run_id>`); **no API.** Use when you want a human writing the script. The
+  dashboard (non-attended) returns `needs_terminal` with that command instead of running
+  the model step. `./attend reel` reuses the carousel's dark/light mood.
 
-  That command renders the reel locally (voice + ffmpeg), stores it `ready`, and you
-  preview + post from the dashboard. `./attend reel` reuses the carousel's dark/light
-  mood so the reel matches its carousel.
+- **`api`** (KEPT but INACTIVE) — `mode="api"` calls Claude via `run_structured_skill`,
+  guarded by the quota breaker. Deliberately **not deleted**; flip back with
+  `THELIVU_REEL_MODE=api` when Claude credit is a non-issue.
 
-- **`api`** (KEPT but INACTIVE) — `make_narrated_reel(..., mode="api")` calls Claude
-  directly via `run_structured_skill`, guarded by the quota breaker. The route was
-  deliberately **not deleted**, only switched off (owner's call, 2026-07-25). Flip it
-  back with `THELIVU_REEL_MODE=api` or `mode="api"` when API credit is a non-issue.
+None of the three touches the trust gate or the human publish gate.
 
 ## Pieces
 - `publishing/make_reel.py` — `make_narrated_reel(run_id, *, dark, article_url,
