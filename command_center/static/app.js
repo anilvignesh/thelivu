@@ -874,6 +874,34 @@ async function vSystem(main) {
   });
   main.appendChild(bd);
 
+  // Tech steward — advisory only. Recommendations are shown with the exact
+  // command to apply; nothing here changes a model on its own.
+  const sw = d.steward || {};
+  const recs = sw.recs || [];
+  const st = el(`<div class="card">
+    <b>Tech steward:</b> ${recs.length} open recommendation${recs.length === 1 ? '' : 's'}
+    <span class="muted small">— last sweep ${ago(sw.last)}</span>
+    <div class="muted small">Watches model catalogues, pricing and routing. Advisory — it never switches a model or spends.</div>
+    <div class="actions" data-x="a"></div><div data-x="recs"></div></div>`);
+  addBtn(st.querySelector('[data-x=a]'), 'Run sweep now', 'small', async () => {
+    const r = await api('/system/signal', { method: 'POST', body: { key: 'force_tech_steward', value: '1' } });
+    toast(r.note, 'ok');
+  });
+  const rbox = st.querySelector('[data-x=recs]');
+  for (const r of recs) {
+    const saves = (r.saves_usd_mo === null || r.saves_usd_mo === undefined || r.saves_usd_mo === '')
+      ? '' : ` · ~$${Number(r.saves_usd_mo).toFixed(2)}/mo`;
+    rbox.appendChild(el(`<div class="item">
+      <div class="row between"><div><b>${esc(String(r.action || ''))}</b></div>
+        <div class="muted small">${esc(String(r.area || ''))} · ${esc(String(r.risk || ''))} risk${saves}</div></div>
+      <div class="muted small">${esc(String(r.why || ''))}</div>
+      ${r.from || r.to ? `<div class="muted small">${esc(String(r.from || '?'))} → ${esc(String(r.to || '?'))}</div>` : ''}
+    </div>`));
+  }
+  if (sw.brief)
+    rbox.appendChild(el(`<details><summary class="muted small">Full brief</summary><pre class="small" style="white-space:pre-wrap">${esc(sw.brief)}</pre></details>`));
+  main.appendChild(st);
+
   const vc = el(`<div class="card"><b>Voice server (:3901):</b> ${d.voice_up ? '<span style="color:var(--good)">up</span>' : '<span style="color:var(--brick)">down</span>'}
     <span class="muted small">— Chatterbox holds ~2 GB RAM; stop it when idle.</span>
     <div class="actions" data-x="a"></div></div>`);

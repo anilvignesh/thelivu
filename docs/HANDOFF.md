@@ -220,6 +220,17 @@ API** — stubs are the only retirement).
     (`feedparser.parse` returns entries) before trusting it. Johnny Harris's id was
     wrong; `@perfectunion` now resolves to a different channel (deactivated).
     Confirmed working: ColdFusion, Coffeezilla, FYI.
+20. **A stale `GEMINI_API_KEY` exported in Anil's shell shadows `.env`.**
+    `shared/config.py` reads the ambient environment and does NOT call
+    `load_dotenv` — locally, an exported key wins over the one in `.env`. There
+    is a second, newer Gemini key in the shell profile whose project cannot use
+    `gemini-2.5-flash` at all: calls fail **404 "no longer available to new
+    users"**, which reads like a model deprecation and is not one. The real key
+    (matching `.env` and the Railway variable) returns the honest **429
+    "prepayment credits are depleted"**. If a local `./attend` run 404s on a
+    research skill, check `echo $GEMINI_API_KEY` against `.env` before believing
+    a model was retired. Production is unaffected — Railway carries the good key.
+    Found 2026-07-26 while testing the tech steward.
 
 ## 6. Editorial invariants (do not drift)
 
@@ -253,6 +264,13 @@ grant) — everything else is autonomous.
   `shared/costs.py`, the ONLY cost table; `shared/budget.py` owns cap parsing so
   the UI and the engine can't disagree. Set it from the CC System view,
   `POST /api/system/budget`, or `/setbudget <usd>`.
+- **Tech steward (2026-07-26):** weekly advisory sweep — `run_tech_steward()` in
+  the orchestrator, skill `engine/skills/tech-steward/`, routed to Gemini +
+  Google Search (ops, not journalism). kv: `last_tech_steward_at` (stamped
+  BEFORE running), `latest_tech_brief`, `latest_tech_recs` (JSON array),
+  signal `force_tech_steward`. Surfaced in the CC System view with the exact
+  apply command per recommendation. **It never switches a model or spends** —
+  applying is Anil's one-variable change.
 - **Model routing knobs are env vars:** `THELIVU_CLAUDE_MODEL`,
   `THELIVU_HAIKU_MODEL`, `THELIVU_GEMINI_MODEL` (see `shared/config.py`) — apply
   a routing change with `railway variable set … --service thelivu-agent`, no

@@ -61,6 +61,25 @@ The engine now runs to a budget instead of running until the balance dies.
   Sonnet 5's intro pricing ($2/$10 to 2026-08-31) is offset by a tokenizer that
   uses ~30% more tokens, and it goes ~30% dearer after. Revisit 2026-09-01.
 
+## Tech steward (added 2026-07-26 — plan 05)
+
+The technical counterpart to the chief-of-staff: a **weekly advisory sweep** that
+keeps the model stack apt instead of letting it drift until something 404s or a
+price moves under us. `run_tech_steward()` builds a telemetry snapshot (30-day
+spend by skill × model, the full routing table, the rate table we assume, budget
+and breaker state), then searches the live Anthropic / Google / NVIDIA catalogues
+and emits a ranked `RECOMMENDATIONS` block — each with `from` → `to`, a risk
+rating and an estimated monthly saving.
+
+- **Advisory only.** It never switches a model, never spends. Applying is one
+  env var (`railway variable set THELIVU_CLAUDE_MODEL=… --service thelivu-agent`),
+  so reverting is too. Never recommends moving journalism off Claude/Gemini.
+- Routed to **Gemini + Google Search** — it's a search-heavy scan of pricing
+  pages, and it's ops, not journalism, so the charter has no stake in it.
+- Weekly in the tick (stamped before running, per the retry-storm rule) plus a
+  `force_tech_steward` signal; CC System view shows the last sweep, a Run-now
+  button, the recommendation cards and the full brief.
+
 ## Command Center v2 (added 2026-07-26 — the operations base)
 
 **The Streamlit dashboard has a successor: `command_center/`** — a proper web app

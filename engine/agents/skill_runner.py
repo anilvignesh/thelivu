@@ -207,6 +207,10 @@ _GEMINI_SKILLS = {
     "source-scout",
     "story-scout",
     "story-tracker",
+    # Ops, not journalism: a search-heavy scan of model catalogues and pricing
+    # pages. The cheap grounded searcher is the apt tool, and the charter has no
+    # stake in it — it never touches a story.
+    "tech-steward",
 }
 
 # Search-grounded skills that warrant the stronger (Pro) Gemini for sharper

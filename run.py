@@ -3,7 +3,7 @@ import os
 service = os.environ.get("RAILWAY_SERVICE_NAME", "thelivu")
 
 if service == "thelivu-agent":
-    from engine.agents.orchestrator import run_daily_cycle, process_recheck_requests, process_queued_carousels, cleanup_finished_carousels, send_cost_report, run_source_scout, run_story_scout, run_story_tracker, run_meta_synthesis, run_dig_advance, promote_dig, run_chief_of_staff, _cost_report_due
+    from engine.agents.orchestrator import run_daily_cycle, process_recheck_requests, process_queued_carousels, cleanup_finished_carousels, send_cost_report, run_source_scout, run_story_scout, run_story_tracker, run_meta_synthesis, run_dig_advance, promote_dig, run_chief_of_staff, run_tech_steward, _cost_report_due
     import time, logging, sys
     from datetime import datetime, timezone, timedelta
     from shared.config import ANTHROPIC_API_KEY, APPROVAL_MODE, TELEGRAM_BOT_TOKEN, TELEGRAM_DRAFT_CHAT_ID, CHECK_INTERVAL_HOURS, REPO_ROOT, SLIDE_SERVER_BASE_URL, SLIDE_SERVER_PORT
@@ -300,6 +300,27 @@ if service == "thelivu-agent":
                 run_chief_of_staff()
         except Exception as e:
             log.error("Chief-of-staff (daily) failed: %s", e)
+
+        # Tech steward — manual signal (command center "Run now").
+        try:
+            if kv_get("force_tech_steward"):
+                kv_set("force_tech_steward", "")
+                log.info("Tech-steward sweep signalled")
+                run_tech_steward()
+        except Exception as e:
+            log.error("Tech steward (manual) failed: %s", e)
+
+        # Tech steward — weekly technical sweep (model routing, prices, catalogues).
+        try:
+            last_steward = kv_get("last_tech_steward_at")
+            if not last_steward:
+                kv_set("last_tech_steward_at", now_utc.isoformat())
+            elif (now_utc - datetime.fromisoformat(last_steward)).days >= 7:
+                # Stamp BEFORE running — same retry-storm rule as the sweeps above.
+                kv_set("last_tech_steward_at", now_utc.isoformat())
+                run_tech_steward()
+        except Exception as e:
+            log.error("Tech steward (weekly) failed: %s", e)
 
         # Owner topics — check every 2 minutes, run immediately if queued
         try:

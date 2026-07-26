@@ -1,5 +1,6 @@
 """Overview, system status, schedules/signals, voice server, background jobs."""
 import datetime
+import json
 import os
 import subprocess
 
@@ -23,6 +24,7 @@ SCHEDULES = [
     ("Dig auto-advance",       "last_dig_sweep_at",    "~6h",        None, None),
     ("Auto-recheck (held)",    "last_auto_recheck_at", "~daily",     None, None),
     ("Meta-synthesis",         "last_meta_at",         "monthly",    "force_meta_run", "1"),
+    ("Tech steward",           "last_tech_steward_at", "weekly",     "force_tech_steward", "1"),
 ]
 
 # Only signals in this catalogue (or the per-item ones the routes build
@@ -116,6 +118,8 @@ def system_status(request, data):
                            "ORDER BY id"),
         breaker=breaker_state,
         budget=budget_state,
+        steward=lambda: db.kv_many(["latest_tech_brief", "latest_tech_recs",
+                                    "last_tech_steward_at"]),
     )
     scheds = []
     for label, key, cadence, sig, sigval in SCHEDULES:
@@ -130,9 +134,17 @@ def system_status(request, data):
         "NVIDIA_API_KEY": bool(os.environ.get("NVIDIA_API_KEY")),
         "DATABASE_URL": bool(os.environ.get("DATABASE_URL")),
     }
+    sw = r["steward"]
+    try:
+        steward_recs = json.loads(sw.get("latest_tech_recs") or "[]")
+    except (ValueError, TypeError):
+        steward_recs = []
     return J({
         "breaker": r["breaker"],
         "budget": r["budget"],
+        "steward": {"last": sw.get("last_tech_steward_at"),
+                    "brief": sw.get("latest_tech_brief"),
+                    "recs": steward_recs},
         "voice_up": voice_status(),
         "schedules": scheds,
         "queue": r["queue"],

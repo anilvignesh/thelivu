@@ -1997,6 +1997,127 @@ def run_story_tracker():
 
 
 # ---------------------------------------------------------------------------
+# Tech steward (runs weekly — keeps the model stack apt and the burn sane)
+# ---------------------------------------------------------------------------
+
+def _build_steward_snapshot():
+    """Telemetry the steward reasons over: where the money went, what runs on
+    what, and the state of the two safety valves."""
+    from shared.costs import spend_by_skill_model, daily_spend_usd, RATES
+    from shared import budget, quota
+    from engine.agents.skill_runner import (
+        _HAIKU_SKILLS, _GEMINI_SKILLS, _GEMINI_PRO_SKILLS, _NVIDIA_SKILLS)
+    from shared.config import (CLAUDE_MODEL, HAIKU_MODEL, GEMINI_MODEL,
+                               GEMINI_PRO_MODEL, NVIDIA_MODEL, SKILLS_DIR)
+    from shared.db import get_pipeline_stats
+
+    rows = spend_by_skill_model(days=30)
+    total = sum(r["usd"] for r in rows)
+
+    lines = ["SPEND — last 30 days, by skill x model (priciest first):"]
+    for r in rows:
+        lines.append(f"  {r['skill']:<22} {r['model']:<26} "
+                     f"${r['usd']:>8.4f}  {r['calls']:>4} calls  "
+                     f"{r['in_tok']:>9,} in / {r['out_tok']:>8,} out")
+    lines.append(f"  {'TOTAL':<22} {'':<26} ${total:>8.4f} over 30 days "
+                 f"(~${total:.2f}/mo run-rate)")
+
+    try:
+        stats = get_pipeline_stats()
+        lines.append(f"\nPipeline: {stats['total']} runs all-time, "
+                     f"avg {stats['avg_tokens']:,} tokens/story. "
+                     f"By status: {stats['by_status']}")
+    except Exception as e:
+        lines.append(f"\nPipeline stats unavailable: {e}")
+
+    def _route(skill):
+        if skill in _NVIDIA_SKILLS:
+            return f"{NVIDIA_MODEL} (NVIDIA, free)"
+        if skill in _GEMINI_SKILLS:
+            return GEMINI_PRO_MODEL if skill in _GEMINI_PRO_SKILLS else GEMINI_MODEL
+        return HAIKU_MODEL if skill in _HAIKU_SKILLS else CLAUDE_MODEL
+
+    try:
+        skills = sorted(p.name for p in SKILLS_DIR.iterdir() if p.is_dir())
+    except Exception:
+        skills = sorted({r["skill"] for r in rows if r["skill"]})
+    lines.append("\nCURRENT ROUTING (skill -> model):")
+    for s in skills:
+        lines.append(f"  {s:<22} -> {_route(s)}")
+    lines.append(
+        "\nRouting knobs (env vars, changeable without a code push): "
+        "THELIVU_CLAUDE_MODEL, THELIVU_HAIKU_MODEL, THELIVU_GEMINI_MODEL, "
+        "GEMINI_PRO_MODEL, NVIDIA_MODEL.\n"
+        f"Skill sets: HAIKU={sorted(_HAIKU_SKILLS)} GEMINI={sorted(_GEMINI_SKILLS)} "
+        f"GEMINI_PRO={sorted(_GEMINI_PRO_SKILLS)} NVIDIA={sorted(_NVIDIA_SKILLS)}")
+
+    lines.append("\nRATES WE CURRENTLY ASSUME (USD per MTok, input/output) — "
+                 "verify these against today's published pricing and flag any that moved:")
+    for tier, (i, o) in RATES.items():
+        lines.append(f"  {tier:<14} ${i}/${o}")
+
+    try:
+        spent, cap, over = budget.status()
+        lines.append(f"\nBudget: cap {'disabled' if cap is None else f'${cap:.2f}/day'}, "
+                     f"${spent:.4f} spent today{' — CAP REACHED, model stages parked' if over else ''}.")
+    except Exception as e:
+        lines.append(f"\nBudget state unavailable: {e}")
+    try:
+        blocked = quota.is_blocked()
+        lines.append(f"Quota breaker: {'OPEN — ' + blocked if blocked else 'closed'}.")
+    except Exception:
+        pass
+    return "\n".join(lines)
+
+
+def run_tech_steward():
+    """Weekly technical sweep: is every stage on an apt model at today's prices,
+    and has anything we depend on changed? Advisory only — it recommends, the
+    owner applies. Nothing here switches a model or spends."""
+    log.info("Running tech-steward sweep...")
+    try:
+        snapshot = _build_steward_snapshot()
+    except Exception as e:
+        log.error("Tech steward snapshot failed: %s", e, exc_info=True)
+        return
+    try:
+        # Same generous budget as the chief-of-staff: the sweep reasons over the
+        # telemetry AND must close a complete block at the end.
+        output = run_skill("tech-steward", f"TECHNICAL SNAPSHOT:\n\n{snapshot}",
+                           topic="tech stack sweep", max_tokens=8192)
+    except Exception as e:
+        log.error("Tech steward skill failed: %s", e)
+        return
+
+    recs = _extract_block_array(output, "RECOMMENDATIONS")
+    kv_set("latest_tech_brief", output[:6000])
+    kv_set("latest_tech_recs", json.dumps(recs)[:6000])
+    kv_set("last_tech_steward_at", datetime.now(timezone.utc).isoformat())
+
+    if recs:
+        rank = {"high": 0, "medium": 1, "low": 2}
+        top = sorted(recs, key=lambda r: rank.get(str(r.get("risk", "")).lower(), 3))[:4]
+        rec_lines = "\n".join(
+            f"• [{_esc(str(r.get('area', '?')))}] {_esc(str(r.get('action', '')))[:160]}"
+            f" <i>({_esc(str(r.get('risk', '?')))} risk"
+            + (f", ~${float(r['saves_usd_mo']):.2f}/mo" if r.get("saves_usd_mo") not in (None, "") else "")
+            + ")</i>"
+            for r in top)
+        body = (f"<b>{len(recs)} recommendation(s)</b> — advisory, nothing applied.\n\n"
+                f"{rec_lines}\n\n"
+                f"Apply from the command center System view, or:\n"
+                f"<code>railway variable set THELIVU_CLAUDE_MODEL=... --service thelivu-agent</code>")
+    else:
+        body = ("No changes recommended — routing is apt and nothing moved in the "
+                "model catalogues or pricing this week.")
+
+    _notify_card("🛠️", f"Tech steward — {len(recs)} recommendation(s)",
+                 body=body, report_title="Tech steward — technical sweep",
+                 report_md=output)
+    log.info("Tech steward complete: %d recommendation(s).", len(recs))
+
+
+# ---------------------------------------------------------------------------
 # Meta-synthesizer (runs monthly — find patterns across all stories)
 # ---------------------------------------------------------------------------
 

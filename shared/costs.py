@@ -54,6 +54,33 @@ def cost_inr(model, in_tok, out_tok):
     return cost_usd(model, in_tok, out_tok) * USD_TO_INR
 
 
+def spend_by_skill_model(days=30):
+    """[{skill, model, in_tok, out_tok, calls, usd}] over the last N days,
+    priciest first. The tech steward's view of where the money actually goes."""
+    from shared.db import _conn, _is_postgres
+
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        if _is_postgres():
+            cur.execute(
+                "SELECT skill, model, SUM(input_tokens), SUM(output_tokens), COUNT(*) "
+                "FROM token_usage WHERE recorded_at >= NOW() - INTERVAL %s "
+                "GROUP BY skill, model", (f"{days} days",))
+        else:
+            cur.execute(
+                "SELECT skill, model, SUM(input_tokens), SUM(output_tokens), COUNT(*) "
+                "FROM token_usage WHERE recorded_at >= datetime('now', ?) "
+                "GROUP BY skill, model", (f"-{days} days",))
+        rows = [{"skill": r[0], "model": r[1], "in_tok": r[2] or 0,
+                 "out_tok": r[3] or 0, "calls": r[4],
+                 "usd": cost_usd(r[1], r[2], r[3])} for r in cur.fetchall()]
+        rows.sort(key=lambda r: r["usd"], reverse=True)
+        return rows
+    finally:
+        conn.close()
+
+
 def daily_spend_usd(day=None):
     """Total spend for a UTC day (default: today), summed from token_usage.
 
