@@ -6,6 +6,16 @@ zero-config, well-known tools we control:
   - YouTube (search, channel latest, transcript)  -> yt-dlp
   - Any web page, clean text                       -> Jina Reader (r.jina.ai, public)
   - RSS/Atom                                        -> feedparser
+  - X/Twitter timelines, READ-ONLY                 -> Nitter RSS (no account, no cookies)
+
+WHY NITTER AND NOT A SCRAPER (2026-07-28): we missed the Bareilly assault story —
+a saffron activist filmed slapping two students on their way to the CJP protest —
+because it broke on X and we had no way to read X. The considered alternative
+(agent-reach) installs ~9 unpinned upstream tools and stores authenticated X
+cookies on the same box as the Instagram publishing token and prod Postgres URL.
+Nitter needs no account, no cookies and no install: it is a public RSS bridge, so
+it fits the existing rss path and adds zero supply-chain surface. Public instances
+come and go, hence the fallback list.
 
 CHARTER DISCIPLINE (do not bypass): social is a LEAD surface. A credible, identified
 fact-checker/journalist (see engine/sources.yaml social candidates) can SURFACE a lead
@@ -115,9 +125,17 @@ def web_read(url):
 
 
 def rss_latest(feed_url, n=10):
-    """Latest items from an RSS/Atom feed. Returns [{title, link, published, summary}]."""
+    """Latest items from an RSS/Atom feed. Returns [{title, link, published, summary}].
+
+    Raises on a feed that parsed to nothing. A silently-empty feed is how a sweep
+    concludes "quiet day" when the truth is "broken input" — that happened on
+    2026-07-28 with thenewsminute.com/feed, which serves a single item.
+    """
     import feedparser
     d = feedparser.parse(feed_url)
+    if not d.entries:
+        why = getattr(d, "bozo_exception", None) or f"status={getattr(d, 'status', '?')}"
+        raise ValueError(f"feed returned no entries: {feed_url} ({why})")
     out = []
     for e in d.entries[:n]:
         out.append({
@@ -129,6 +147,86 @@ def rss_latest(feed_url, n=10):
     return out
 
 
+# Some bridges answer 200 with their error text wrapped as a feed ENTRY (xcancel
+# returns "RSS reader not yet whitelisted!"). That parses as a perfectly valid
+# item and would enter a sweep as if it were a post, so match and reject it.
+_BRIDGE_ERROR = re.compile(
+    r"not yet whitelist|rate limit|instance has been blocked|error|captcha|"
+    r"please send an email", re.I)
+
+
+def _looks_like_bridge_error(items):
+    if len(items) > 2:
+        return False
+    return any(_BRIDGE_ERROR.search(i.get("title", "")) for i in items)
+
+
+# Public Nitter bridges, tried in order. They rot — when they all fail, that is a
+# real finding (X went dark on us), not something to paper over.
+NITTER_INSTANCES = [
+    os.environ.get("NITTER_INSTANCE", "").rstrip("/") or None,
+    "https://nitter.net",
+    "https://xcancel.com",
+    "https://nitter.poast.org",
+]
+
+
+def x_timeline(handle, n=15):
+    """Recent public posts from an X account, read-only, via a Nitter RSS bridge.
+
+    `handle` may be '@scroll_in' or 'scroll_in'. Returns the rss_latest shape plus
+    'instance'. Tries each bridge until one yields entries; raises if all fail —
+    losing X visibility silently is exactly the failure this exists to prevent.
+    """
+    h = handle.lstrip("@").strip()
+    errors = []
+    for base in NITTER_INSTANCES:
+        if not base:
+            continue
+        feed = f"{base}/{h}/rss"
+        try:
+            items = rss_latest(feed, n)
+        except Exception as e:
+            errors.append(f"{base}: {str(e)[:90]}")
+            continue
+        if _looks_like_bridge_error(items):
+            errors.append(f"{base}: bridge error page ({items[0].get('title','')[:50]})")
+            continue
+        for it in items:
+            it["instance"] = base
+        return items
+    raise RuntimeError(f"no Nitter bridge served @{h} — tried: {'; '.join(errors)}")
+
+
+def x_search(query, n=15):
+    """Search public X posts via a Nitter bridge's search RSS.
+
+    ⚠️ As of 2026-07-28 NO public bridge serves search: nitter.net and poast
+    return empty, xcancel demands whitelisting. Kept because it costs nothing and
+    a self-hosted instance (NITTER_INSTANCE) does support it. **Monitor named
+    handles with x_timeline instead** — that works today. Raises rather than
+    returning [] so a caller can't read "no bridge" as "nothing was posted".
+    """
+    from urllib.parse import quote
+    errors = []
+    for base in NITTER_INSTANCES:
+        if not base:
+            continue
+        feed = f"{base}/search/rss?f=tweets&q={quote(query)}"
+        try:
+            items = rss_latest(feed, n)
+        except Exception as e:
+            errors.append(f"{base}: {str(e)[:90]}")
+            continue
+        if _looks_like_bridge_error(items):
+            errors.append(f"{base}: bridge error page ({items[0].get('title','')[:50]})")
+            continue
+        for it in items:
+            it["instance"] = base
+        return items
+    raise RuntimeError(f"no Nitter bridge served search {query!r} — tried: {'; '.join(errors)}")
+
+
 if __name__ == "__main__":
     import argparse, json
     ap = argparse.ArgumentParser(description="Thelivu social desk (safe: YouTube/web/RSS)")
@@ -136,8 +234,10 @@ if __name__ == "__main__":
     s = sub.add_parser("yt-search"); s.add_argument("query"); s.add_argument("-n", type=int, default=5)
     c = sub.add_parser("yt-channel"); c.add_argument("channel"); c.add_argument("-n", type=int, default=5)
     t = sub.add_parser("yt-transcript"); t.add_argument("video")
-    w = sub.add_parser("web"); w.add_argument("url")
+    w = sub.add_parser("web"); w.add_argument("url"); w.add_argument("-c", type=int, default=4000)
     r = sub.add_parser("rss"); r.add_argument("feed"); r.add_argument("-n", type=int, default=10)
+    x = sub.add_parser("x"); x.add_argument("handle"); x.add_argument("-n", type=int, default=15)
+    xs = sub.add_parser("x-search"); xs.add_argument("query"); xs.add_argument("-n", type=int, default=15)
     a = ap.parse_args()
     if a.cmd == "yt-search":
         print(json.dumps(youtube_search(a.query, a.n), indent=2))
@@ -146,6 +246,13 @@ if __name__ == "__main__":
     elif a.cmd == "yt-transcript":
         print(youtube_transcript(a.video)[:4000])
     elif a.cmd == "web":
-        print(web_read(a.url)[:4000])
+        # -c 0 for the whole page; the old hard 4000-char cut silently truncated
+        # article bodies mid-sentence.
+        text = web_read(a.url)
+        print(text if a.c <= 0 else text[:a.c])
     elif a.cmd == "rss":
         print(json.dumps(rss_latest(a.feed, a.n), indent=2))
+    elif a.cmd == "x":
+        print(json.dumps(x_timeline(a.handle, a.n), indent=2))
+    elif a.cmd == "x-search":
+        print(json.dumps(x_search(a.query, a.n), indent=2))

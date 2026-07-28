@@ -23,6 +23,52 @@ defaults:
 
 sources:
 
+  # ── Added 2026-07-28 after the Bareilly miss ──────────────────────────────
+  # These three outlets carried the CJP-protest assault and force stories while
+  # our pool showed nothing. Deccan Herald and India Today block our plain
+  # fetcher — read them through the social desk's Jina reader (web_read), which
+  # exists precisely for that. See docs/run-113-refresh-notes-2026-07-28.md.
+
+  - id: deccan-herald
+    name: Deccan Herald
+    platform: web
+    handle: "@DeccanHerald"
+    # Deccan Herald publishes NO working RSS (every documented path 404s/empties,
+    # checked 2026-07-28), so it is monitored through its X timeline via the
+    # Nitter bridge — which is an RSS feed, so the normal path handles it. If this
+    # instance rots, social_desk.x_timeline("@DeccanHerald") falls across the list.
+    feed: "https://nitter.net/DeccanHerald/rss"
+    role: verification
+    tier: 2
+    lean: "mainstream national daily, Bengaluru-based"
+    status: active
+    added: 2026-07-28
+    notes: "Broke the Bareilly assault (saffron activist Satyam Pandit) on 27 Jul 2026. 403s our plain fetcher — read articles with web_read."
+
+  - id: india-today
+    name: India Today
+    platform: web
+    handle: "@IndiaToday"
+    feed: "https://www.indiatoday.in/rss/1206578"
+    role: lead
+    tier: 3
+    lean: "mainstream TV/print; corroborate load-bearing claims elsewhere"
+    status: active
+    added: 2026-07-28
+    notes: "Corroborated the Bareilly assault. High volume, TV-desk framing — lead surface, not a trust anchor."
+
+  - id: hrw
+    name: Human Rights Watch
+    platform: web
+    handle: "@hrw"
+    feed: "https://www.hrw.org/rss/news"
+    role: verification
+    tier: 1
+    lean: "international rights NGO; advocacy framing, rigorous documentation"
+    status: active
+    added: 2026-07-28
+    notes: "Documented excessive force against the student protesters, 23 Jul 2026. Already cited in run 113."
+
   - id: coldfusion
     name: ColdFusion
     platform: youtube
