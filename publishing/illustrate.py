@@ -13,6 +13,7 @@ the same NVIDIA key as the Gemma script model.
 import base64
 import logging
 import os
+import re
 
 log = logging.getLogger("illustrate")
 
@@ -45,6 +46,43 @@ _SOFTEN = {
 }
 
 MIN_IMAGE_BYTES = 50_000  # a filtered/blank frame comes back tiny
+
+# Nouns that carry the news but reliably trip the filter. On a refusal we retry
+# once with the scene abstracted — the *concept* survives, the flagged object
+# doesn't. Journalism stories are full of these, so one filtered beat must not
+# cost the whole reel its look.
+_ABSTRACT = {
+    "police": "uniformed figures", "policeman": "a uniformed figure",
+    "officer": "a uniformed figure", "gun": "a device", "pellet": "small metal shot",
+    "rifle": "a long object", "weapon": "an implement", "AK-47": "a long object",
+    "firing": "discharge", "fired": "discharged", "shot": "struck",
+    "baton": "a rod", "lathi": "a rod", "riot": "crowd", "crackdown": "pressure",
+    "beaten": "pushed back", "injury": "harm", "injured": "harmed",
+    "wound": "mark", "protester": "person", "protesters": "people",
+    # Phrases first — longest-match wins, so these beat the single-word entries
+    # and avoid "student protesters" becoming "young person people".
+    "student protesters": "young people", "student protester": "a young person",
+    "pellet gun": "a device", "pellet guns": "devices",
+    "student": "young person", "students": "young people", "assault": "confrontation",
+    "slap": "raised hand", "slapping": "a raised hand", "arrest": "detention",
+}
+
+
+# ONE pass, longest match first — substituting term by term let replacements be
+# re-substituted ("pellet"->"small metal shot", then "shot"->"struck") and turned
+# prompts into nonsense like "small metal struck guns at young person people".
+_ABSTRACT_LC = {k.lower(): v for k, v in _ABSTRACT.items()}
+_ABSTRACT_RE = re.compile(
+    r"\b(" + "|".join(re.escape(k) for k in sorted(_ABSTRACT_LC, key=len, reverse=True)) + r")\b",
+    re.I)
+
+
+def _abstract(scene):
+    """Strip the newsworthy-but-flaggable nouns, keep the composition."""
+    out = _ABSTRACT_RE.sub(lambda m: _ABSTRACT_LC[m.group(0).lower()], scene)
+    return ("A purely symbolic, abstract editorial composition — objects and "
+            "silhouettes only, no identifiable people, no violence depicted. "
+            + out)
 
 
 def _soften(text):
@@ -85,6 +123,24 @@ def generate_beat_images(scenes, out_dir, *, seed=7, progress=None):
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    def _try(prompt):
+        """One generation attempt. Returns bytes, or None if refused/blank."""
+        r = requests.post(
+            FLUX_URL,
+            headers={"Authorization": f"Bearer {key}", "Accept": "application/json"},
+            json={"prompt": f"{prompt} {STYLE}", "width": GEN_W, "height": GEN_H,
+                  "steps": 35, "cfg_scale": 3.5, "seed": seed},
+            timeout=180,
+        )
+        r.raise_for_status()
+        art = r.json()["artifacts"][0]
+        # The filter does not error — it returns a black frame with a reason.
+        if "FILTER" in str(art.get("finishReason") or "").upper():
+            return None
+        data = base64.b64decode(art["base64"])
+        return data if len(data) >= MIN_IMAGE_BYTES else None
+
     paths = []
     for i, scene in enumerate(scenes):
         if progress:
@@ -92,32 +148,23 @@ def generate_beat_images(scenes, out_dir, *, seed=7, progress=None):
                 progress(i, len(scenes))
             except Exception:
                 pass
+        data = None
         try:
-            r = requests.post(
-                FLUX_URL,
-                headers={"Authorization": f"Bearer {key}", "Accept": "application/json"},
-                json={"prompt": f"{_soften(scene)} {STYLE}",
-                      "width": GEN_W, "height": GEN_H,
-                      "steps": 35, "cfg_scale": 3.5, "seed": seed},
-                timeout=180,
-            )
-            r.raise_for_status()
-            art = r.json()["artifacts"][0]
-            # The filter does not error — it returns a black frame with a reason.
-            reason = str(art.get("finishReason") or "")
-            if "FILTER" in reason.upper():
-                log.warning("beat %d: content-filtered (%s) — no image", i, reason)
-                paths.append(None)
-                continue
-            data = base64.b64decode(art["base64"])
-            if len(data) < MIN_IMAGE_BYTES:
-                log.warning("beat %d: %d-byte image, treating as blank", i, len(data))
-                paths.append(None)
-                continue
-            p = out_dir / f"beat_{i}.png"
-            p.write_bytes(data)
-            paths.append(p)
+            data = _try(_soften(scene))
+            if data is None:
+                # Refused. The subject is the news, so retry with the scene
+                # abstracted rather than losing the beat — one filtered beat
+                # would otherwise drop the whole reel to text slides.
+                log.warning("beat %d: content-filtered — retrying abstracted", i)
+                data = _try(_abstract(_soften(scene)))
+                if data is None:
+                    log.warning("beat %d: still filtered after abstraction", i)
         except Exception as e:
             log.warning("beat %d illustration failed: %s", i, e)
+        if data is None:
             paths.append(None)
+            continue
+        p = out_dir / f"beat_{i}.png"
+        p.write_bytes(data)
+        paths.append(p)
     return paths
