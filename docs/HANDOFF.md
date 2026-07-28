@@ -232,6 +232,18 @@ API** — stubs are the only retirement).
     a model was retired. Production is unaffected — Railway carries the good key.
     Found 2026-07-26 while testing the tech steward.
 
+21. **The local `.env` keys drift from Railway's — check the KEY before believing
+    the ERROR.** Second instance in two days. On 2026-07-28 `.env`'s
+    `ANTHROPIC_API_KEY` returned **401 authentication_error** while the key on
+    both Railway services worked fine; the same day a stale `GEMINI_API_KEY`
+    exported in the shell 404'd on a live model (#20). Neither error says
+    "your key is stale" — one reads as a revoked account, the other as a
+    deprecated model. **Before diagnosing an outage, compare the key you are
+    using against `railway variables --service thelivu-agent --json`.**
+    Production was healthy through both. `command_center/run.sh` already pulls
+    env from Railway at boot, which is why the CC kept working while the CLI did
+    not — copy that pattern for any local attended run.
+
 ## 6. Editorial invariants (do not drift)
 
 The spine: **a verification engine with a human gate** — compelling-but-false
