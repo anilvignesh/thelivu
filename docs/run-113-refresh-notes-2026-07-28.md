@@ -11,6 +11,76 @@ Jina web reads, RSS) against the DB-approved source pool. Tier and status are
 marked per item — **do not flatten these into "right-wing groups attacked
 students."** That is not what the record shows.
 
+## 0. SECOND SWEEP (X via Nitter, 2026-07-28) — the piece needs a rewrite, not a patch
+
+Once X reading worked, nine source timelines returned in one pass what days of
+web search had not. The published piece's thesis — *minister gone, FIRs live* —
+is now substantially overtaken. Treat everything below §1 as the first, thinner
+pass.
+
+**The FIR thread has largely broken the students' way.**
+- **Bihar government to withdraw cases against protesters and release those
+  jailed** — The Hindu + Deccan Herald, 27 Jul. Assam likewise (Scroll, 28 Jul).
+- **Government–CJP truce** after a Delhi meeting on FIRs and detentions; CJP says
+  it received assurances — India Today, 28 Jul.
+- CJP still warns it may restart protests if BJP states renege — Scroll, 28 Jul.
+- **Kapil Sibal contributed ₹1 crore** to CJP's legal-aid fund for students
+  facing FIRs — LiveLaw, 27 Jul.
+- Bihar Police: **694 detained** during Saturday's protests — Scroll, 28 Jul.
+
+**The pellet-gun question moved from contested to documented — this is the
+biggest change.** The piece said "which force, if any, fired them is not
+established." That is no longer the state of the record:
+- **A general diary entry at Parliament Street police station shows the RAF fired
+  two rounds from an anti-riot weapon** — The Hindu, 28 Jul. A contemporaneous
+  police record, not a claim.
+- The Hindu, 28 Jul: "Days after Delhi Police denied the usage of pellet guns
+  during the July 20 march to Parliament, in which at least four…"
+- **Former IPS officer Yashovardhan Azad and two alleged pellet victims have moved
+  the Supreme Court** seeking a ban/decommissioning of pellet guns in civilian
+  protests — LiveLaw + Deccan Herald, 27 Jul.
+- Rahul Gandhi to Amit Shah: "Did you authorise the use of lethal weapons against
+  students?" — Scroll, 27 Jul.
+→ Still not a finding of fact against a named officer. But "unestablished" is now
+wrong, and the correction runs in our favour: we hedged, and the hedge resolved.
+
+**The Supreme Court has spoken on the principle.**
+- **"Peaceful protests constitutionally protected, mere agitation can't justify
+  lathi-charge"** — LiveLaw/Scroll, 27 Jul. TNM notes the governing precedent
+  traces to Ramdev's 2011 protest case.
+- SC to hear petitions on the July 20 police excesses; **Rajya Sabha MP Manoj Jha
+  moved the SC over Bihar police firing** on NEET protesters — LiveLaw.
+- An advocate has moved the SC **alleging assault by Delhi police** during a
+  station visit to meet detained protesters — LiveLaw, 28 Jul.
+
+**The state's counter-narrative — carry it, and attribute it.** Leaving this out
+would be the mirror of the error we criticise:
+- Delhi Police: **2,873 people "with criminal backgrounds" infiltrated** the
+  protests — India Today, 28 Jul.
+- Police say they have **identified 980+ people accused of murder, rape and
+  dacoity** at and around the protest site — Deccan Herald, 27 Jul.
+- Claims of Khalistan involvement and external funding are circulating — TNM is
+  interrogating them, 27 Jul. **Unverified; do not repeat as fact.**
+- BJP held **Tiranga Yatras in West Bengal** against the protest violence — The
+  Hindu, 27 Jul.
+- A forensic probe reports a **cross-border disinformation network** around the
+  protests — India Today, 28 Jul.
+- **AFP Fact Check: the viral "Time magazine cover" featuring Sonam Wangchuk is
+  fabricated** (22 Jul). Directly usable — it is the movement's own side being
+  fact-checked, which is exactly the even-handedness the charter demands.
+
+**Legislative:** the government tabled the **Public Examinations Amendment Bill**
+in the Lok Sabha, 27 Jul — the substantive demand, now moving. First hearing in
+the NEET paper-leak fast-track court was **deferred when CBI counsel failed to
+appear** (The Hindu, 27 Jul).
+
+→ **Editorial consequence:** the honest 28 Jul piece is no longer "the win was
+hollow." It is closer to *the students won more than a scalp — cases withdrawn in
+two states, a Supreme Court line on the right to protest, a Bill tabled — while
+the force question moved from denial into court, and the state built a
+criminality counter-narrative around it.* That is a different piece, and the
+published one needs a correction note, not a silent edit.
+
 ## 1. Development that overtakes the current piece
 
 **Assam and Bihar say they will release detained protesters and withdraw FIRs.**
