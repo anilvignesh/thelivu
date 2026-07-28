@@ -75,8 +75,10 @@ def draw_illustrated_frame(image_path, caption, idx, n_illustrated, out_png):
            font=_font(MONO, 32), fill=(238, 232, 222))
 
     f = _font(SERIF_BOLD, 92)
-    _draw_emph_block(d, reel._font_safe(caption), f, int(92 * 1.14),
-                     W - 2 * pad_x, int(H * 0.63), (245, 240, 230), ACCENT)
+    # No _font_safe here — _draw_emph_block renders the serif's missing math
+    # operators from the mono face instead of degrading them to ASCII.
+    _draw_emph_block(d, caption, f, int(92 * 1.14),
+                     W - 2 * pad_x, int(H * 0.63), (245, 240, 230), ACCENT, size=92)
 
     bar_y = H - 300
     bar_w = W - 2 * pad_x

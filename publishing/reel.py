@@ -106,14 +106,27 @@ def _is_highlight_token(tok):
     return len(letters) >= 2 and all(c.isupper() for c in letters)
 
 
-def _draw_emph_block(d, caption, font, line_h, max_w, top_y, fg, accent):
+def _draw_emph_block(d, caption, font, line_h, max_w, top_y, fg, accent, size=None):
     """Word-wrap `caption` to max_w and draw it centred from top_y, colouring
-    highlight tokens (numbers/₹/acronyms) in `accent`. Returns block height."""
+    highlight tokens (numbers/₹/acronyms) in `accent`. Returns block height.
+
+    Tokens carrying a glyph the serif lacks (the math operators) are drawn from
+    the mono face so the symbol survives — measurement and drawing must use the
+    SAME font per token or the centring drifts.
+    """
+    fb = None
+    if size and any(_needs_fallback(w) for w in caption.split()):
+        # Mono runs visually larger than the serif at the same nominal size.
+        fb = _font(MONO_BOLD, int(size * 0.88))
+
+    def tf(token):
+        return fb if (fb and _needs_fallback(token)) else font
+
     space = d.textlength(" ", font=font)
     words = caption.split()
     lines, cur, cur_w = [], [], 0.0
     for wtok in words:
-        wtw = d.textlength(wtok, font=font)
+        wtw = d.textlength(wtok, font=tf(wtok))
         add = wtw + (space if cur else 0)
         if cur and cur_w + add > max_w:
             lines.append(cur); cur, cur_w = [wtok], wtw
@@ -123,20 +136,32 @@ def _draw_emph_block(d, caption, font, line_h, max_w, top_y, fg, accent):
         lines.append(cur)
     y = top_y
     for ln in lines:
-        line_w = sum(d.textlength(w, font=font) for w in ln) + space * (len(ln) - 1)
+        line_w = sum(d.textlength(w, font=tf(w)) for w in ln) + space * (len(ln) - 1)
         x = (W - line_w) / 2
         for w in ln:
-            d.text((x, y), w, font=font, fill=accent if _is_highlight_token(w) else fg)
-            x += d.textlength(w, font=font) + space
+            f_tok = tf(w)
+            # Nudge the mono glyph down so it sits on the serif baseline.
+            dy = int(line_h * 0.06) if f_tok is fb else 0
+            d.text((x, y + dy), w, font=f_tok,
+                   fill=accent if _is_highlight_token(w) else fg)
+            x += d.textlength(w, font=f_tok) + space
         y += line_h
     return line_h * len(lines)
 
 
-# Symbols the Noto Serif / DejaVu Mono bundle can't render (they'd show as an
-# empty "tofu" box) mapped to safe equivalents. ₹, ×, — and · ARE in the fonts.
+# The caption face (NotoSerif-Bold) has no math operators — they would draw as
+# an empty "tofu" box. Verified against the bundled font's cmap 2026-07-28: it
+# DOES have … ’ ‘ “ ” – — × ₹, which an earlier version was substituting away
+# for no reason (curly quotes became straight, en-dashes became hyphens).
+# DejaVuSansMono has all six operators, so captions render them from the mono
+# face instead of degrading "promised ≠ withdrawn" into "promised != withdrawn"
+# — which reads as code on an editorial slide.
+_SERIF_MISSING = set("≠≈→←≤≥")
+
+# Last-resort ASCII, only for single-font contexts that can't fall back per
+# token (the kicker). Captions go through _draw_emph_block and keep the symbol.
 _GLYPH_SUB = {
     "≈": "~", "≤": "<=", "≥": ">=", "≠": "!=", "→": "->", "←": "<-",
-    "…": "...", "’": "'", "‘": "'", "“": '"', "”": '"', "–": "-",
 }
 
 
@@ -146,8 +171,14 @@ def _font_safe(text):
     return text
 
 
+def _needs_fallback(token):
+    return any(c in _SERIF_MISSING for c in token)
+
+
 def _render_frame(caption, dark, idx, total, kicker, out_png):
-    caption = _font_safe(caption)
+    # The caption keeps its symbols — _draw_emph_block falls back to the mono
+    # face per token. The kicker is drawn with a single font, so it takes the
+    # ASCII substitution.
     kicker = _font_safe(kicker or "")
     pal = PALETTE["dark" if dark else "light"]
     bg, fg, accent = pal["bg"], pal["fg"], pal["accent"]
@@ -206,7 +237,7 @@ def _render_frame(caption, dark, idx, total, kicker, out_png):
     if tmp_cur:
         nlines += 1
     top_y = (H - line_h * nlines) // 2 - 40
-    _draw_emph_block(d, caption, f, line_h, max_w, top_y, fg, accent)
+    _draw_emph_block(d, caption, f, line_h, max_w, top_y, fg, accent, size=size)
 
     # bottom: thin progress bar (cleaner than dots) + source line
     bar_y = H - 300
