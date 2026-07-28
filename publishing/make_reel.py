@@ -171,7 +171,7 @@ def _illustrate(fields, out_dir, _p):
 
 
 def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
-                       mode=None, illustrated=True):
+                       mode=None, illustrated=True, script=None):
     """Generate a narrated reel (Anil's cloned voice) for an approved run and store
     it. Returns a result dict — never raises for the expected failure modes so the
     dashboard can render a clean message:
@@ -255,20 +255,29 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
     # 3) Script — video-script skill. run_structured_skill routes to the attended
     #    handoff automatically when THELIVU_ATTENDED=1 (the ./attend process), or to
     #    Claude in api mode. Either way the parsing/marker check is identical.
-    _p(0.10, "Writing the reel script (free Gemma 4)…" if nvidia
-             else "Writing the reel script…" if not attended
-             else "Waiting for the script (attended handoff)…")
     from publishing.reel import parse_script, build_reel
     _M_SCRIPT = r"^HOOK:"  # the one line every valid video-script output must have
-    try:
-        if nvidia:
-            script = _gen_script_nvidia(draft, run_id=run_id)
-        else:
-            from engine.agents.skill_runner import run_structured_skill
-            script = run_structured_skill("video-script", draft, marker=_M_SCRIPT, run_id=run_id)
-    except Exception as e:
-        log.error("video-script failed for run #%s: %s", run_id, e)
-        return {"ok": False, "error": f"script generation failed: {e}"}
+    if script:
+        # A human-corrected script. The generator compresses, and compression is
+        # where it overstates — reel #12 said the students "won a bill" that had
+        # only been tabled. When a line has been fixed by hand, do not regenerate
+        # it and hope; build exactly what was approved.
+        _p(0.10, "Using the supplied script…")
+        if "HOOK:" not in script.upper():
+            return {"ok": False, "error": "supplied script has no HOOK: line"}
+    else:
+        _p(0.10, "Writing the reel script (free Gemma 4)…" if nvidia
+                 else "Writing the reel script…" if not attended
+                 else "Waiting for the script (attended handoff)…")
+        try:
+            if nvidia:
+                script = _gen_script_nvidia(draft, run_id=run_id)
+            else:
+                from engine.agents.skill_runner import run_structured_skill
+                script = run_structured_skill("video-script", draft, marker=_M_SCRIPT, run_id=run_id)
+        except Exception as e:
+            log.error("video-script failed for run #%s: %s", run_id, e)
+            return {"ok": False, "error": f"script generation failed: {e}"}
 
     fields = parse_script(script)
     if not fields.get("beats"):

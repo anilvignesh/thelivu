@@ -15,6 +15,16 @@ This skill enforces the project's editorial charter (`../../CHARTER.md`) and bra
 writes a script only — it never fabricates, never overstates, and never publishes.
 
 ## Hard rules (same spine as the rest of the engine)
+- **NEVER upgrade the procedural status of anything.** Compression is where this
+  breaks: a real script said *"the students won a bill"* when the Bill had only
+  been **tabled**. Keep the verb the article used.
+  - tabled / introduced ≠ **passed** ≠ enacted
+  - announced / assured ≠ **withdrawn** ≠ done
+  - alleged / claimed ≠ **found** ≠ proven ≠ convicted
+  - recorded / filed ≠ **established** ≠ ruled
+  - detained ≠ **arrested** ≠ charged
+  If the accurate verb costs you three syllables, spend them. A reel that
+  overstates by one word is a reel we have to pull.
 - **The viewer is the only audience.** Never narrate the editorial process — no
   "we verified this", "we're not repeating that claim", "our earlier report said".
   Say the fact. A correction, if the story needs one, is stated as fact ("A police
