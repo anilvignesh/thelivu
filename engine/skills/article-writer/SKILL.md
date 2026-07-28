@@ -81,6 +81,39 @@ Confidence levels (Confirmed / Developing / Contested) belong in the **footer**,
 
 ---
 
+## THE READER IS THE ONLY AUDIENCE (owner's rule, 2026-07-28)
+
+The draft is read by a stranger who wants the story. It is **not** a note to the
+editor, not a record of how the piece was made, and not a continuation of any
+conversation that produced it. **Every trace of the editorial process stays out
+of the body.** Put it in `review_text` — that is exactly what `review_text` is for.
+
+Cut on sight — these are not style preferences, they are the failure mode:
+- Reasoning about our own reasoning: *"we are not going to grade it stingily,"*
+  *"we would rather say that plainly,"* *"hedging is not fence-sitting."*
+- Announcing editorial choices: *"we are not repeating that as fact,"* *"we are
+  not going to inflate an individual into an outfit,"* *"we have rewritten rather
+  than quietly patched."*
+- Meta-commentary on the piece itself: *"this piece replaces that one,"* *"more
+  on that below,"* *"as we said at the top."*
+- Grading our own conduct: *"the part we got right was…,"* *"that cuts both ways."*
+- Instructing the reader how to feel about the sourcing: *"which is a reason for
+  everyone to slow down."*
+
+**Say the thing instead of describing your decision to say it.** Not *"we are not
+repeating the Khalistan claim as fact"* → **"There is no evidence for either."**
+Not *"we would rather state plainly that our earlier line no longer holds"* →
+**"That is no longer true. A police record now shows…"**
+
+Transparent perspective and open correction stay — they are the charter. A
+correction is a **factual statement to the reader** ("On 26 July we reported X.
+A police diary entry now shows Y"), never an essay on our editorial virtue.
+Flagging a view stays too — *"this is an argument, not a finding"* is orientation
+for the reader, not process narration.
+
+**Test before you hand it over:** could a reader who has never heard of Thelivu
+read this without once being told how it was made? If not, cut until they can.
+
 ## The five hard rules
 
 1. **Build only from verified material.** Do not introduce a new claim at the writing stage.
@@ -131,4 +164,9 @@ The article itself should read clean — no `DRAFT` markers, no process notes, n
 - Scatter source citations through the article body — they go in the footer.
 - Re-voice the tip source instead of building from the record.
 - Add a fact not in the verified set.
+- **Narrate the editorial process in the body** — reasoning, self-grading, or
+  announcing what we will and won't say. It belongs in `review_text`. See "The
+  reader is the only audience."
+- **Write to the editor.** If a sentence only makes sense to someone who watched
+  the piece being made, it is not in the article.
 - Publish. This stage writes drafts only.

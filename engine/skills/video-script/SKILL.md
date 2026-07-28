@@ -15,6 +15,11 @@ This skill enforces the project's editorial charter (`../../CHARTER.md`) and bra
 writes a script only — it never fabricates, never overstates, and never publishes.
 
 ## Hard rules (same spine as the rest of the engine)
+- **The viewer is the only audience.** Never narrate the editorial process — no
+  "we verified this", "we're not repeating that claim", "our earlier report said".
+  Say the fact. A correction, if the story needs one, is stated as fact ("A police
+  record now shows…"), never as commentary on our own work. Same rule as
+  article-writer; it applies to spoken lines, captions and IMAGE prompts alike.
 - **Only what the article established.** No new claims, no numbers not in the piece,
   no fabricated quotes. If the article hedged, the script hedges (say "alleged,"
   "reportedly," "the records suggest").

@@ -56,6 +56,24 @@ Run the draft against these checks. For each, return PASS or the specific fix ne
    - The deeper test: could a regular reader guess this piece's verdict from its topic alone? If the outlet keeps reaching the same political conclusion, that is a house line asserting itself, not the evidence speaking — and a predictable outlet is a discounted one.
    - The fix is never to bend the facts. It is to find the angle THIS story has that the last one didn't — a different structure, a different stake, or the honest admission that the obvious frame doesn't fit here. Sometimes the public-interest story is praise; sometimes it holds the CURRENT government to account; sometimes there is no villain at all. Vary deliberately.
 
+7. **Reader-facing: no process narration.** (Owner's rule, 2026-07-28 — a draft
+   reached the gate reading like a note to the editor.)
+   - The body is for a stranger who wants the story. Anything about *how the piece
+     was made* belongs in the review note, not the article.
+   - **Quote and cut** every line that reasons about our own reasoning (*"we would
+     rather say that plainly"*), announces an editorial choice (*"we are not
+     repeating that as fact"*, *"we have rewritten rather than quietly patched"*),
+     grades our own conduct (*"the part we got right was…"*, *"that cuts both
+     ways"*), or comments on the piece itself (*"this piece replaces that one"*).
+   - The fix is almost always to **state the thing instead of the decision**:
+     *"we are not repeating the claim as fact"* → *"There is no evidence for it."*
+   - This does NOT catch legitimate transparency: an open correction stated as
+     fact ("On 26 July we reported X; a police record now shows Y"), flagging an
+     argument as an argument, or noting a lead came from a partisan source. Those
+     orient the reader. Process narration orients the editor.
+   - Test: could someone who has never heard of Thelivu read it start to finish
+     without being told how it was made? If not, FIX with the lines quoted.
+
 ## Output format
 
 ### If the story fails the quality gate:
@@ -92,6 +110,7 @@ APPROVED
 4. Named-person / defamation: PASS | FIX — [what]
 5. Transparency: PASS | FIX — [what]
 6. Self-similarity / monotony: PASS | FIX — [what recent piece it echoes, fresh angle to take]
+7. Reader-facing (no process narration): PASS | FIX — [quote each offending line]
 
 ## Confidence label: Confirmed | Developing | Contested
 ## Verdict: Ready | Fix-then-publish | Hold | Kill
