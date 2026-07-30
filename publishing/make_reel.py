@@ -189,11 +189,38 @@ def _build_caption(fields, article_url):
     return "\n\n".join(b for b in bits if b)[:2200]
 
 
-def _illustrate(fields, out_dir, _p):
-    """One illustration per beat, or None if any beat failed.
+# Words per second of narration, measured off the built reels (reel #14: 110 words in
+# 44.9s = 147 wpm). Used only to guess how many sub-shots a beat deserves BEFORE the
+# voice has been synthesised; the real durations are divided among them at render time,
+# so a bad estimate changes shot lengths slightly, never sync.
+_WORDS_PER_SEC = 147 / 60
 
-    All-or-nothing on purpose: a reel with three illustrated frames and two text
-    slides reads as a bug, not a style. The caller falls back to the text-slide
+
+def _plan_shots(beats):
+    """How many sub-shots each beat gets, from its spoken word count.
+
+    A beat is 6-12s of speech (the script's 110-135 words over 5-6 beats makes that
+    arithmetic unavoidable), so one picture per beat means one picture per ~9s. This
+    plans 2-3 pictures for the long ones. The narration is untouched — only the number
+    of images changes — so nothing here can affect what the reel SAYS.
+    """
+    from publishing.reel import shots_for_duration
+    plan = []
+    for spoken, _caption in beats:
+        words = len((spoken or "").split())
+        if not words:
+            plan.append(1)      # the silent sign-off hold is one card, never cut
+            continue
+        plan.append(shots_for_duration(words / _WORDS_PER_SEC))
+    return plan
+
+
+def _illustrate(fields, out_dir, _p, shots=None):
+    """Illustrations per beat, or None if any beat failed.
+
+    Returns a list parallel to `beats`, each entry a LIST of paths — the sub-shots for
+    that beat. All-or-nothing on purpose: a reel with three illustrated frames and two
+    text slides reads as a bug, not a style. The caller falls back to the text-slide
     look for the whole reel.
     """
     from publishing.illustrate import generate_beat_images, scene_from_beat
@@ -206,20 +233,32 @@ def _illustrate(fields, out_dir, _p):
 
     beats = fields["beats"]
     prompts = fields.get("images") or []
-    scenes = []
+    shots = shots or [1] * len(beats)
+    # Flatten to one scene per SUB-SHOT, remembering which beat each came from. Extra
+    # sub-shots reuse the beat's own scene: the beat is one idea, and the variation
+    # comes from the per-scene seed in generate_beat_images, so the second picture is
+    # another view of the same concept rather than a new claim.
+    scenes, owner = [], []
     for i, (spoken, caption) in enumerate(beats):
         given = prompts[i].strip() if i < len(prompts) and prompts[i] else ""
-        scenes.append(given or scene_from_beat(caption, spoken))
+        scene = given or scene_from_beat(caption, spoken)
+        for _ in range(max(int(shots[i]), 1)):
+            scenes.append(scene)
+            owner.append(i)
 
-    def _step(i, total):
-        _p(0.15 + 0.35 * (i / max(total, 1)), f"Illustrating beat {i + 1}/{total}…")
+    def _step(k, total):
+        _p(0.15 + 0.35 * (k / max(total, 1)), f"Illustrating shot {k + 1}/{total}…")
 
-    images = generate_beat_images(scenes, out_dir, progress=_step)
-    if any(p is None for p in images):
-        missing = [i for i, p in enumerate(images) if p is None]
+    flat = generate_beat_images(scenes, out_dir, progress=_step)
+    if any(p is None for p in flat):
+        missing = sorted({owner[k] for k, p in enumerate(flat) if p is None})
         log.warning("illustrations missing for beats %s — text-slide fallback", missing)
         return None
-    return images
+
+    grouped = [[] for _ in beats]
+    for k, p in enumerate(flat):
+        grouped[owner[k]].append(p)
+    return grouped
 
 
 def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
@@ -369,10 +408,17 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
     with tempfile.TemporaryDirectory(prefix="mkreel_") as tmp:
         tmpdir = Path(tmp)
         render_frame, kind, n_frames = None, "narrated", len(fields["beats"])
+        shots_per_beat = None
         if illustrated:
-            _p(0.15, f"Illustrating {len(fields['beats'])} beats…")
+            # Plan the sub-shots BEFORE generating: a 9-second beat gets 2-3 pictures
+            # instead of one, so the picture changes every ~4s. Words are untouched.
+            shots_per_beat = _plan_shots(fields["beats"])
+            n_shots = sum(shots_per_beat)
+            log.info("run #%s: %d beats -> %d illustrated shots (%s)",
+                     run_id, len(shots_per_beat), n_shots, shots_per_beat)
+            _p(0.15, f"Illustrating {n_shots} shots across {len(shots_per_beat)} beats…")
             try:
-                images = _illustrate(fields, tmpdir / "ill", _p)
+                images = _illustrate(fields, tmpdir / "ill", _p, shots=shots_per_beat)
             except Exception as e:
                 log.warning("illustration step failed for run #%s: %s", run_id, e)
                 images = None
@@ -380,11 +426,17 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
                 from publishing.reel_illustrated import make_renderer
                 render_frame = make_renderer(images)
                 kind = "illustrated"
-                # One extra beat with no spoken text = the silent sign-off hold.
+                # One extra beat with no spoken text = the silent sign-off hold. It is
+                # a single card, never cut, so it contributes one shot.
                 fields = dict(fields, beats=list(fields["beats"]) + [("", "")])
+                shots_per_beat = list(shots_per_beat) + [1]
                 n_frames = len(fields["beats"])
             else:
                 log.info("run #%s: falling back to text-slide frames", run_id)
+                # The text-slide look has nothing to vary per sub-shot, so a split
+                # would just restart the zoom on an identical frame — a visible
+                # stutter. Fall back to one shot per beat along with the look.
+                shots_per_beat = None
 
         # 5) Render — local Chatterbox voice + ffmpeg. Force the chatterbox backend
         #    explicitly (the module TTS_BACKEND defaults to piper unless env-set).
@@ -392,7 +444,7 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
         out_mp4 = tmpdir / f"reel_run{run_id}.mp4"
         try:
             build_reel(fields, bool(dark), out_mp4, backend="chatterbox",
-                       render_frame=render_frame)
+                       render_frame=render_frame, shots_per_beat=shots_per_beat)
         except Exception as e:
             log.error("build_reel failed for run #%s: %s", run_id, e)
             return {"ok": False, "error": f"reel render failed: {e}"}

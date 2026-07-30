@@ -124,13 +124,13 @@ def generate_beat_images(scenes, out_dir, *, seed=7, progress=None):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    def _try(prompt):
+    def _try(prompt, img_seed):
         """One generation attempt. Returns bytes, or None if refused/blank."""
         r = requests.post(
             FLUX_URL,
             headers={"Authorization": f"Bearer {key}", "Accept": "application/json"},
             json={"prompt": f"{prompt} {STYLE}", "width": GEN_W, "height": GEN_H,
-                  "steps": 35, "cfg_scale": 3.5, "seed": seed},
+                  "steps": 35, "cfg_scale": 3.5, "seed": img_seed},
             timeout=180,
         )
         r.raise_for_status()
@@ -149,14 +149,19 @@ def generate_beat_images(scenes, out_dir, *, seed=7, progress=None):
             except Exception:
                 pass
         data = None
+        # Per-scene seed. It used to be one fixed seed for every scene, which was
+        # harmless while each beat had a distinct prompt — but sub-shots of one beat
+        # deliberately reuse a near-identical prompt, and a shared seed would render
+        # them as the SAME picture, so the cut would look like a stutter.
+        img_seed = seed + i
         try:
-            data = _try(_soften(scene))
+            data = _try(_soften(scene), img_seed)
             if data is None:
                 # Refused. The subject is the news, so retry with the scene
                 # abstracted rather than losing the beat — one filtered beat
                 # would otherwise drop the whole reel to text slides.
                 log.warning("beat %d: content-filtered — retrying abstracted", i)
-                data = _try(_abstract(_soften(scene)))
+                data = _try(_abstract(_soften(scene)), img_seed)
                 if data is None:
                     log.warning("beat %d: still filtered after abstraction", i)
         except Exception as e:

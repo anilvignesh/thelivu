@@ -186,7 +186,11 @@ def _needs_fallback(token):
     return any(c in _SERIF_MISSING for c in token)
 
 
-def _render_frame(caption, dark, idx, total, kicker, out_png):
+def _render_frame(caption, dark, idx, total, kicker, out_png, shot=0):
+    # `shot` is the sub-shot index within this beat. The text-slide look has nothing
+    # to vary per sub-shot (the caption is the frame), so it ignores it — and
+    # build_reel only ever splits a beat that has more than one illustration, so a
+    # text-slide reel is never handed a shot > 0.
     # The caption keeps its symbols — _draw_emph_block falls back to the mono
     # face per token. The kicker is drawn with a single font, so it takes the
     # ASCII substitution.
@@ -346,6 +350,40 @@ def _duration(path):
 ZOOM_MAX = 1.08
 
 
+# Target length of one visual. Chosen from the measured problem, not taste: at one
+# illustration per spoken beat the picture changed every ~9s (reel #14: 5 visuals over
+# 44.9s). ~4s is a normal shot length for the format and divides a 6-12s beat into 2-3.
+TARGET_SHOT_SECS = 4.0
+# A beat is one idea; past three pictures for it the visuals start telling a different
+# story than the sentence, and it costs another FLUX call + render pass per shot.
+MAX_SHOTS_PER_BEAT = 3
+
+
+def shots_for_duration(secs):
+    """How many sub-shots a beat of `secs` should be cut into.
+
+    Half-UP rather than round(): Python rounds .5 to even, so a 10s beat came out at
+    2 shots of 5.0s when 3 shots of 3.3s sit closer to the 4s target.
+    """
+    return max(1, min(MAX_SHOTS_PER_BEAT, int(secs / TARGET_SHOT_SECS + 0.5)))
+
+
+def _split_duration(total, k):
+    """Split `total` into k parts that sum to EXACTLY `total`.
+
+    Rounding matters here: the sub-shots are the video timeline while the VO is one
+    continuous track, so k parts of `round(total/k, 3)` would leave the picture up to
+    a few ms short or long per beat and the drift accumulates over 6 beats. The last
+    part absorbs the remainder.
+    """
+    if k <= 1:
+        return [total]
+    part = round(total / k, 3)
+    parts = [part] * (k - 1)
+    parts.append(round(total - part * (k - 1), 3))
+    return parts
+
+
 def _zoom_expr(frames, zmax=ZOOM_MAX):
     """The zoompan `z` expression for a beat `frames` long.
 
@@ -362,12 +400,25 @@ def _zoom_expr(frames, zmax=ZOOM_MAX):
     """
     inc = (zmax - 1.0) / max(frames, 1)
     return f"min(zoom+{inc:.8f},{zmax})"
-def build_reel(fields, dark, out_mp4, kicker=None, backend=None, render_frame=None):
+def build_reel(fields, dark, out_mp4, kicker=None, backend=None, render_frame=None,
+               shots_per_beat=None):
     """Render frames + VO for each beat, animate with a gentle zoom, mux to MP4.
     `fields` is parse_script() output. `backend` overrides the module TTS_BACKEND
     for the voice (see _synth). `render_frame` overrides the frame renderer —
     `reel_illustrated.make_renderer()` passes the illustrated look; the default is
-    the text-slide frame. Returns the out path."""
+    the text-slide frame. Returns the out path.
+
+    `shots_per_beat` is an optional list of how many sub-shots each beat should be cut
+    into. A spoken beat runs 6-12s, and the script's word budget (110-135 words over
+    5-6 beats) makes that unavoidable — so one visual per beat means one static image
+    per ~9 seconds, which is very slow for the format. Cutting a long beat into 2-3
+    sub-shots, each with its own illustration, changes the picture every ~4s WITHOUT
+    touching a word of the narration: the audio track is built and concatenated
+    separately, so only the video timeline is subdivided. Nothing is re-verified
+    because nothing is rewritten.
+
+    Default (None) = one shot per beat, i.e. exactly the old behaviour.
+    """
     draw_frame = render_frame or _render_frame
     beats = fields["beats"]
     if not beats:
@@ -381,25 +432,35 @@ def build_reel(fields, dark, out_mp4, kicker=None, backend=None, render_frame=No
         seg_paths, wav_paths = [], []
         n = len(beats)
         for i, (spoken, caption) in enumerate(beats):
-            png = work / f"f{i}.png"
             wav = work / f"a{i}.wav"
-            draw_frame(caption, dark, i, n, kicker, png)
             dur = _synth(spoken, wav, backend) + GAP_SECS  # hold the frame through the gap too
             wav_paths.append((wav, dur))
-            seg = work / f"s{i}.mp4"
-            frames = max(int(round(dur * FPS)), 1)
-            # gentle Ken-Burns zoom-in on the still (retention on a static frame) —
-            # spread across the WHOLE beat, so it never stalls into a freeze-frame
-            vf = (f"zoompan=z='{_zoom_expr(frames)}':d={frames}"
-                  f":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={W}x{H}:fps={FPS},"
-                  f"format=yuv420p")
-            subprocess.run(
-                ["ffmpeg", "-y", "-loop", "1", "-i", str(png), "-t", f"{dur:.3f}",
-                 "-vf", vf, "-r", str(FPS), "-c:v", "libx264", "-pix_fmt", "yuv420p",
-                 str(seg)],
-                check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            )
-            seg_paths.append(seg)
+
+            # Cut this beat into sub-shots. The audio is one continuous take either
+            # way — only the picture cuts — so the sum of the sub-shot durations must
+            # equal `dur` exactly or the VO drifts out of sync with the visuals.
+            k = 1
+            if shots_per_beat and i < len(shots_per_beat):
+                k = max(int(shots_per_beat[i]), 1)
+            cuts = _split_duration(dur, k)
+
+            for j, sub in enumerate(cuts):
+                png = work / f"f{i}_{j}.png"
+                draw_frame(caption, dark, i, n, kicker, png, shot=j)
+                seg = work / f"s{i}_{j}.mp4"
+                frames = max(int(round(sub * FPS)), 1)
+                # gentle Ken-Burns zoom-in on the still (retention on a static frame) —
+                # spread across the WHOLE sub-shot, so it never stalls into a freeze-frame
+                vf = (f"zoompan=z='{_zoom_expr(frames)}':d={frames}"
+                      f":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={W}x{H}:fps={FPS},"
+                      f"format=yuv420p")
+                subprocess.run(
+                    ["ffmpeg", "-y", "-loop", "1", "-i", str(png), "-t", f"{sub:.3f}",
+                     "-vf", vf, "-r", str(FPS), "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                     str(seg)],
+                    check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+                seg_paths.append(seg)
 
         # concat video segments
         concat_list = work / "segs.txt"

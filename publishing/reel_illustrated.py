@@ -132,15 +132,27 @@ def draw_signoff_card(out_png):
 def make_renderer(image_paths):
     """Build the `render_frame` callable `build_reel` expects.
 
-    `image_paths` is one illustration per story beat. The reel is assembled with
-    one extra beat on the end (empty spoken text → a silent hold), and that last
-    frame is the sign-off card.
+    `image_paths` is per story beat. Each entry is EITHER a single path (one
+    illustration for that beat) or a list of paths — the sub-shots a long beat is cut
+    into, so the picture changes every ~4s instead of once per 9-second beat. The reel
+    is assembled with one extra beat on the end (empty spoken text → a silent hold),
+    and that last frame is the sign-off card.
+
+    The progress dots read the number of BEATS, not sub-shots: sub-shots are one idea
+    seen from two angles, so counting them would tell the viewer the story is longer
+    than it is.
     """
     n_ill = len(image_paths)
 
-    def render(caption, dark, idx, total, kicker, out_png):
+    def render(caption, dark, idx, total, kicker, out_png, shot=0):
         if idx >= n_ill:
             return draw_signoff_card(out_png)
-        return draw_illustrated_frame(image_paths[idx], caption, idx, n_ill, out_png)
+        entry = image_paths[idx]
+        shots = entry if isinstance(entry, (list, tuple)) else [entry]
+        # Clamp rather than trust: if a beat got fewer illustrations than the split
+        # asked for (a FLUX refusal on one sub-shot), hold the last good one instead
+        # of raising in the middle of a 15-minute render.
+        path = shots[min(shot, len(shots) - 1)]
+        return draw_illustrated_frame(path, caption, idx, n_ill, out_png)
 
     return render
