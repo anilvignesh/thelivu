@@ -1249,7 +1249,7 @@ with t_tasks:
         ("📰 RSS / daily cycle",       "last_cycle_at",       "hourly-ish",  "force_rss_run", "1"),
         ("🕵️ Source scout",            "last_scout_at",       "weekly",      "force_scout_run", "1"),
         ("🗺️ Story scout (dig brief)",  "last_scout_at",       "weekly",      "dig_request",
-         "infrastructure-concentration — Adani infrastructure footprint, anchored on Vizhinjam"),
+         "*"),
         ("📌 Story tracker",           "last_tracker_at",     "weekly",      "force_tracker_run", "1"),
         ("🧑‍💼 Chief of staff",         "last_cos_at",         "daily",       "run_chief_of_staff", "1"),
         ("🔬 Dig auto-advance",        "last_dig_sweep_at",   "~6h",         None, None),

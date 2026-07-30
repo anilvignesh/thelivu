@@ -94,7 +94,7 @@ If the draft has a legal flag (LEGAL-FLAG: YES in the reviewer's output), the ca
 |---------|-------------|
 | `/runnow` | Trigger an RSS cycle immediately (don't wait for the 6h schedule) |
 | `/scoutnow` | Trigger a source scout now (proposes new sources) |
-| `/dig [theme]` | Targeted story-scout dig on a watchlist theme (default: Vizhinjam/Adani). Brief arrives with an Investigate button |
+| `/dig [theme]` | Targeted story-scout dig on a watchlist theme. No theme = the scout picks the ripest one itself. Brief arrives with an Investigate button |
 | `/priors` | Show the learning loop's current outcome-weighted signals (see docs/learning-loop.md) |
 | `/setinterval <hours>` | Change the RSS cycle interval (1–24h, default 6h) |
 

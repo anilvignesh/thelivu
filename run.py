@@ -240,8 +240,13 @@ if service == "thelivu-agent":
             dig_theme = kv_get("dig_request")
             if dig_theme:
                 kv_set("dig_request", "")
-                log.info("Dig signalled — running targeted story scout: %s", dig_theme)
-                run_story_scout(theme_hint=dig_theme)
+                # `*` is the bot's "no theme given" sentinel — it has to be non-empty to
+                # get past the `if` above, and maps back to no hint so the scout picks
+                # the ripest watchlist theme itself.
+                hint = None if dig_theme.strip() == "*" else dig_theme
+                log.info("Dig signalled — running story scout: %s",
+                         hint or "(scout picks from the watchlist)")
+                run_story_scout(theme_hint=hint)
         except Exception as e:
             log.error("Targeted dig failed: %s", e)
 

@@ -10,15 +10,6 @@
 
 themes:
 
-  - id: infrastructure-concentration
-    question: "Who controls India's ports, airports and grain storage now — and how did they get them?"
-    why_under_told: "Reported piecemeal; the cumulative scale, and the privatisation processes behind it, are under-examined."
-    kerala_anchor: "Vizhinjam International Seaport (Adani), Thiruvananthapuram"
-    primary_records: [APSEZ / Adani Ports filings, AAI airport-privatisation bid documents, FCI grain-storage / silo contracts, relevant CAG and court references]
-    rtis: []
-    status: scoping
-    discipline_note: "Frame as DOCUMENTED concentration + CONTESTED processes — not asserted corruption. Named-entity defamation care applies."
-
   - id: environmental-degradation
     question: "Which of India's protected or critical landscapes are being lost, who profits, and who was supposed to stop it?"
     why_under_told: "Slow-burn conditions, not events; the courts usually act only after the fact."

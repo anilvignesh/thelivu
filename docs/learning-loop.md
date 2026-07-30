@@ -51,4 +51,4 @@ never verification, never suppress high-impact leads.
 `/dig [theme]` sets kv `dig_request`, the orchestrator loop picks it up on the
 next 2-minute tick and produces a targeted dig brief (card with the existing
 "Investigate this now" button). No hint = the scout picks from the watchlist
-as before. First use: the Vizhinjam/Adani infrastructure-concentration theme.
+as before.

@@ -315,10 +315,10 @@ Liberation Mono lacks the ₹ glyph.
 - 1 carousel posted to Instagram; 6 rendered, awaiting owner approval in the
   draft chat (advice given: approve ~one/day).
 - Instagram bio link: owner was setting it to the base URL manually.
-- Open threads: validation week (`engine/DRY-RUN-PLAYBOOK.md`); the
-  Vizhinjam/Adani dig (watchlist); media-lawyer review before going public;
-  Instagram ingestion path decision. Phase 2 (automation, tip line) is
-  deferred — see `engine/DEPLOYMENT.md`.
+- Open threads: validation week (`engine/DRY-RUN-PLAYBOOK.md`); the next watchlist
+  dig; media-lawyer review before going public; Instagram ingestion path
+  decision. Phase 2 (automation, tip line) is deferred — see
+  `engine/DEPLOYMENT.md`.
 
 ---
 

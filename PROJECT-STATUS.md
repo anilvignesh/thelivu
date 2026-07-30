@@ -328,8 +328,8 @@ Each was downgraded, attributed, or dropped. **Preserve this reflex above all el
 **Editorial:**
 - Run the **validation week** (`engine/DRY-RUN-PLAYBOOK.md`): review only, fill
   `engine/dry-run-log.md`, encode each miss as a rule.
-- Ripe next **dig** (on the watchlist): **Adani infrastructure, anchored on
-  Vizhinjam.** Also: Aravalli degradation; El Niño/monsoon (verify the forecast first).
+- Ripe next **dig** (on the watchlist): Aravalli degradation; El Niño/monsoon (verify
+  the forecast first).
 
 **Your to-dos (not the engine's):**
 - Check `@thelivu` handle availability (Telegram bot + channel).
@@ -346,6 +346,7 @@ public tip line. See `engine/DEPLOYMENT.md`.
 ## Quick reference — how to run things
 
 - **Daily cycle:** "Run today's Thelivu cycle on FYI."
-- **A dig:** "Run the Vizhinjam/Adani dig" (story-scout method).
+- **A dig:** "Run a dig on <watchlist theme>" (story-scout method), or `/dig` with no
+  argument to let the scout pick the ripest theme itself.
 - **A submitted topic:** just give it — topic-intake triages scope + worth first.
 - Everything ends at the **human gate**. During validation, stop before publishing.

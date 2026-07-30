@@ -131,7 +131,7 @@ async def cmd_topic(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not topic:
         await update.message.reply_text(
             "Usage: /topic [your story idea or question]\n\n"
-            "Example: /topic What happened to the Vizhinjam port deal with Adani?"
+            "Example: /topic Who is actually paying for Kerala's coastal protection works?"
         )
         return
     queue_topic(topic, source="owner-telegram")
@@ -325,14 +325,14 @@ async def cmd_scoutnow(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_dig(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Signal a targeted story-scout dig on a watchlist theme (or free text).
-    No argument = the ripe default: Adani infrastructure concentration,
-    anchored on Vizhinjam."""
+
+    No argument = let the story-scout pick the ripest watchlist theme itself. The kv
+    value must stay non-empty or run.py's `if dig_theme:` never fires the dig, so the
+    no-theme case sends the sentinel `*`, which run.py maps back to theme_hint=None."""
     theme = " ".join(context.args).strip() if context.args else ""
-    if not theme:
-        theme = "infrastructure-concentration — Adani infrastructure footprint, anchored on Vizhinjam International Seaport"
-    kv_set("dig_request", theme)
+    kv_set("dig_request", theme or "*")
     await update.message.reply_text(
-        f"Dig signalled: {theme}\n\n"
+        f"Dig signalled: {theme or 'scout picks the ripest watchlist theme'}\n\n"
         "The agent will produce a dig brief within ~2 minutes — it arrives here "
         "with an 'Investigate this now' button. Tapping that runs the full "
         "verification pipeline; the draft still ends at your approve/kill gate."
@@ -491,7 +491,7 @@ KEY COMMANDS:
 /pending — everything waiting on you, one card
 /drafts /held /queue /status — what's in the pipeline
 /topic [text] — submit a story idea
-/dig [theme] — targeted watchlist dig (default: Vizhinjam/Adani)
+/dig [theme] — targeted watchlist dig (no theme = scout picks the ripest)
 /priors — what the learning loop currently believes
 /links /addlink /dellink /pinlink — manage the bio page
 /cost /stats — spend and lifetime numbers
