@@ -23,6 +23,73 @@ chat. To bootstrap it:
 
 ---
 
+## Reel pacing + command-centre browse (2026-07-30)
+
+Six changes, all on `main`. Four of them are bug fixes to things that looked finished.
+
+**The reel's visual pacing was broken twice over.**
+
+1. **The Ken-Burns push stalled.** `zoompan`'s increment was a constant `0.0006`/frame
+   against a constant `1.08` ceiling, so it exhausted itself after 133 frames = **4.44s
+   at 30fps**. Speech beats run 6-12s, so every beat drifted for 4.4s and then held a
+   pixel-identical frame. Measured: 2.2 mean pixel change per half-second while moving,
+   **0.001** after the ceiling — stopped, not slowed. Reel #14 was frozen for 51% of its
+   runtime, #13 for 45%, #17 for 55%. Worse, it read as a glitch rather than a look,
+   because the stall keys off an absolute 4.4s: #13's 2.9s and 4.1s beats never froze
+   while its 12.5s beat froze for 8s. `_zoom_expr()` now derives the increment from the
+   beat's own frame count. `ZOOM_MAX` (1.08) is the one knob.
+2. **One picture per ~9 seconds.** Reel #14 is 110 words — *inside* the skill's 110-135
+   spec, so the model obeyed; the spec's own arithmetic is the problem. 110-135 words at
+   the measured 147wpm is 45-55s over the specified 5-6 frames = 8-11s per still.
+   `build_reel` now takes **`shots_per_beat`** and subdivides a long beat's *video* into
+   2-3 sub-shots, each with its own illustration (`TARGET_SHOT_SECS = 4.0`,
+   `MAX_SHOTS_PER_BEAT = 3`). The audio is built and concatenated separately, so **the
+   narration is byte-identical and nothing is re-verified.** That was the deciding
+   factor: compression is where reel #12 upgraded a tabled Bill to "won", so buying
+   pacing by shortening spoken lines would trade verification quality for retention.
+   - `_split_duration` makes sub-shots sum to EXACTLY the beat duration — per-part
+     rounding drifts against a continuous VO and accumulates over 6 beats.
+   - `generate_beat_images` had ONE fixed seed for every scene. Harmless when each beat
+     had a distinct prompt, fatal once sub-shots reuse the beat's scene: a shared seed
+     renders them identically and the cut becomes a stutter. Seed is now per-scene.
+   - Text-slide reels are **never** split (nothing varies per sub-shot → the cut would
+     restart the zoom on the same frame); the illustration fallback resets the plan.
+   - The silent sign-off card is one shot, never cut. Progress dots still count beats.
+
+**The hook was specified but never enforced.** `_gen_script_nvidia` returned its output
+regardless of whether the retry worked, and the only downstream check was `if not beats`
+— which passes, because BEAT 1..n *are* beats. A hookless script therefore rendered a
+reel opening mid-story, silently, after a ~15-minute render. Separately, `parse_script`'s
+`^LABEL:\s*(.+)$` used `\s`, which matches newlines: a bare `HOOK:` **stole BEAT 1's
+sentence** (and spoke BEAT 1 twice), a bare `CLOSE:` stole the HASHTAGS line, a bare
+`BEAT n:` swallowed its own caption. Horizontal whitespace only now. `parse_script`
+returns `hook`, and ONE predicate (`_has_hook`) guards the nvidia generator,
+`run_structured_skill`'s marker, and a post-parse check, so no mode can drift weaker.
+
+**NVIDIA calls had no transient retry** — a single 500 killed a whole reel build. Now
+`shared/nvidia.py::call_with_retry`, used by all three call sites (video-script,
+FLUX illustrations, `skill_runner._run_nvidia`). Retries 5xx/timeouts, **fails fast on
+4xx**, never touches the quota breaker (NVIDIA has its own key). Most important on the
+illustration path: ~12 FLUX calls per reel now, and all-or-nothing fallback meant one
+blip cost the whole illustrated look.
+
+**Command centre browse.** Stories/Carousels/Reels share ONE control — see
+`docs/command-center-v2.md`. Includes a real filter fix: `pipeline_runs.status` carries
+legacy duplicate spellings (`hold`+`held`, `kill`+`killed`), so filtering the literal hid
+rows — "killed" showed 16 of the actual 25.
+
+**Reel remake takes suggestions.** A textarea on Remake, stored on `reels.notes`,
+prefilled into the next remake, injected into the script prompt inside a block that
+restates that the hard rules outrank every note — the reel is post-gate, so nothing
+re-verifies it after the Post tap. See `docs/reel-button.md`.
+
+**Also:** the Streamlit dashboard is retired (killed + autostart moved to
+`~/.config/autostart-retired/`; code left in place, not back-ported). The
+**Vizhinjam/Adani dig is dropped** — watchlist theme removed, `/dig` with no argument now
+lets the scout pick the ripest theme, and story-scout's worked examples were *replaced*
+(not deleted) with live-watchlist equivalents so the skill keeps teaching
+condition-vs-event, question-vs-conclusion and what a Kerala anchor is.
+
 ## Illustrated reels (productionized 2026-07-26 — plan 02)
 
 `make_narrated_reel()` now produces the **ink-dark illustrated** reel (the reel #9

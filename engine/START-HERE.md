@@ -18,13 +18,25 @@ the open web, and publishes short, sourced, perspective-driven pieces to a
 Telegram channel. It is **human-gated**: a person reviews and approves every
 piece before it goes out.
 
-## 2. Current status
+## 2. Current status (updated 2026-07-30)
 
-**Phase 1 — validation dry runs. Review only. Nothing is published. Nothing is
-automated. Not yet public.** The owner triggers one cycle each morning by hand,
-reviews the output, and logs what the guardrails caught (see
-`DRY-RUN-PLAYBOOK.md` and `dry-run-log.md`). Automation comes only after the
-week's gate is met.
+**Live and automated, still human-gated.** This section described Phase-1 dry runs
+("nothing is published, nothing is automated") long after both stopped being true —
+if it looks stale again, trust `PROJECT-STATUS.md`, which is the living state.
+
+- **~25 stories published**, self-hosted + on the bio page; carousels and reels posted
+  to Instagram (`@thelivu.reports`).
+- **The engine runs unattended on Railway** (`run.py` ticks ~2 min: RSS cycle,
+  chief-of-staff, dig auto-advance, scouts). Postgres on Railway is the live DB.
+- **Operations happen in the command centre**, not in a chat: `command_center/` on
+  `:8600` (laptop, LAN, phone over Tailscale). The old Streamlit `dashboard.py` is
+  **retired** as of 2026-07-30. See `docs/command-center-v2.md`.
+- **Reels + carousels are built locally** on the owner's laptop (cloned voice + ffmpeg;
+  Railway has no GPU) and stored in the DB for the fileserver to serve.
+- **The human gate is unchanged and non-negotiable** — publishing and posting are the
+  only gated actions, and nothing auto-publishes.
+
+Phase-1 artifacts (`DRY-RUN-PLAYBOOK.md`, `dry-run-log.md`) are kept as history.
 
 ## 3. Locked decisions (Phase 0 — do not silently change)
 
@@ -34,11 +46,16 @@ week's gate is met.
 - **Language:** English.
 - **Cadence:** one human-reviewed piece per day. Quality over quantity.
 - **First source:** FYI by Creator House (Kerala). Full list in `sources.yaml`.
-- **Models:** Claude for reasoning (investigate/verify/write/review); Gemini for
-  video ingestion only. Channels are *tips*; the open web is the substance.
-- **Hosting:** attended, on the owner's M1 Mac via Claude Code under a Pro plan,
-  transcripts-first to minimise cost. Unattended automation (API keys, a VPS,
-  the bot) comes later, only after validation.
+- **Models:** Claude for reasoning (investigate/verify/write/review); Gemini for video
+  ingestion and some monitoring. Channels are *tips*; the open web is the substance.
+  **Presentation-side skills only** (`carousel-composer`, `video-script`) run on free
+  NVIDIA-hosted Gemma — they format an already-verified, already-approved story, so they
+  never touch the trust gate. That split is the locked part: *never* move a judgment or
+  verification step onto a cheaper model to save credit.
+- **Hosting (superseded 2026-07-30):** the engine runs unattended on **Railway**;
+  media rendering is local on the owner's **Pop!_OS laptop** (not the M1 Mac this
+  originally said). Attended mode (`./attend`) still exists as the fallback for when the
+  APIs are dry, and is human-operated only — never cron, Railway or `claude -p`.
 
 ## 4. The non-negotiables (compressed charter — full text in `CHARTER.md`)
 

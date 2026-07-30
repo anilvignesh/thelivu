@@ -86,8 +86,34 @@ bundler/hash step, so the browser was heuristically caching `app.js` and serving
 previous build — the new modal shipped to the server and wasn't in the tab. `no-cache`
 means revalidate, not never-cache; the ETag still makes an unchanged file cheap.
 
+## Pacing + the hook (2026-07-30)
+
+Three invariants the render path now holds. Full measurements in `PROJECT-STATUS.md`.
+
+- **The zoom spans the beat.** `_zoom_expr(frames)` derives the increment from the beat's
+  own length. A fixed increment against a fixed ceiling ran out at 4.44s and froze the
+  rest of every 6-12s beat (45-55% of a reel). `ZOOM_MAX` is the single knob; raise it for
+  more visible movement, but check the caption margins first — captions sit near the edges
+  and travel is what crops them.
+- **A long beat gets 2-3 pictures.** `build_reel(shots_per_beat=[...])` subdivides the
+  *video* only; the VO is one continuous take per beat, so `_split_duration` must sum to
+  exactly the beat duration or the picture drifts against the voice. `TARGET_SHOT_SECS`
+  and `MAX_SHOTS_PER_BEAT` live in `publishing/reel.py`; `_plan_shots` estimates each
+  beat's length from its word count at 147wpm *before* synthesis (a bad estimate changes
+  shot lengths, never sync). Sub-shots reuse the beat's own scene with a different seed —
+  a beat is one idea, and the second picture is another view of it, not a new claim.
+  **Do not "fix" pacing by shortening the spoken lines**: compression is where reel #12
+  overstated a tabled Bill, so that trades verification for retention.
+- **No reel renders without a hook.** `_has_hook` (line-anchored, requires actual words)
+  is the ONE predicate; it guards the nvidia generator, `run_structured_skill`'s marker
+  and a post-parse check on `parse_script`'s new `hook` field. Beware `\s` in the script
+  regexes — it matches newlines, and a bare `HOOK:` used to capture BEAT 1's sentence.
+
 ## Not to do
 - Do **not** automate `./attend reel` (cron / Railway / `claude -p`). It is attended
   because a human is present; the blocking wait is the boundary, not a rough edge.
+- Do **not** add a second NVIDIA retry loop. `shared/nvidia.py::call_with_retry` is the
+  one, used by the script step, the FLUX illustrations and `skill_runner._run_nvidia`.
+  It retries 5xx/timeouts, fails fast on 4xx, and must never trip the paid quota breaker.
 - Do **not** re-enable the API route as the default without a deliberate owner call —
   the whole point of `REEL_MODE=attended` is that reels don't spend API credit.
