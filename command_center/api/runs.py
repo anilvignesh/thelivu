@@ -11,7 +11,8 @@ import time
 from starlette.routing import Route
 
 from command_center import db, jobs
-from command_center.api.util import J, endpoint, err, breaker_state
+from command_center.api.util import (J, endpoint, err, breaker_state, list_query,
+                                     SORTS_BASE)
 from shared.db import get_run, update_run, kv_get, kv_set
 
 _TG_LIMIT = 4096
@@ -31,30 +32,29 @@ def _tg_notify(text):
         pass
 
 
+# The status literals in pipeline_runs are not clean: the engine has written both `hold`
+# and `held`, and both `kill` and `killed`, over its life. The UI offers one label per
+# real state and this maps it to every spelling that means it — filtering on the literal
+# alone silently hides rows (9 killed runs, today).
+RUN_STATUS_GROUPS = {
+    "held": ["held", "hold", "needs_attention"],
+    "killed": ["killed", "kill"],
+    "dropped": ["dropped", "drop"],
+}
+
+RUN_SORTS = dict(SORTS_BASE, updated="updated_at DESC NULLS LAST")
+
+
 @endpoint
 def list_runs(request, data):
-    qp = request.query_params
-    status = qp.get("status") or ""
-    search = (qp.get("q") or "").strip()
-    limit = min(int(qp.get("limit") or 40), 200)
-    offset = int(qp.get("offset") or 0)
-    sql = ("SELECT id, created_at, updated_at, source, throughline, trust_gate, status, slug "
-           "FROM pipeline_runs")
-    where, params = [], []
-    if status and status != "all":
-        if status == "held":
-            where.append("status IN ('held','hold','needs_attention')")
-        else:
-            where.append("status = %s")
-            params.append(status)
-    if search:
-        where.append("LOWER(throughline) LIKE %s")
-        params.append(f"%{search.lower()}%")
-    if where:
-        sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY id DESC LIMIT %s OFFSET %s"
-    params += [limit, offset]
-    return J({"runs": db.q(sql, tuple(params))})
+    lq = list_query(request, sorts=RUN_SORTS)
+    lq.filter_status("status", RUN_STATUS_GROUPS)
+    lq.search("throughline", "source")
+    rows = db.q("SELECT id, created_at, updated_at, source, throughline, trust_gate, "
+                "status, slug FROM pipeline_runs" + lq.where_sql() + lq.page_sql(),
+                lq.page_params())
+    total = db.q(lq.count_sql("pipeline_runs"), tuple(lq.params))[0]["n"]
+    return J({"runs": rows, **lq.envelope(total)})
 
 
 @endpoint

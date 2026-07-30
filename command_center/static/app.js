@@ -147,7 +147,11 @@ function watchJob(jobId, title) {
 }
 
 /* ── State + router ────────────────────────────────────────────────────── */
-const state = { view: 'overview', gateCount: 0, inrRate: 84 };
+/* `list` holds each browse screen's search/filter/sort. It lives in state, not in the
+   DOM, because almost every action calls route() and rebuilds the view — without this
+   the screen snaps back to "all / newest" the moment you post or kill something, which
+   is half of why finding anything was painful. */
+const state = { view: 'overview', gateCount: 0, inrRate: 84, list: {} };
 
 const VIEWS = [
   ['overview',  '◉',  'Overview',      vOverview],
@@ -190,6 +194,97 @@ async function route() {
   }
 }
 window.addEventListener('hashchange', route);
+
+/* ── Shared: the list controls (Stories · Carousels · Reels) ───────────────
+   ONE control for every browse surface — same markup, same wording, same keys on the
+   wire (q / status / sort / kind / limit / offset), so a fourth list screen inherits it
+   instead of inventing a fourth answer. The bar owns the controls and the paging
+   footer; the view still owns fetching and card markup, which differ per screen.
+
+   Usage:
+     const bar = listBar('reels', { statuses: [...], sorts: [...], kinds: [...] });
+     main.appendChild(bar.node);  main.appendChild(list);  main.appendChild(bar.foot);
+     bar.onChange = load;  await load();
+   and inside load(): api('/reels?' + bar.qs()) … bar.setCount(shown, d.total). */
+
+const SORT_LABELS = {
+  newest: 'Newest first',
+  oldest: 'Oldest first',
+  updated: 'Recently updated',
+  posted: 'Recently posted',
+};
+/* Status labels: the value is what the API filters on (a GROUP server-side, so `killed`
+   also catches the legacy `kill` spelling), the label is what reads well in the menu. */
+const STATUS_LABELS = {
+  all: 'All statuses', pending_human: 'At the gate', published: 'Published',
+  held: 'Held / needs attention', investigating: 'Investigating', writing: 'Writing',
+  recheck_requested: 'Recheck requested', killed: 'Killed', dropped: 'Dropped',
+  ready: 'Ready', posted: 'Posted', pending_review: 'Pending review', queued: 'Queued',
+};
+const KIND_LABELS = { all: 'Any look', illustrated: 'Illustrated', narrated: 'Text slides' };
+
+function listBar(view, opts) {
+  const sorts = opts.sorts || ['newest', 'oldest'];
+  const st = state.list[view] || (state.list[view] = {
+    q: '', status: 'all', sort: sorts[0], kind: 'all', pageSize: opts.pageSize || 20,
+  });
+  st.limit = st.pageSize;   // a re-render always starts from page one
+
+  const sel = (key, values, labels) => `<select data-x="${key}" style="width:auto">${
+    values.map(v => `<option value="${esc(v)}"${st[key] === v ? ' selected' : ''}>${
+      esc(labels[v] || v)}</option>`).join('')}</select>`;
+
+  const node = el(`<div class="row" style="margin-bottom:12px">
+    <input data-x="q" placeholder="Search…" value="${esc(st.q)}" style="flex:1;min-width:150px">
+    ${sel('status', opts.statuses || ['all'], STATUS_LABELS)}
+    ${opts.kinds ? sel('kind', opts.kinds, KIND_LABELS) : ''}
+    ${sel('sort', sorts, SORT_LABELS)}
+    <button class="btn ghost small" data-x="clear" title="Clear search, filter and sort">↺</button>
+  </div>`);
+  const foot = el(`<div class="row between" style="margin-top:12px">
+    <span class="muted small" data-x="count"></span>
+    <button class="btn small" data-x="more" style="display:none">Load more</button>
+  </div>`);
+
+  const bar = {
+    node, foot, onChange: () => {},
+    qs(extra) {
+      const p = new URLSearchParams({ q: st.q, status: st.status, sort: st.sort,
+                                      limit: st.limit, offset: 0 });
+      if (opts.kinds) p.set('kind', st.kind);
+      for (const k in (extra || {})) p.set(k, extra[k]);
+      return p.toString();
+    },
+    /* One page size that grows, rather than an offset that pages: the views append into
+       a single list, and re-fetching from 0 keeps "load more" correct even when the
+       engine has inserted rows since the first page. */
+    setCount(shown, total) {
+      const c = foot.querySelector('[data-x=count]');
+      const filtered = st.q || st.status !== 'all' || (opts.kinds && st.kind !== 'all');
+      c.textContent = total === 0
+        ? (filtered ? 'Nothing matches those filters.' : 'Nothing here yet.')
+        : `Showing ${shown} of ${total}${filtered ? ' matching' : ''}.`;
+      const more = foot.querySelector('[data-x=more]');
+      more.style.display = shown < total ? '' : 'none';
+    },
+  };
+
+  const changed = () => { st.limit = st.pageSize; bar.onChange(); };
+  node.querySelector('[data-x=status]').onchange = e => { st.status = e.target.value; changed(); };
+  node.querySelector('[data-x=sort]').onchange = e => { st.sort = e.target.value; changed(); };
+  if (opts.kinds)
+    node.querySelector('[data-x=kind]').onchange = e => { st.kind = e.target.value; changed(); };
+  const q = node.querySelector('[data-x=q]');
+  let t;
+  q.oninput = e => { st.q = e.target.value.trim(); clearTimeout(t); t = setTimeout(changed, 300); };
+  q.onkeydown = e => { if (e.key === 'Enter') { clearTimeout(t); changed(); } };
+  node.querySelector('[data-x=clear]').onclick = () => {
+    Object.assign(st, { q: '', status: 'all', sort: sorts[0], kind: 'all', limit: st.pageSize });
+    route();
+  };
+  foot.querySelector('[data-x=more]').onclick = () => { st.limit += st.pageSize; bar.onChange(); };
+  return bar;
+}
 
 /* ── Shared: status dots + gate badge ──────────────────────────────────── */
 function paintStatus(breaker, voiceUp) {
@@ -411,34 +506,27 @@ async function vGate(main) {
 async function vStories(main) {
   main.innerHTML = '';
   main.appendChild(el(`<div><h1>Stories</h1><div class="sub">Every pipeline run — click any to open the full dossier.</div></div>`));
-  const bar = el(`<div class="row" style="margin-bottom:12px">
-    <select style="width:auto">
-      ${['all', 'pending_human', 'published', 'held', 'investigating', 'writing', 'recheck_requested', 'killed'].map(s => `<option>${s}</option>`).join('')}
-    </select>
-    <input placeholder="Search throughline…" style="flex:1;min-width:140px">
-    <button class="btn">Search</button></div>`);
-  main.appendChild(bar);
+  const bar = listBar('stories', {
+    pageSize: 30,
+    statuses: ['all', 'pending_human', 'published', 'held', 'investigating', 'writing',
+               'recheck_requested', 'killed', 'dropped'],
+    sorts: ['newest', 'oldest', 'updated'],
+  });
   const list = el(`<div></div>`);
-  main.appendChild(list);
+  main.append(bar.node, list, bar.foot);
   async function load() {
     list.innerHTML = '<div class="muted">Loading…</div>';
-    const st = bar.querySelector('select').value;
-    const q = bar.querySelector('input').value.trim();
-    const d = await api(`/runs?status=${st}&q=${encodeURIComponent(q)}&limit=60`);
+    const d = await api('/runs?' + bar.qs());
     list.innerHTML = '';
-    if (!d.runs.length) list.appendChild(el(`<div class="muted">No runs match.</div>`));
     for (const r of d.runs) list.appendChild(runCard(r));
+    bar.setCount(d.runs.length, d.total);
   }
-  bar.querySelector('button').onclick = load;
-  bar.querySelector('select').onchange = load;
-  bar.querySelector('input').onkeydown = e => { if (e.key === 'Enter') load(); };
+  bar.onChange = load;
   await load();
 }
 
 /* ══ CAROUSELS ══════════════════════════════════════════════════════════ */
 async function vCarousels(main) {
-  const d = await api('/carousels?limit=20');
-  paintStatus(d.breaker);
   main.innerHTML = '';
   main.appendChild(el(`<div><h1>Carousels</h1>
     <div class="sub">The "receipts" deep-dive — optional per story, reels are the reach default.
@@ -457,6 +545,26 @@ async function vCarousels(main) {
   };
   main.appendChild(mk);
 
+  const bar = listBar('carousels', {
+    statuses: ['all', 'pending_review', 'queued', 'posted', 'killed'],
+    sorts: ['newest', 'oldest', 'posted'],
+  });
+  const list = el(`<div></div>`);
+  main.append(bar.node, list, bar.foot);
+  bar.onChange = paintCarousels;
+  await paintCarousels();
+
+  async function paintCarousels() {
+    list.innerHTML = '<div class="muted">Loading…</div>';
+    const d = await api('/carousels?' + bar.qs());
+    paintStatus(d.breaker);
+    list.innerHTML = '';
+    renderCarousels(list, d);
+    bar.setCount(d.carousels.length, d.total);
+  }
+}
+
+function renderCarousels(list, d) {
   const actionable = ['pending_review', 'queued', 'composing', 'approved_manual', 'failed'];
   for (const c of d.carousels) {
     const card = el(`<div class="item">
@@ -514,9 +622,8 @@ async function vCarousels(main) {
     } else if (c.status === 'posted' && c.ig_permalink) {
       acts.appendChild(el(`<a class="btn small" href="${esc(c.ig_permalink)}" target="_blank">View on Instagram ↗</a>`));
     }
-    main.appendChild(card);
+    list.appendChild(card);
   }
-  if (!d.carousels.length) main.appendChild(el(`<div class="card muted">No carousels yet.</div>`));
 }
 
 /* ══ REELS ══════════════════════════════════════════════════════════════ */
@@ -560,17 +667,39 @@ async function makeReelFlow(rid, opts = {}) {
 }
 
 async function vReels(main) {
-  const d = await api('/reels?limit=30');
-  paintStatus(undefined, d.voice_up);
   main.innerHTML = '';
-  main.appendChild(el(`<div><h1>Reels</h1>
-    <div class="sub">The reach surface — narrated in your cloned voice, rendered on this laptop.
-    Voice server: ${d.voice_up ? '<span style="color:var(--good)">● up</span>' : '<span style="color:var(--brick)">● down</span> (start it in System)'}</div></div>`));
+  const head = el(`<div><h1>Reels</h1><div class="sub" data-x="sub"></div></div>`);
+  main.appendChild(head);
 
   const mkb = el(`<div class="actions" style="margin-bottom:14px"><button class="btn primary">🎬 Make a reel…</button></div>`);
   mkb.querySelector('button').onclick = () => makeReelFlow(null);
   main.appendChild(mkb);
 
+  const bar = listBar('reels', {
+    statuses: ['all', 'ready', 'posted', 'killed'],
+    kinds: ['all', 'illustrated', 'narrated'],
+    sorts: ['newest', 'oldest', 'posted'],
+  });
+  const list = el(`<div></div>`);
+  main.append(bar.node, list, bar.foot);
+  bar.onChange = paintReels;
+  await paintReels();
+
+  async function paintReels() {
+    list.innerHTML = '<div class="muted">Loading…</div>';
+    const d = await api('/reels?' + bar.qs());
+    paintStatus(undefined, d.voice_up);
+    head.querySelector('[data-x=sub]').innerHTML =
+      `The reach surface — narrated in your cloned voice, rendered on this laptop.
+       Voice server: ${d.voice_up ? '<span style="color:var(--good)">● up</span>'
+                                  : '<span style="color:var(--brick)">● down</span> (start it in System)'}`;
+    list.innerHTML = '';
+    renderReels(list, d);
+    bar.setCount(d.reels.length, d.total);
+  }
+}
+
+function renderReels(list, d) {
   for (const r of d.reels) {
     const size = r.size_bytes ? `${Math.round(r.size_bytes / 1024)} KB` : '—';
     const card = el(`<div class="item">
@@ -610,9 +739,8 @@ async function vReels(main) {
     } else if (r.ig_permalink) {
       acts.appendChild(el(`<a class="btn small" href="${esc(r.ig_permalink)}" target="_blank">View on Instagram ↗</a>`));
     }
-    main.appendChild(card);
+    list.appendChild(card);
   }
-  if (!d.reels.length) main.appendChild(el(`<div class="card muted">No reels yet — make one from a published story.</div>`));
 }
 
 /* ══ DIGS ═══════════════════════════════════════════════════════════════ */

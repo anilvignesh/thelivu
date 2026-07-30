@@ -26,6 +26,86 @@ def err(message, status=400):
     return J({"ok": False, "error": message}, status)
 
 
+class ListQuery:
+    """The parsed shared list controls (search / status / sort / page) for one request.
+
+    Every browse surface — Stories, Carousels, Reels — takes the same five query params
+    so the UI control can be one component instead of one per screen. This class turns
+    them into SQL pieces; the endpoint supplies the table-specific spec.
+
+    `order` is looked up in a **whitelist**, never interpolated from the request: a sort
+    key the spec doesn't define falls back to the default rather than reaching SQL.
+    """
+
+    def __init__(self, *, q, status, sort, order, limit, offset):
+        self.q, self.status, self.sort = q, status, sort
+        self.order, self.limit, self.offset = order, limit, offset
+        self.where, self.params = [], []
+
+    def add(self, clause, *params):
+        self.where.append(clause)
+        self.params.extend(params)
+
+    def filter_status(self, column, groups):
+        """Status filter by GROUP, not by raw literal. `pipeline_runs` carries legacy
+        duplicate spellings (`hold` AND `held`, `kill` AND `killed`), so filtering on the
+        literal the UI shows silently drops rows — 9 killed runs, today. The group map is
+        the single place that aliasing is allowed to live."""
+        if not self.status or self.status == "all":
+            return
+        values = groups.get(self.status, [self.status])
+        marks = ",".join(["%s"] * len(values))
+        self.add(f"{column} IN ({marks})", *values)
+
+    def search(self, *columns):
+        """Case-insensitive OR across the given text columns."""
+        if not self.q:
+            return
+        needle = f"%{self.q.lower()}%"
+        ors = " OR ".join(f"LOWER(COALESCE({c},'')) LIKE %s" for c in columns)
+        self.add(f"({ors})", *[needle] * len(columns))
+
+    def where_sql(self):
+        return (" WHERE " + " AND ".join(self.where)) if self.where else ""
+
+    def page_sql(self):
+        return f" ORDER BY {self.order} LIMIT %s OFFSET %s"
+
+    def page_params(self):
+        return tuple(self.params) + (self.limit, self.offset)
+
+    def count_sql(self, table):
+        return f"SELECT COUNT(*) AS n FROM {table}{self.where_sql()}"
+
+    def envelope(self, total):
+        """The shape every list endpoint returns alongside its rows, so the UI can render
+        "N of M" and a Load more without knowing which screen it is."""
+        return {"total": total, "limit": self.limit, "offset": self.offset,
+                "sort": self.sort, "status": self.status or "all", "q": self.q}
+
+
+# Sorts shared by every list surface. Ordering by id rather than created_at: both are
+# monotonic here and id is the primary key, so it needs no extra index.
+SORTS_BASE = {"newest": "id DESC", "oldest": "id ASC"}
+
+
+def list_query(request, *, sorts, default="newest", max_limit=200, default_limit=40):
+    qp = request.query_params
+    sort = qp.get("sort") or default
+    if sort not in sorts:
+        sort = default          # whitelist: request text never reaches the ORDER BY
+    try:
+        limit = min(max(int(qp.get("limit") or default_limit), 1), max_limit)
+    except ValueError:
+        limit = default_limit
+    try:
+        offset = max(int(qp.get("offset") or 0), 0)
+    except ValueError:
+        offset = 0
+    return ListQuery(q=(qp.get("q") or "").strip(), status=(qp.get("status") or "").strip(),
+                     sort=sort, order=sorts[sort], limit=limit, offset=offset)
+
+
 def endpoint(fn):
     """Async wrapper: parse the JSON body up front, then run the sync handler
     in the threadpool (all our DB/publishing calls are blocking)."""

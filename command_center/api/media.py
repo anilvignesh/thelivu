@@ -11,7 +11,8 @@ from starlette.responses import Response
 from starlette.routing import Route
 
 from command_center import db, jobs
-from command_center.api.util import J, endpoint, err, breaker_state
+from command_center.api.util import (J, endpoint, err, breaker_state, list_query,
+                                     SORTS_BASE)
 from shared.db import (
     get_run, get_carousel_slides, queue_carousel_run, get_reel_bytes,
     update_reel, add_bio_link, list_bio_links, delete_bio_link,
@@ -23,14 +24,24 @@ _BASE = lambda: os.environ.get("SLIDE_SERVER_BASE_URL", "").rstrip("/")
 
 # ── Carousels ─────────────────────────────────────────────────────────────────
 
+_CAROUSEL_FROM = "carousel_runs cr LEFT JOIN pipeline_runs r ON r.id = cr.run_id"
+# Same two base sorts as every other list surface, plus the one axis a posted-media
+# screen actually wants. NULLS LAST so unposted rows don't crowd out the posted ones.
+CAROUSEL_SORTS = {"newest": "cr.id DESC", "oldest": "cr.id ASC",
+                  "posted": "cr.posted_at DESC NULLS LAST, cr.id DESC"}
+
+
 @endpoint
 def list_carousels(request, data):
-    limit = min(int(request.query_params.get("limit") or 15), 50)
+    lq = list_query(request, sorts=CAROUSEL_SORTS, default_limit=20, max_limit=100)
+    lq.filter_status("cr.status", {})
+    lq.search("r.throughline", "cr.caption")
     r = db.parallel(
         cars=lambda: db.q("SELECT cr.id, cr.run_id, cr.status, cr.caption, cr.ig_permalink, "
-                          "cr.dark, cr.article_url, r.throughline AS story "
-                          "FROM carousel_runs cr LEFT JOIN pipeline_runs r ON r.id = cr.run_id "
-                          "ORDER BY cr.id DESC LIMIT %s", (limit,)),
+                          "cr.dark, cr.article_url, r.throughline AS story FROM "
+                          + _CAROUSEL_FROM + lq.where_sql() + lq.page_sql(),
+                          lq.page_params()),
+        total=lambda: db.q(lq.count_sql(_CAROUSEL_FROM), tuple(lq.params))[0]["n"],
         breaker=breaker_state,
     )
     cars = r["cars"]
@@ -54,7 +65,8 @@ def list_carousels(request, data):
         c["slides"] = [{"position": s["position"], "headline": s["headline"],
                         "url": f"{base}/carousel_{c['id']}_{s['position']}.jpg" if base else None}
                        for s in slides_by_car.get(c["id"], [])]
-    return J({"carousels": cars, "breaker": r["breaker"], "slide_base": base})
+    return J({"carousels": cars, "breaker": r["breaker"], "slide_base": base,
+              **lq.envelope(r["total"])})
 
 
 @endpoint
@@ -148,17 +160,30 @@ def post_carousel(request, data):
 
 # ── Reels ─────────────────────────────────────────────────────────────────────
 
+_REEL_FROM = "reels re LEFT JOIN pipeline_runs r ON r.id = re.run_id"
+REEL_SORTS = {"newest": "re.id DESC", "oldest": "re.id ASC",
+              "posted": "re.posted_at DESC NULLS LAST, re.id DESC"}
+
+
 @endpoint
 def list_reels(request, data):
-    limit = min(int(request.query_params.get("limit") or 20), 50)
+    lq = list_query(request, sorts=REEL_SORTS, default_limit=20, max_limit=100)
+    lq.filter_status("re.status", {})
+    # `kind` is the one axis that genuinely separates reels (illustrated vs text-slide),
+    # so it gets a filter of its own rather than being folded into status.
+    kind = (request.query_params.get("kind") or "").strip()
+    if kind and kind != "all":
+        lq.add("re.kind = %s", kind)
+    lq.search("r.throughline", "re.caption")
     size = "OCTET_LENGTH(re.mp4)" if db.is_postgres() else "LENGTH(re.mp4)"
     reels = db.q(f"SELECT re.id, re.run_id, re.kind, re.caption, re.status, "
                  f"re.ig_permalink, re.notes, re.created_at, re.posted_at, "
-                 f"{size} AS size_bytes, r.throughline AS story "
-                 f"FROM reels re LEFT JOIN pipeline_runs r ON r.id = re.run_id "
-                 f"ORDER BY re.id DESC LIMIT %s", (limit,))
+                 f"{size} AS size_bytes, r.throughline AS story FROM "
+                 + _REEL_FROM + lq.where_sql() + lq.page_sql(), lq.page_params())
+    total = db.q(lq.count_sql(_REEL_FROM), tuple(lq.params))[0]["n"]
     from command_center.api.system import voice_status
-    return J({"reels": reels, "voice_up": voice_status()})
+    return J({"reels": reels, "voice_up": voice_status(), "kind": kind or "all",
+              **lq.envelope(total)})
 
 
 @endpoint

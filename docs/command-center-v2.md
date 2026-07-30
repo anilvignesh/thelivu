@@ -54,7 +54,7 @@ architecture is open for whatever comes next.
 | **Gate** | The review desk. Pending + held runs: full draft (rendered), verification report, review notes. Actions: **Approve→publish** (gated, confirm), Kill, Hold, Requeue, **Recheck with editorial direction**, **Edit draft** (inline, human edit), **AI suggestions** (editorial-reviewer, quota-aware). |
 | **Stories** | Full pipeline browser: filter/search all runs, per-run detail (texts, publication, linked carousel + reel), article-page link, "make carousel", "make reel" from any published run. |
 | **Carousels** | Review desk for slides: preview strip, **edit any slide's headline** (re-renders via fileserver `?fresh=1`), edit caption, Rebuild (recompose), **Post** (gated), Kill. Breaker-aware compose warnings with the exact attend command. |
-| **Reels** | The reach surface, first-class: list all reels with inline video preview (served locally from the DB), **Make reel** (voice-server-aware; progress live), edit caption, **Post** (gated), Kill, remake. Voice server start/stop from the UI. |
+| **Reels** | The reach surface, first-class: list all reels with inline video preview (served locally from the DB), **Make reel** (voice-server-aware; progress live), edit caption, **Post** (gated), Kill, remake with a suggestion box. Voice server start/stop from the UI. Search / status / kind / sort via the shared list control. |
 | **Digs** | Persistent investigations: open (free or from watchlist), advance, promote, park, kill, add owner note, full timeline. |
 | **Chief of staff** | Latest sweep: acted-autonomously list, reasoning, new digs; Run sweep now. |
 | **Sources** | Performance table (runs→published/killed rates), active sources, the 33 candidates from sources.yaml (tier/role/lean), proposals approve/skip, manual RSS add. |
@@ -75,6 +75,40 @@ PATCH `/slides/<pos>`) · `/api/reels` (+make, `/<id>/post|kill`, PATCH caption,
 Route modules: `api/system.py`, `api/runs.py`, `api/media.py`, `api/ops.py` —
 new domains = new module + a nav entry in `app.js`'s view registry. That's the
 extensibility contract.
+
+## Browse: one list control on every content screen (added 2026-07-30)
+
+At 123 runs / 18 carousels / 14 reels, finding a specific thing had become the slow
+part. Stories had an ad-hoc status+search bar and no sort; Carousels and Reels had
+nothing and were silently truncating at `limit=20`. Three screens, three answers.
+
+**Server** — `api/util.py`: `list_query(request, sorts=…)` → a `ListQuery` that parses the
+same five params (`q`, `status`, `sort`, `limit`, `offset`) for every list endpoint and
+builds the WHERE / ORDER BY / LIMIT plus a matching `COUNT(*)`. Used by `/api/runs`,
+`/api/carousels`, `/api/reels`, which all now return
+`{…rows, total, limit, offset, sort, status, q}`.
+
+- **`sort` is a whitelist lookup, never interpolation.** Each endpoint declares a
+  `{key: sql}` dict; an unrecognised key falls back to the default, so request text
+  cannot reach the ORDER BY.
+- **Status filters by GROUP, not literal.** `pipeline_runs.status` carries legacy
+  duplicate spellings from the engine's history — `hold` *and* `held`, `kill` *and*
+  `killed`. Filtering on the literal the UI showed silently hid rows: "killed" returned
+  16 of the actual 25. `RUN_STATUS_GROUPS` in `api/runs.py` is the one place that
+  aliasing lives.
+- Sort keys are near-identical by design: `newest`/`oldest` everywhere, `updated` on
+  Stories (only `pipeline_runs` has `updated_at`), `posted` on Carousels + Reels
+  (`posted_at DESC NULLS LAST` — works on both Postgres and the bundled SQLite 3.45).
+- Reels also filter on **`kind`** (illustrated / narrated) — the one axis that actually
+  separates reels.
+
+**Frontend** — `listBar(view, opts)` in `app.js` returns `{node, foot, qs(), onChange,
+setCount()}`. The bar owns the controls and the "Showing N of M" + Load more footer; the
+view still owns fetching and card markup. Selection lives in **`state.list[view]`**, not
+in the DOM, because nearly every action calls `route()` and rebuilds the view — without
+that the screen snapped back to "all / newest" the moment you posted or killed something,
+which was half the reason browsing hurt. A fourth list screen gets this by calling
+`listBar`, not by inventing a fourth bar.
 
 ## Deployed-code touch (one, tiny)
 
