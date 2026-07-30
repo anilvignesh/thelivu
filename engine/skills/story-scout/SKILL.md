@@ -11,16 +11,16 @@ This skill enforces the project's editorial charter (`../../CHARTER.md`). Read i
 
 ## Why the dig needs its own method
 
-A monitor waits for an event. But the biggest stories aren't events — they're *conditions* that accreted quietly: a hill range chewed away over a decade, one conglomerate quietly acquiring the ports and airports a country runs on, a public asset hollowed by a hundred small decisions. No single feed item announces a condition. You find it only by going looking, on purpose, with a question.
+A monitor waits for an event. But the biggest stories aren't events — they're *conditions* that accreted quietly: a hill range chewed away over a decade, a regulator that quietly stopped issuing penalties, a public asset hollowed by a hundred small decisions. No single feed item announces a condition. You find it only by going looking, on purpose, with a question.
 
 ## The method for a dig
 
 1. **Start from the watchlist.** `../../watchlist.yaml` is Thelivu's standing agenda — themes, sectors and powerful actors worth owning. Pick one.
-2. **Form a sharp, falsifiable QUESTION — not a conclusion.** "Who controls India's ports and airports now, and how did they get them?" — not "Adani is cornering infrastructure." You can answer a question with records; a conclusion is what the evidence is supposed to decide.
+2. **Form a sharp, falsifiable QUESTION — not a conclusion.** "Which of the last three years' CAG findings on Kerala schemes were never answered by the department they named?" — not "the government buries its audits." The question has a countable answer sitting in the record; the conclusion is what the evidence is supposed to decide, and stating it up front is how a dig stops being an investigation.
 3. **Go to PRIMARY records.** This is the heart of it: company and regulatory filings, court records, CAG and audit reports, budget and tender documents, land and environmental-clearance records, official datasets — and RTI requests, the single most powerful unearthing tool an Indian outlet has. Build from the record, not from commentary.
 4. **Try to DISPROVE your own hypothesis.** Treat it as something to kill. What's the boring explanation? What would a fair critic say? A dig that only confirms its starting hunch isn't an investigation — it's an essay with footnotes.
 5. **Verify and connect with discipline.** Every fact through the verifier; every "this links to that" through the pattern-synthesizer — evidence the link, classify it, name the weakest link, downgrade by default.
-6. **Find the Kerala anchor where one exists — as a bonus, not a gate.** A local doorway (Vizhinjam for Adani's ports, a Kerala quarry for an Aravalli-style degradation story) makes a national story land harder with the audience, and it's worth looking for. But it is **not required**: Thelivu covers national and international stories on their own importance. The story's consequence is what makes it a *Thelivu* dig — a Kerala anchor is a plus, never the price of entry.
+6. **Find the Kerala anchor where one exists — as a bonus, not a gate.** A local doorway (one quarry still working through a stop-notice, for a national story on how mining rules go unenforced; a district cooperative bank under RBI action, for a national story on who bears the loss when a small bank fails) makes a national story land harder with the audience, and it's worth looking for. But it is **not required**: Thelivu covers national and international stories on their own importance. The story's consequence is what makes it a *Thelivu* dig — a Kerala anchor is a plus, never the price of entry.
 7. **Publish only what holds — and be willing to publish nothing.** A dig can run for weeks and end in "not established." That is a *successful* dig. The discipline of killing the weak ones is exactly what makes the ones you publish unkillable.
 
 ## RTI as a standing pipeline
