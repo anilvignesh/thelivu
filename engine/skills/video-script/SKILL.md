@@ -35,6 +35,17 @@ writes a script only — it never fabricates, never overstates, and never publis
   "reportedly," "the records suggest").
 - **Attribute the load-bearing facts** in the voice line itself ("the CAG report
   found…", "court records show…") — a spoken claim with no source is not Thelivu.
+- **Never put a bare acronym in a SPOKEN line.** The reel is voiced by a cloned TTS
+  that mangles them — it may spell them out, stress them wrongly, or read them as a
+  word. Write the words the voice should say, and let the CAPTION carry the acronym,
+  where the renderer already highlights it in the accent colour:
+  - spoken: *"the North Eastern Space Applications Centre"* — caption: `NESAC says up to 80%`
+  - spoken: *"the state pollution control board"* — caption: `KSPCB issued 0 penalties`
+  - spoken: *"the state's infrastructure fund"* — caption: `KIIFB · ₹2,000cr`
+  This is why numbers and acronyms belong on screen: those are exactly the tokens the
+  voice can get wrong, and the muted viewer reads them anyway. If an acronym is genuinely
+  more familiar than its expansion (RBI, NEET, CAG), you may speak it — but never one the
+  audience would have to decode, and never a technical agency's initials.
 - **Transparent perspective:** you may argue the article's view, openly — but signal
   when it's a view, not a fact.
 - Named living people: documented facts and contested processes only, never asserted

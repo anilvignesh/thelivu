@@ -104,6 +104,15 @@ cannot pronounce "തെളിവ്", and splicing in a real-voice recording cl
 the cloned voice badly enough that reel #8 was posted and pulled. The fix is to
 say nothing and show the brand. **Do not rebuild the voice-splice.**
 
+**The voice never speaks a bare acronym.** Same root cause as the sign-off: the cloned
+TTS mangles initialisms. Write the expansion into the spoken line and let the CAPTION
+carry the acronym — the renderer already highlights acronyms and numbers in the accent
+colour, because those are precisely the tokens the voice gets wrong and the muted viewer
+reads anyway. Familiar ones (RBI, NEET, CAG) may be spoken; a technical agency's initials
+may not. This lived only as a code comment in `publishing/reel.py` for a long while, so
+the script generator was never told and kept producing them — it is a brand rule, stated
+in `skills/video-script/SKILL.md`.
+
 **Signature elements — not theme variables.** The mark, the wordmark, the
 serif/mono pairing, the layout skeleton and the sign-off card are fixed. The
 illustration is the only thing that varies per story.
