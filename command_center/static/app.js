@@ -520,23 +520,34 @@ async function vCarousels(main) {
 }
 
 /* ══ REELS ══════════════════════════════════════════════════════════════ */
-async function makeReelFlow(rid) {
-  const box = el(`<div><h3>🎬 Make reel${rid ? ` — run #${rid}` : ''}</h3>
+/* `opts.remake` re-words the modal for a re-cut of a reel he has just watched, and
+   `opts.notes` prefills the box with what he asked for last time — a second remake is
+   usually the first note plus one more, not a fresh thought. */
+async function makeReelFlow(rid, opts = {}) {
+  const remake = !!opts.remake;
+  const box = el(`<div><h3>${remake ? '🔁 Remake reel' : '🎬 Make reel'}${rid ? ` — run #${rid}` : ''}</h3>
     <p class="muted small">Free Gemma 4 writes the script, your Chatterbox voice + ffmpeg render locally (a few minutes). You preview before anything posts.</p>
     ${rid ? '' : '<label class="f">Published run #</label><input type="number" data-x="rid">'}
     <label class="f">Theme</label>
     <select data-x="dark"><option value="1" selected>Ink-dark (brand default)</option><option value="0">Light kraft</option></select>
+    <label class="f">${remake ? 'What to change' : 'Suggestions'} <span class="muted small">(optional)</span></label>
+    <textarea data-x="notes" rows="4" placeholder="${remake
+      ? 'Hook is flat — open on the police diary entry. Cut the fourth beat. Slower on the closing line.'
+      : 'Anything to steer the script — emphasis, pacing, which beat to lead on.'}">${esc(opts.notes || '')}</textarea>
+    <p class="muted small">Steers the script — emphasis, pacing, which beats to keep or cut, how lines are phrased.
+    It can't change what the story establishes: the verification rules still win, so a note the article doesn't support is written as the closest accurate line.</p>
     <div class="modal-actions"><button class="btn" data-x="no">Cancel</button>
-    <button class="btn primary" data-x="go">Build reel</button></div></div>`);
+    <button class="btn primary" data-x="go">${remake ? 'Remake reel' : 'Build reel'}</button></div></div>`);
   const close = openModal(box);
   box.querySelector('[data-x=no]').onclick = close;
   box.querySelector('[data-x=go]').onclick = async () => {
     const runId = rid || parseInt((box.querySelector('[data-x=rid]') || {}).value);
     if (!runId) return toast('Run # required', 'err');
     const dark = box.querySelector('[data-x=dark]').value === '1';
+    const notes = box.querySelector('[data-x=notes]').value.trim();
     close();
     try {
-      const r = await api('/reels', { method: 'POST', body: { run_id: runId, dark } });
+      const r = await api('/reels', { method: 'POST', body: { run_id: runId, dark, notes } });
       const j = await watchJob(r.job, `Build reel for run #${runId}`);
       if (j && j.state === 'done') { location.hash = '#/reels'; route(); }
       else if (j && j.result) {
@@ -571,6 +582,7 @@ async function vReels(main) {
         <video class="reel" controls preload="none" src="/api/reels/${r.id}.mp4"></video>
       </div></details>
       <details><summary>Caption / narration</summary><div><pre class="raw">${esc(r.caption || '(none)')}</pre></div></details>
+      ${r.notes ? `<details><summary>Your notes for this cut</summary><div><pre class="raw">${esc(r.notes)}</pre></div></details>` : ''}
       <div class="actions" data-x="actions"></div></div>`);
     const acts = card.querySelector('[data-x=actions]');
     if (r.status !== 'posted' && r.status !== 'killed') {
@@ -588,7 +600,8 @@ async function vReels(main) {
         await api(`/reels/${r.id}/action`, { method: 'POST', body: { action: 'caption', caption: v } });
         toast('Caption saved.', 'ok'); route();
       });
-      if (r.run_id) addBtn(acts, '🔁 Remake', '', async () => makeReelFlow(r.run_id));
+      if (r.run_id) addBtn(acts, '🔁 Remake', '', async () =>
+        makeReelFlow(r.run_id, { remake: true, notes: r.notes || '' }));
       addBtn(acts, '✗ Kill', 'danger', async () => {
         if (!await confirmModal('Kill this reel?', `Reel #${r.id} will be discarded (the run keeps its story).`, { danger: true, label: 'Kill' })) return;
         await api(`/reels/${r.id}/action`, { method: 'POST', body: { action: 'kill' } });

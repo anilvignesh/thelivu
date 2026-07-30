@@ -79,6 +79,34 @@ def _ensure_voice(_p):
 _NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 _NVIDIA_SCRIPT_MODEL = os.environ.get("NVIDIA_SCRIPT_MODEL", "google/gemma-4-31b-it")
 
+# The owner's revision notes from the remake box. Direction, NOT licence: the reel is a
+# POST-GATE artefact, so nothing re-verifies it after he taps Post — a note that asks for
+# a claim the article doesn't carry has to lose to the article. Stated here rather than
+# trusted to the model's judgement, because "make the hook punchier" and "say they won the
+# bill" arrive through the same textarea. (Reel #12 overstated a tabled Bill as passed;
+# that was the generator compressing on its own. Notes must not reopen that door.)
+_NOTES_HEADER = """
+---
+OWNER REVISION NOTES — the previous cut of this reel was reviewed and these changes were
+asked for. Apply them to the script you write now:
+
+{notes}
+
+How to apply them: these notes direct emphasis, structure, pacing, tone, which beats to
+keep or cut, and how lines are phrased. They do NOT change what the story establishes.
+Your hard rules still govern and outrank every note: never upgrade a procedural status,
+never add a claim, number or quote the article does not contain, never narrate the
+editorial process. If a note asks for something the article does not support, follow the
+article and write the closest accurate line instead.
+"""
+
+
+def _notes_block(notes):
+    """The delimited revision-notes block appended to the script prompt, or "" when
+    there are none — so an ordinary build sends the exact prompt it always did."""
+    notes = (notes or "").strip()
+    return _NOTES_HEADER.format(notes=notes) if notes else ""
+
 
 def _gen_script_nvidia(draft, run_id=None):
     """Generate the video-script via NVIDIA-hosted Gemma 4 (free) instead of Claude.
@@ -171,7 +199,7 @@ def _illustrate(fields, out_dir, _p):
 
 
 def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
-                       mode=None, illustrated=True, script=None):
+                       mode=None, illustrated=True, script=None, notes=None):
     """Generate a narrated reel (Anil's cloned voice) for an approved run and store
     it. Returns a result dict — never raises for the expected failure modes so the
     dashboard can render a clean message:
@@ -197,6 +225,13 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
     conceptual FLUX illustration per beat plus the silent sign-off card. If any
     illustration fails it falls back to text-slide frames for the whole reel, so
     this never turns a working reel into a failed job.
+
+    `notes` is free text from the command centre's remake suggestion box — what to
+    change about the cut he just watched ("hook is flat, open on the pellet round",
+    "cut the fourth beat"). It shapes the script step only, is stored on the reel it
+    produced, and cannot override the skill's hard rules (see `_NOTES_HEADER`).
+    Ignored when an explicit `script=` is supplied — a hand-corrected script is
+    already the final word, so there is nothing left to direct.
     """
     from shared.db import get_run, save_reel
     from shared import quota
@@ -265,16 +300,24 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
         _p(0.10, "Using the supplied script…")
         if "HOOK:" not in script.upper():
             return {"ok": False, "error": "supplied script has no HOOK: line"}
+        if notes:
+            log.info("run #%s: script supplied by hand — revision notes not applied "
+                     "to it (they are stored with the reel)", run_id)
     else:
-        _p(0.10, "Writing the reel script (free Gemma 4)…" if nvidia
+        _p(0.10, "Rewriting the reel script to your notes…" if notes
+                 else "Writing the reel script (free Gemma 4)…" if nvidia
                  else "Writing the reel script…" if not attended
                  else "Waiting for the script (attended handoff)…")
+        # ONE prompt for both engines — the notes must not be able to reach Gemma but
+        # not Claude (or vice versa) depending on which mode is active.
+        script_input = draft + _notes_block(notes)
         try:
             if nvidia:
-                script = _gen_script_nvidia(draft, run_id=run_id)
+                script = _gen_script_nvidia(script_input, run_id=run_id)
             else:
                 from engine.agents.skill_runner import run_structured_skill
-                script = run_structured_skill("video-script", draft, marker=_M_SCRIPT, run_id=run_id)
+                script = run_structured_skill("video-script", script_input,
+                                              marker=_M_SCRIPT, run_id=run_id)
         except Exception as e:
             log.error("video-script failed for run #%s: %s", run_id, e)
             return {"ok": False, "error": f"script generation failed: {e}"}
@@ -330,8 +373,10 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
                        if slug and SLIDE_SERVER_BASE_URL else "")
     # The silent sign-off beat is not narration — keep it out of the description.
     caption = _build_caption(dict(fields, narration=narration), article_url)
-    reel_id = save_reel(run_id, mp4_bytes, caption, kind=kind)
+    reel_id = save_reel(run_id, mp4_bytes, caption, kind=kind,
+                        notes=(notes or "").strip() or None)
 
     _p(1.0, "Reel ready ✓")
     return {"ok": True, "reel_id": reel_id, "caption": caption, "kind": kind,
-            "beats": n_frames, "size_kb": len(mp4_bytes) // 1024}
+            "beats": n_frames, "size_kb": len(mp4_bytes) // 1024,
+            "notes": (notes or "").strip() or None}

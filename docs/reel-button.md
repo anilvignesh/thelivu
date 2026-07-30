@@ -55,6 +55,37 @@ None of the three touches the trust gate or the human publish gate.
 - Rendering is CPU-bound and slow — ~15-20 min for a ~6-beat / ~55s reel. Expect it.
 - Posting needs `IG_USER_ID` / `IG_ACCESS_TOKEN` (same as carousels).
 
+## Remake suggestions (added 2026-07-30)
+
+A remake used to be a pure re-roll: the modal collected only `run_id` + `dark`, so
+nothing carried the owner's reaction to the cut he had just watched. The reel modal now
+has a **suggestion box** — "What to change" on Remake — and the notes travel to the one
+place that can act on them, the video-script step.
+
+- `make_narrated_reel(..., notes=…)`; `_notes_block()` builds the delimited
+  `OWNER REVISION NOTES` block and it is appended to the **script prompt for both
+  engines** (`script_input = draft + _notes_block(notes)`) — the notes must not reach
+  Gemma but not Claude depending on which mode is live.
+- **Notes are direction, not licence.** The block restates that the skill's hard rules
+  outrank every note: no procedural upgrades, no claim/number/quote the article doesn't
+  carry, no process narration, and if a note asks for something the article doesn't
+  support, follow the article. This is stated rather than assumed because the reel is
+  **post-gate** — nothing re-verifies it after the Post tap, and "punch up the hook" and
+  "say they won the bill" arrive through the same textarea. (Reel #12 overstated a tabled
+  Bill as passed on the generator's own; notes must not reopen that door.)
+- Notes are **stored on the reel** (`reels.notes`) — shown on the card, and prefilled
+  into the next Remake, because a second remake is usually the first note plus one more.
+- Ignored for the prompt when an explicit `script=` is supplied (a hand-corrected script
+  is already the final word) — still recorded on the reel.
+- Attended parity: `./attend reel <run_id> --notes "…"`.
+- The legacy Streamlit `dashboard.py` was deliberately left alone — the command center
+  supersedes it; `notes` defaults to None so that path is unaffected.
+
+**Also fixed here:** `/assets/*` now sends `Cache-Control: no-cache`. The SPA has no
+bundler/hash step, so the browser was heuristically caching `app.js` and serving the
+previous build — the new modal shipped to the server and wasn't in the tab. `no-cache`
+means revalidate, not never-cache; the ETag still makes an unchanged file cheap.
+
 ## Not to do
 - Do **not** automate `./attend reel` (cron / Railway / `claude -p`). It is attended
   because a human is present; the blocking wait is the boundary, not a rough edge.

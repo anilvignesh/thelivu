@@ -145,6 +145,7 @@ CREATE TABLE IF NOT EXISTS reels (
     status         TEXT DEFAULT 'ready',
     ig_media_id    TEXT,
     ig_permalink   TEXT,
+    notes          TEXT,
     created_at     TIMESTAMP DEFAULT NOW(),
     posted_at      TIMESTAMP
 );
@@ -323,6 +324,7 @@ CREATE TABLE IF NOT EXISTS reels (
     status         TEXT DEFAULT 'ready',
     ig_media_id    TEXT,
     ig_permalink   TEXT,
+    notes          TEXT,
     created_at     TEXT DEFAULT (datetime('now')),
     posted_at      TEXT
 );
@@ -459,6 +461,12 @@ def init_db():
                     conn.commit()
                 except Exception:
                     conn.rollback()  # column already exists
+            for col, defn in [("notes", "TEXT")]:
+                try:
+                    cur.execute(f"ALTER TABLE reels ADD COLUMN {col} {defn}")
+                    conn.commit()
+                except Exception:
+                    conn.rollback()  # column already exists
         else:
             cur.executescript(_SCHEMA_SQLITE)
             for col, defn in [("legal_flag", "INTEGER DEFAULT 0"), ("legal_reason", "TEXT"), ("slug", "TEXT")]:
@@ -470,6 +478,11 @@ def init_db():
                               ("dark", "INTEGER DEFAULT 0"), ("stamp", "TEXT")]:
                 try:
                     cur.execute(f"ALTER TABLE carousel_runs ADD COLUMN {col} {defn}")
+                except Exception:
+                    pass
+            for col, defn in [("notes", "TEXT")]:
+                try:
+                    cur.execute(f"ALTER TABLE reels ADD COLUMN {col} {defn}")
                 except Exception:
                     pass
         conn.commit()
@@ -1393,11 +1406,15 @@ def get_carousel_run(carousel_id):
         conn.close()
 
 
-def save_reel(run_id, mp4_bytes, caption, kind="narrated"):
+def save_reel(run_id, mp4_bytes, caption, kind="narrated", notes=None):
     """Store a locally-generated reel MP4 in the DB so the Railway fileserver can
     serve it at a public URL for Instagram to fetch (Piper/ffmpeg run on Anil's
     laptop; Railway can't regenerate it — so the bytes live in the DB, same
-    survive-redeploys philosophy as slides). Returns the reel id."""
+    survive-redeploys philosophy as slides). Returns the reel id.
+
+    `notes` is the owner's revision direction that shaped THIS cut (the remake
+    suggestion box). Stored with the reel it produced, so the next remake can show
+    what was asked last time instead of re-rolling blind."""
     ph = "%s" if _is_postgres() else "?"
     if _is_postgres():
         import psycopg2 as _pg
@@ -1409,9 +1426,9 @@ def save_reel(run_id, mp4_bytes, caption, kind="narrated"):
     try:
         cur = conn.cursor()
         cur.execute(
-            f"INSERT INTO reels (run_id, kind, caption, mp4, status) "
-            f"VALUES ({ph},{ph},{ph},{ph},'ready')",
-            (run_id, kind, caption, blob),
+            f"INSERT INTO reels (run_id, kind, caption, mp4, notes, status) "
+            f"VALUES ({ph},{ph},{ph},{ph},{ph},'ready')",
+            (run_id, kind, caption, blob, notes or None),
         )
         if _is_postgres():
             cur.execute("SELECT lastval()"); rid = cur.fetchone()[0]
@@ -1431,7 +1448,7 @@ def get_reel(reel_id):
         ph = "%s" if _is_postgres() else "?"
         cur.execute(
             "SELECT id, run_id, kind, caption, status, ig_media_id, ig_permalink, "
-            "created_at, posted_at FROM reels WHERE id = " + ph, (reel_id,))
+            "notes, created_at, posted_at FROM reels WHERE id = " + ph, (reel_id,))
         return _fetchone(cur)
     finally:
         conn.close()
@@ -1447,7 +1464,7 @@ def get_reel_for_run(run_id):
         ph = "%s" if _is_postgres() else "?"
         cur.execute(
             "SELECT id, run_id, kind, caption, status, ig_media_id, ig_permalink, "
-            "created_at, posted_at FROM reels WHERE run_id = " + ph +
+            "notes, created_at, posted_at FROM reels WHERE run_id = " + ph +
             " ORDER BY id DESC LIMIT 1", (run_id,))
         return _fetchone(cur)
     finally:

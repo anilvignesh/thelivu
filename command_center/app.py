@@ -51,7 +51,12 @@ async def asset(request):
     p = (STATIC / name).resolve()
     if not p.is_file() or p.parent != STATIC.resolve():
         return JSONResponse({"error": "not found"}, status_code=404)
-    return FileResponse(p)
+    # `no-cache` = revalidate every time, NOT "never cache": FileResponse still sends
+    # an ETag, so an unchanged file is a 304 and costs nothing. Without this the
+    # browser heuristically caches app.js and silently serves the previous build —
+    # a UI change ships to the server and isn't there in the tab. There is no
+    # bundler/hash step to bust the URL, so the header is the whole mechanism.
+    return FileResponse(p, headers={"Cache-Control": "no-cache"})
 
 
 class AuthMiddleware(BaseHTTPMiddleware):

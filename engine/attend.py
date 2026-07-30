@@ -195,7 +195,7 @@ def cmd_reel(args):
         print(f"    [{int(frac*100):3d}%] {msg}", flush=True)
 
     res = make_narrated_reel(run_id, dark=bool(dark), article_url=article_url,
-                             progress=_p, mode="attended")
+                             progress=_p, mode="attended", notes=args.notes)
 
     if res.get("ok"):
         rid = res["reel_id"]
@@ -250,6 +250,10 @@ def main():
     c.set_defaults(fn=cmd_carousel)
     rl = sub.add_parser("reel", help="build a narrated reel for a run attended (no API)")
     rl.add_argument("run_id", type=int, help="published run id to make a reel for")
+    rl.add_argument("--notes", default=None,
+                    help="what to change about the previous cut — same suggestion box as "
+                         "the command centre's Remake (steers the script; it cannot "
+                         "override the article)")
     rl.set_defaults(fn=cmd_reel)
     sub.add_parser("clear", help="close the breaker early (after a top-up)").set_defaults(fn=cmd_clear)
     args = p.parse_args()

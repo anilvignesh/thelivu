@@ -153,7 +153,7 @@ def list_reels(request, data):
     limit = min(int(request.query_params.get("limit") or 20), 50)
     size = "OCTET_LENGTH(re.mp4)" if db.is_postgres() else "LENGTH(re.mp4)"
     reels = db.q(f"SELECT re.id, re.run_id, re.kind, re.caption, re.status, "
-                 f"re.ig_permalink, re.created_at, re.posted_at, "
+                 f"re.ig_permalink, re.notes, re.created_at, re.posted_at, "
                  f"{size} AS size_bytes, r.throughline AS story "
                  f"FROM reels re LEFT JOIN pipeline_runs r ON r.id = re.run_id "
                  f"ORDER BY re.id DESC LIMIT %s", (limit,))
@@ -164,12 +164,16 @@ def list_reels(request, data):
 @endpoint
 def make_reel(request, data):
     """Build a narrated reel locally (Gemma 4 script + Chatterbox voice +
-    ffmpeg). Long — runs as a job with live progress."""
+    ffmpeg). Long — runs as a job with live progress.
+
+    `notes` is the remake suggestion box: what to change about the cut he just
+    watched. It steers the script step and is stored on the resulting reel."""
     rid = int(data.get("run_id") or 0)
     run = get_run(rid)
     if not run:
         return err("no such run", 404)
     dark = data.get("dark")
+    notes = (data.get("notes") or "").strip() or None
     article_url = None
     base = _BASE()
     if base and run.get("slug"):
@@ -178,7 +182,7 @@ def make_reel(request, data):
     def do_make(progress):
         from publishing.make_reel import make_narrated_reel
         return make_narrated_reel(rid, dark=dark, article_url=article_url,
-                                  progress=progress)
+                                  progress=progress, notes=notes)
 
     return J({"ok": True, "job": jobs.submit(f"build reel for run #{rid}", do_make,
                                              {"run_id": rid})})
