@@ -19,6 +19,7 @@ finished MP4 bytes are stored in the DB for the Railway fileserver to serve.
 
 import logging
 import os
+import re
 import tempfile
 from pathlib import Path
 
@@ -108,6 +109,19 @@ def _notes_block(notes):
     return _NOTES_HEADER.format(notes=notes) if notes else ""
 
 
+# A reel lives or dies in its first three seconds, so the hook is the one structural
+# element every path validates. Anchored to line-start so a stray "HOOK:" inside prose
+# can't satisfy it, and it must carry actual words — `HOOK:` followed by nothing is the
+# same failure as no HOOK at all. The gap is `[ \t]*`, NOT `\s*`: `\s` matches newlines,
+# so `\s*\S` happily accepted a bare `HOOK:` line by reaching down to the text on the
+# NEXT line — which is exactly the hookless script this check exists to reject.
+_HOOK_RE = re.compile(r"^HOOK:[ \t]*\S", re.IGNORECASE | re.MULTILINE)
+
+
+def _has_hook(script):
+    return bool(_HOOK_RE.search(script or ""))
+
+
 def _gen_script_nvidia(draft, run_id=None):
     """Generate the video-script via NVIDIA-hosted Gemma 4 (free) instead of Claude.
 
@@ -141,12 +155,22 @@ def _gen_script_nvidia(draft, run_id=None):
         return r.json()["choices"][0]["message"]["content"].strip()
 
     out = _call()
-    if "HOOK:" not in out.upper():
+    if not _has_hook(out):
         log.warning("nvidia video-script missing HOOK: — retrying once (run #%s)", run_id)
-        out = _call("\n\n---\nYour previous reply lacked the required HOOK: line. Output "
-                    "ONLY the structured script now, starting at TITLE:, no preamble.")
+        out = _call("\n\n---\nYour previous reply lacked the required HOOK: line. The reel "
+                    "MUST open on a hook — the sharpest fact or the stakes, in one "
+                    "sentence, no throat-clearing. Output ONLY the structured script now, "
+                    "starting at TITLE:, no preamble.")
     # strip stray code fences some models wrap around the block
-    return out.replace("```", "").strip()
+    out = out.replace("```", "").strip()
+    # Fail rather than ship a hookless script. The old code returned `out` regardless of
+    # the retry's result: a second miss produced a script whose first line was BEAT 1, and
+    # the reel opened mid-story with no hook at all. run_structured_skill raises in the
+    # same situation; this path has to hold the same contract.
+    if not _has_hook(out):
+        raise RuntimeError("video-script produced no HOOK: line after a retry — refusing "
+                           "to build a reel that opens without a hook")
+    return out
 
 
 def _build_caption(fields, article_url):
@@ -291,15 +315,19 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
     #    handoff automatically when THELIVU_ATTENDED=1 (the ./attend process), or to
     #    Claude in api mode. Either way the parsing/marker check is identical.
     from publishing.reel import parse_script, build_reel
-    _M_SCRIPT = r"^HOOK:"  # the one line every valid video-script output must have
+    # One hook check for every path: the same predicate the nvidia generator enforces is
+    # handed to run_structured_skill as its marker (it accepts a callable), so api and
+    # attended modes cannot drift to a weaker rule than the default mode.
+    _M_SCRIPT = _has_hook
     if script:
         # A human-corrected script. The generator compresses, and compression is
         # where it overstates — reel #12 said the students "won a bill" that had
         # only been tabled. When a line has been fixed by hand, do not regenerate
         # it and hope; build exactly what was approved.
         _p(0.10, "Using the supplied script…")
-        if "HOOK:" not in script.upper():
-            return {"ok": False, "error": "supplied script has no HOOK: line"}
+        if not _has_hook(script):
+            return {"ok": False, "error": "supplied script has no HOOK: line — the reel "
+                                          "has to open on a hook"}
         if notes:
             log.info("run #%s: script supplied by hand — revision notes not applied "
                      "to it (they are stored with the reel)", run_id)
@@ -325,6 +353,12 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
     fields = parse_script(script)
     if not fields.get("beats"):
         return {"ok": False, "error": "video-script produced no usable beats"}
+    # Belt and braces on the thing that decides whether anyone watches: the generators
+    # validate their raw output, but only the parser knows what actually became beat one.
+    # A HOOK line the parser couldn't read is the same product as no hook.
+    if not fields.get("hook"):
+        return {"ok": False, "error": "the script's HOOK line did not parse — a reel has "
+                                      "to open on a hook, so nothing was rendered"}
     # Captured before the silent sign-off beat is appended below.
     narration = fields.get("narration") or ""
 

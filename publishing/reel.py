@@ -50,8 +50,13 @@ def parse_script(text):
     Returns {"title", "stamp"?, "beats": [(spoken, caption), ...], "hashtags"}.
     Hook and close are just the first/last beats — same rendering, so they collapse
     into one ordered list."""
+    # The gap after the colon is `[ \t]*`, NOT `\s*`. `\s` matches newlines, so with
+    # MULTILINE `^LABEL:\s*(.+)$` reached PAST an empty label line and captured the next
+    # line's text: a bare `HOOK:` silently stole BEAT 1's sentence as the hook (and then
+    # BEAT 1 was spoken twice), and a bare `CLOSE:` stole the HASHTAGS line. An empty
+    # label must read as empty.
     def one(label):
-        m = re.search(rf"^{label}:\s*(.+)$", text, re.IGNORECASE | re.MULTILINE)
+        m = re.search(rf"^{label}:[ \t]*(.+)$", text, re.IGNORECASE | re.MULTILINE)
         return m.group(1).strip() if m else ""
 
     title = one("TITLE")
@@ -68,12 +73,14 @@ def parse_script(text):
         images.append(one("HOOK_IMAGE"))
 
     # BEAT 1 / BEAT 1 CAPTION / BEAT 1 IMAGE, BEAT 2 / ... in order
+    # Same horizontal-only whitespace rule as `one()` — an empty `BEAT 2:` must not
+    # swallow the `BEAT 2 CAPTION:` line below it.
     spoken = {int(m.group(1)): m.group(2).strip()
-              for m in re.finditer(r"^BEAT\s+(\d+):\s*(.+)$", text, re.IGNORECASE | re.MULTILINE)}
+              for m in re.finditer(r"^BEAT[ \t]+(\d+):[ \t]*(.+)$", text, re.IGNORECASE | re.MULTILINE)}
     caps = {int(m.group(1)): m.group(2).strip()
-            for m in re.finditer(r"^BEAT\s+(\d+)\s+CAPTION:\s*(.+)$", text, re.IGNORECASE | re.MULTILINE)}
+            for m in re.finditer(r"^BEAT[ \t]+(\d+)[ \t]+CAPTION:[ \t]*(.+)$", text, re.IGNORECASE | re.MULTILINE)}
     imgs = {int(m.group(1)): m.group(2).strip()
-            for m in re.finditer(r"^BEAT\s+(\d+)\s+IMAGE:\s*(.+)$", text, re.IGNORECASE | re.MULTILINE)}
+            for m in re.finditer(r"^BEAT[ \t]+(\d+)[ \t]+IMAGE:[ \t]*(.+)$", text, re.IGNORECASE | re.MULTILINE)}
     for i in sorted(spoken):
         beats.append((spoken[i], caps.get(i, spoken[i])))
         images.append(imgs.get(i, ""))
@@ -84,12 +91,16 @@ def parse_script(text):
         images.append(one("CLOSE_IMAGE"))
 
     hashtags = one("HASHTAGS")
+    # Whether the script actually opened on a HOOK, reported separately because the
+    # beats list alone can't tell you: a script whose HOOK line is missing still
+    # produces beats (BEAT 1…n) and renders happily, opening the reel on a mid-story
+    # beat. The hook IS the reel — callers must be able to reject a script without one.
     # The Instagram description = the FULL narration (all spoken lines as prose),
     # so the whole story is in the caption for readers/muted viewers and every
     # acronym/number is correct in text. Built here so post-time can reuse it.
     narration = " ".join(sp for sp, _ in beats)
     return {"title": title, "kicker": kicker, "beats": beats, "images": images,
-            "hashtags": hashtags, "narration": narration}
+            "hashtags": hashtags, "narration": narration, "hook": hook}
 
 
 # ── frame rendering (Dossier look, 9:16) ────────────────────────────────────────
