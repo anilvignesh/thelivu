@@ -197,30 +197,35 @@ def _build_caption(fields, article_url):
     return "\n\n".join(b for b in bits if b)[:2200]
 
 
-# Words per second of narration, measured off the built reels (reel #14: 110 words in
-# 44.9s = 147 wpm). Used only to guess how many sub-shots a beat deserves BEFORE the
-# voice has been synthesised; the real durations are divided among them at render time,
-# so a bad estimate changes shot lengths slightly, never sync.
-_WORDS_PER_SEC = 147 / 60
-
-
-def _plan_shots(beats):
-    """How many sub-shots each beat gets, from its spoken word count.
+def _plan_shots(voiced):
+    """How many sub-shots each beat gets, from its REAL synthesised duration.
 
     A beat is 6-12s of speech (the script's 110-135 words over 5-6 beats makes that
     arithmetic unavoidable), so one picture per beat means one picture per ~9s. This
     plans 2-3 pictures for the long ones. The narration is untouched — only the number
     of images changes — so nothing here can affect what the reel SAYS.
+
+    This used to estimate the duration from the word count at 147wpm, before the voice
+    existed. It overshot on one beat of the first Assam reel and cut a 5.8s line into
+    two 2.9s shots — the fastest cuts in that reel were an estimation error, not a
+    choice. Voicing first costs nothing extra (build_reel reuses the wavs).
     """
     from publishing.reel import shots_for_duration
-    plan = []
-    for spoken, _caption in beats:
-        words = len((spoken or "").split())
-        if not words:
-            plan.append(1)      # the silent sign-off hold is one card, never cut
-            continue
-        plan.append(shots_for_duration(words / _WORDS_PER_SEC))
-    return plan
+    # A silent beat (the sign-off hold) carries only GAP_SECS of "speech", so it falls
+    # out as one card without needing a special case.
+    return [shots_for_duration(dur) for _wav, dur, _pauses in voiced]
+
+
+# Appended to a sub-shot's scene so the second picture is a different COMPOSITION of the
+# same idea, not the same image re-rolled. Seed-only variation left two of six pairs
+# near-identical on the first Assam build, and a cut to a near-identical image is the
+# worst kind — it spends the viewer's attention and returns nothing. The IDEA is
+# unchanged, so this cannot introduce a claim the beat does not make.
+_SHOT_ANGLES = [
+    "",
+    " Compose this as a wide establishing view, the subject small within a large space.",
+    " Compose this as a close detail of one part of the same subject.",
+]
 
 
 def _illustrate(fields, out_dir, _p, shots=None):
@@ -250,8 +255,12 @@ def _illustrate(fields, out_dir, _p, shots=None):
     for i, (spoken, caption) in enumerate(beats):
         given = prompts[i].strip() if i < len(prompts) and prompts[i] else ""
         scene = given or scene_from_beat(caption, spoken)
-        for _ in range(max(int(shots[i]), 1)):
-            scenes.append(scene)
+        k = max(int(shots[i]), 1)
+        for j in range(k):
+            # Only vary the framing when the beat is actually cut — a single-shot beat
+            # keeps the scene exactly as the script wrote it.
+            angle = _SHOT_ANGLES[j % len(_SHOT_ANGLES)] if k > 1 else ""
+            scenes.append(scene + angle)
             owner.append(i)
 
     def _step(k, total):
@@ -361,7 +370,7 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
     # 3) Script — video-script skill. run_structured_skill routes to the attended
     #    handoff automatically when THELIVU_ATTENDED=1 (the ./attend process), or to
     #    Claude in api mode. Either way the parsing/marker check is identical.
-    from publishing.reel import parse_script, build_reel
+    from publishing.reel import parse_script, build_reel, synth_beats
     # One hook check for every path: the same predicate the nvidia generator enforces is
     # handed to run_structured_skill as its marker (it accepts a callable), so api and
     # attended modes cannot drift to a weaker rule than the default mode.
@@ -417,14 +426,24 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
         tmpdir = Path(tmp)
         render_frame, kind, n_frames = None, "narrated", len(fields["beats"])
         shots_per_beat = None
+
+        # 4) Voice FIRST. The shot plan needs each beat's real duration (a word-count
+        #    estimate over-cut a 5.8s beat into two 2.9s shots) and its real pause
+        #    positions (so a cut lands on a breath, not mid-clause). build_reel is
+        #    handed these wavs, so the slowest step still runs exactly once.
+        _p(0.12, f"Voicing {len(fields['beats'])} beats…")
+        try:
+            voiced = synth_beats(fields["beats"], "chatterbox", tmpdir / "vo")
+        except Exception as e:
+            log.error("voicing failed for run #%s: %s", run_id, e)
+            return {"ok": False, "error": f"voicing failed: {e}"}
+
         if illustrated:
-            # Plan the sub-shots BEFORE generating: a 9-second beat gets 2-3 pictures
-            # instead of one, so the picture changes every ~4s. Words are untouched.
-            shots_per_beat = _plan_shots(fields["beats"])
+            shots_per_beat = _plan_shots(voiced)
             n_shots = sum(shots_per_beat)
-            log.info("run #%s: %d beats -> %d illustrated shots (%s)",
-                     run_id, len(shots_per_beat), n_shots, shots_per_beat)
-            _p(0.15, f"Illustrating {n_shots} shots across {len(shots_per_beat)} beats…")
+            log.info("run #%s: beats %s -> shots %s (%d images)", run_id,
+                     [round(d, 1) for _w, d, _p2 in voiced], shots_per_beat, n_shots)
+            _p(0.25, f"Illustrating {n_shots} shots across {len(shots_per_beat)} beats…")
             try:
                 images = _illustrate(fields, tmpdir / "ill", _p, shots=shots_per_beat)
             except Exception as e:
@@ -446,13 +465,15 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
                 # stutter. Fall back to one shot per beat along with the look.
                 shots_per_beat = None
 
-        # 5) Render — local Chatterbox voice + ffmpeg. Force the chatterbox backend
-        #    explicitly (the module TTS_BACKEND defaults to piper unless env-set).
-        _p(0.55 if illustrated else 0.35, f"Voicing {n_frames} beats + rendering…")
+        # 5) Render — ffmpeg over the already-voiced beats. The backend is still passed
+        #    because the appended sign-off beat has no pre-voiced wav: it is empty
+        #    spoken text, which `_synth` turns into the deliberate silent hold.
+        _p(0.55 if illustrated else 0.35, f"Rendering {n_frames} frames…")
         out_mp4 = tmpdir / f"reel_run{run_id}.mp4"
         try:
             build_reel(fields, bool(dark), out_mp4, backend="chatterbox",
-                       render_frame=render_frame, shots_per_beat=shots_per_beat)
+                       render_frame=render_frame, shots_per_beat=shots_per_beat,
+                       voiced=voiced)
         except Exception as e:
             log.error("build_reel failed for run #%s: %s", run_id, e)
             return {"ok": False, "error": f"reel render failed: {e}"}

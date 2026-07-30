@@ -364,8 +364,97 @@ def shots_for_duration(secs):
 
     Half-UP rather than round(): Python rounds .5 to even, so a 10s beat came out at
     2 shots of 5.0s when 3 shots of 3.3s sit closer to the 4s target.
+
+    Feed this the beat's REAL synthesised duration, never a word-count estimate. On the
+    first Assam build the estimate overshot on one beat and a 5.8s line was cut into two
+    2.9s shots — the fastest cuts in the reel were an estimation error, not a choice.
     """
     return max(1, min(MAX_SHOTS_PER_BEAT, int(secs / TARGET_SHOT_SECS + 0.5)))
+
+
+# A cut is only worth making where the voice already pauses. Silence shorter than this
+# is a consonant gap, not a breath.
+_MIN_PAUSE = 0.12
+# How far from the ideal split point we will move to find a real pause. Beyond this the
+# shots stop being even enough to read as deliberate.
+_PAUSE_SEARCH = 1.25
+
+
+def find_pauses(wav_path, min_pause=_MIN_PAUSE):
+    """Midpoints of the silent stretches inside a spoken wav, in seconds.
+
+    Used to land a picture cut on an audible pause instead of on a stopwatch. A cut at
+    exactly dur/2 usually falls mid-clause: the sentence keeps running while the image
+    changes, which reads as a flicker rather than a new idea, and no amount of slowing
+    down fixes an unmotivated cut. Empty list if ffmpeg finds nothing — the caller then
+    falls back to an even split.
+    """
+    try:
+        out = subprocess.run(
+            ["ffmpeg", "-nostdin", "-i", str(wav_path), "-af",
+             f"silencedetect=noise=-32dB:d={min_pause}", "-f", "null", "-"],
+            capture_output=True, text=True, check=True,
+        ).stderr
+    except Exception:
+        return []
+    starts, pauses = [], []
+    for line in out.splitlines():
+        if "silence_start:" in line:
+            try:
+                starts.append(float(line.split("silence_start:")[1].split()[0]))
+            except (IndexError, ValueError):
+                pass
+        elif "silence_end:" in line and starts:
+            try:
+                end = float(line.split("silence_end:")[1].split()[0])
+            except (IndexError, ValueError):
+                continue
+            pauses.append((starts.pop(0) + end) / 2.0)
+    return pauses
+
+
+def plan_cuts(total, k, pauses):
+    """Sub-shot lengths for a beat: k parts summing to EXACTLY `total`, with each
+    boundary snapped to the nearest real pause where one is close enough.
+
+    Returns the same shape as `_split_duration` so the renderer does not care which
+    way the boundaries were chosen.
+    """
+    if k <= 1:
+        return [total]
+    ideal = [total * (i + 1) / k for i in range(k - 1)]
+    chosen = []
+    for want in ideal:
+        near = [p for p in pauses if abs(p - want) <= _PAUSE_SEARCH
+                and p > sum(chosen) + 0.8 and p < total - 0.8]
+        chosen.append(min(near, key=lambda p: abs(p - want)) if near else want)
+    bounds = [0.0] + chosen + [total]
+    parts = [round(bounds[i + 1] - bounds[i], 3) for i in range(len(bounds) - 1)]
+    # Absorb rounding into the last part: the sub-shots are the video timeline against
+    # one continuous VO, so they must sum to the beat exactly.
+    parts[-1] = round(total - sum(parts[:-1]), 3)
+    return parts
+
+
+def synth_beats(beats, backend, work_dir):
+    """Voice every beat FIRST, so shots can be planned from real durations and real
+    pauses rather than from a word-count guess. Returns
+    [(wav_path, duration_including_gap, [pause_times])] aligned with `beats`.
+
+    The whole beat is synthesised in ONE call, exactly as before — splitting a sentence
+    into clauses and voicing them separately would give each clause its own prosody
+    contour and change how the reel sounds. The audio is untouched; we only learn where
+    it already breathes.
+    """
+    work_dir = Path(work_dir)
+    work_dir.mkdir(parents=True, exist_ok=True)
+    out = []
+    for i, (spoken, _caption) in enumerate(beats):
+        wav = work_dir / f"a{i}.wav"
+        dur = _synth(spoken, wav, backend) + GAP_SECS
+        pauses = find_pauses(wav) if (spoken or "").strip() else []
+        out.append((wav, dur, pauses))
+    return out
 
 
 def _split_duration(total, k):
@@ -401,7 +490,7 @@ def _zoom_expr(frames, zmax=ZOOM_MAX):
     inc = (zmax - 1.0) / max(frames, 1)
     return f"min(zoom+{inc:.8f},{zmax})"
 def build_reel(fields, dark, out_mp4, kicker=None, backend=None, render_frame=None,
-               shots_per_beat=None):
+               shots_per_beat=None, voiced=None):
     """Render frames + VO for each beat, animate with a gentle zoom, mux to MP4.
     `fields` is parse_script() output. `backend` overrides the module TTS_BACKEND
     for the voice (see _synth). `render_frame` overrides the frame renderer —
@@ -418,6 +507,10 @@ def build_reel(fields, dark, out_mp4, kicker=None, backend=None, render_frame=No
     because nothing is rewritten.
 
     Default (None) = one shot per beat, i.e. exactly the old behaviour.
+
+    `voiced` is `synth_beats()` output — pass it when the caller already voiced the
+    beats to plan the shots from real durations, so the slowest step does not run
+    twice. Omit it and the beats are voiced here, as before.
     """
     draw_frame = render_frame or _render_frame
     beats = fields["beats"]
@@ -432,8 +525,12 @@ def build_reel(fields, dark, out_mp4, kicker=None, backend=None, render_frame=No
         seg_paths, wav_paths = [], []
         n = len(beats)
         for i, (spoken, caption) in enumerate(beats):
-            wav = work / f"a{i}.wav"
-            dur = _synth(spoken, wav, backend) + GAP_SECS  # hold the frame through the gap too
+            if voiced and i < len(voiced):
+                wav, dur, pauses = voiced[i]
+            else:
+                wav = work / f"a{i}.wav"
+                dur = _synth(spoken, wav, backend) + GAP_SECS  # hold through the gap too
+                pauses = []
             wav_paths.append((wav, dur))
 
             # Cut this beat into sub-shots. The audio is one continuous take either
@@ -442,7 +539,9 @@ def build_reel(fields, dark, out_mp4, kicker=None, backend=None, render_frame=No
             k = 1
             if shots_per_beat and i < len(shots_per_beat):
                 k = max(int(shots_per_beat[i]), 1)
-            cuts = _split_duration(dur, k)
+            # Land each boundary on a real pause when one is close enough; otherwise
+            # this degrades to the even split.
+            cuts = plan_cuts(dur, k, pauses) if pauses else _split_duration(dur, k)
 
             for j, sub in enumerate(cuts):
                 png = work / f"f{i}_{j}.png"
