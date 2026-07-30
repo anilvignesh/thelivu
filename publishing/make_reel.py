@@ -141,7 +141,7 @@ def _gen_script_nvidia(draft, run_id=None):
               "structured script your instructions specify — no preamble, no commentary, "
               "no markdown fences.\n\n" + skill)
 
-    def _call(extra=""):
+    def _post(extra):
         r = requests.post(
             _NVIDIA_URL,
             headers={"Authorization": f"Bearer {key}"},
@@ -153,6 +153,14 @@ def _gen_script_nvidia(draft, run_id=None):
         )
         r.raise_for_status()
         return r.json()["choices"][0]["message"]["content"].strip()
+
+    def _call(extra=""):
+        """One script attempt, transient failures retried — see shared/nvidia.py for
+        why 5xx/timeouts are retried and 4xx is not. A single 500 used to abort the
+        whole build before the voice or ffmpeg had done anything."""
+        from shared.nvidia import call_with_retry
+        return call_with_retry(lambda: _post(extra),
+                               what=f"video-script via NVIDIA (run #{run_id})")
 
     out = _call()
     if not _has_hook(out):

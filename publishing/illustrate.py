@@ -116,6 +116,8 @@ def generate_beat_images(scenes, out_dir, *, seed=7, progress=None):
     import requests
     from pathlib import Path
 
+    from shared.nvidia import call_with_retry
+
     key = os.environ.get("NVIDIA_API_KEY", "")
     if not key:
         log.warning("NVIDIA_API_KEY not set — no illustrations")
@@ -125,16 +127,30 @@ def generate_beat_images(scenes, out_dir, *, seed=7, progress=None):
     out_dir.mkdir(parents=True, exist_ok=True)
 
     def _try(prompt, img_seed):
-        """One generation attempt. Returns bytes, or None if refused/blank."""
-        r = requests.post(
-            FLUX_URL,
-            headers={"Authorization": f"Bearer {key}", "Accept": "application/json"},
-            json={"prompt": f"{prompt} {STYLE}", "width": GEN_W, "height": GEN_H,
-                  "steps": 35, "cfg_scale": 3.5, "seed": img_seed},
-            timeout=180,
-        )
-        r.raise_for_status()
-        art = r.json()["artifacts"][0]
+        """One generation attempt, transient failures retried. Returns bytes, or None
+        if the safety filter refused it or the image came back blank.
+
+        The retry matters more here than anywhere else in the reel: illustrations are
+        now 2-3 per long beat rather than one, so a reel makes ~12 FLUX calls instead
+        of ~5 — and because a single missing illustration drops the WHOLE reel to text
+        slides (all-or-nothing, by design), one transient 500 out of twelve used to
+        cost the entire illustrated look. A refusal is NOT retried here: it's handled
+        by the caller re-prompting with the scene abstracted, which is the fix that
+        actually works on a filter.
+        """
+        def _once():
+            r = requests.post(
+                FLUX_URL,
+                headers={"Authorization": f"Bearer {key}", "Accept": "application/json"},
+                json={"prompt": f"{prompt} {STYLE}", "width": GEN_W, "height": GEN_H,
+                      "steps": 35, "cfg_scale": 3.5, "seed": img_seed},
+                timeout=180,
+            )
+            r.raise_for_status()
+            return r.json()
+
+        body = call_with_retry(_once, what=f"FLUX seed={img_seed}")
+        art = body["artifacts"][0]
         # The filter does not error — it returns a black frame with a reason.
         if "FILTER" in str(art.get("finishReason") or "").upper():
             return None

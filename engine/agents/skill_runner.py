@@ -352,18 +352,26 @@ def _run_nvidia(skill_name, input_text, system_prompt, max_tokens, run_id=None):
     a failure here does NOT trip it. Charter-safe: post-gate formatting only."""
     import requests
     from shared.db import record_usage
+    from shared.nvidia import call_with_retry
     log.info("Running %s via NVIDIA %s", skill_name, NVIDIA_MODEL)
-    r = requests.post(
-        f"{NVIDIA_BASE_URL.rstrip('/')}/chat/completions",
-        headers={"Authorization": f"Bearer {NVIDIA_API_KEY}"},
-        json={"model": NVIDIA_MODEL,
-              "messages": [{"role": "system", "content": system_prompt},
-                           {"role": "user", "content": input_text}],
-              "max_tokens": max_tokens, "temperature": 0.4},
-        timeout=300,
-    )
-    r.raise_for_status()
-    data = r.json()
+
+    def _once():
+        r = requests.post(
+            f"{NVIDIA_BASE_URL.rstrip('/')}/chat/completions",
+            headers={"Authorization": f"Bearer {NVIDIA_API_KEY}"},
+            json={"model": NVIDIA_MODEL,
+                  "messages": [{"role": "system", "content": system_prompt},
+                               {"role": "user", "content": input_text}],
+                  "max_tokens": max_tokens, "temperature": 0.4},
+            timeout=300,
+        )
+        r.raise_for_status()
+        return r.json()
+
+    # The free tier 500s under load and cold-starts for minutes; retrying a blip here
+    # is much cheaper than pausing and requeueing the whole run. Still never trips the
+    # paid breaker — NVIDIA has its own key and its own quota.
+    data = call_with_retry(_once, what=f"{skill_name} via NVIDIA")
     try:
         u = data.get("usage", {}) or {}
         record_usage(skill=skill_name, model=NVIDIA_MODEL,
