@@ -339,6 +339,29 @@ def _duration(path):
 
 
 # ── assembly ──────────────────────────────────────────────────────────────────
+# Total travel of the Ken-Burns push, as a zoom factor. Kept CONSTANT per beat rather
+# than derived from a per-second rate: the frames carry captions near the edges, so a
+# long beat drifting further would start cropping type. Same distance, over whatever
+# time the beat happens to take.
+ZOOM_MAX = 1.08
+
+
+def _zoom_expr(frames, zmax=ZOOM_MAX):
+    """The zoompan `z` expression for a beat `frames` long.
+
+    The increment MUST be derived from the beat's own length. It used to be a fixed
+    0.0006/frame against a fixed 1.08 ceiling, which meant the push ran out after
+    (1.08-1.0)/0.0006 = 133 frames — 4.4s at 30fps — and every frame after that was
+    pixel-identical. Speech beats run 6-12s, so most of a reel was a slow zoom that
+    visibly locked into a freeze-frame partway through each beat, and the shortest
+    beats never froze at all, so the stall looked like a glitch rather than a style.
+    Measured before the fix: 2.2 mean pixel change per half-second while moving,
+    0.001 after the ceiling.
+
+    The min() stays as a clamp against float drift on the last frame.
+    """
+    inc = (zmax - 1.0) / max(frames, 1)
+    return f"min(zoom+{inc:.8f},{zmax})"
 def build_reel(fields, dark, out_mp4, kicker=None, backend=None, render_frame=None):
     """Render frames + VO for each beat, animate with a gentle zoom, mux to MP4.
     `fields` is parse_script() output. `backend` overrides the module TTS_BACKEND
@@ -365,8 +388,9 @@ def build_reel(fields, dark, out_mp4, kicker=None, backend=None, render_frame=No
             wav_paths.append((wav, dur))
             seg = work / f"s{i}.mp4"
             frames = max(int(round(dur * FPS)), 1)
-            # gentle Ken-Burns zoom-in on the still (retention on a static frame)
-            vf = (f"zoompan=z='min(zoom+0.0006,1.08)':d={frames}"
+            # gentle Ken-Burns zoom-in on the still (retention on a static frame) —
+            # spread across the WHOLE beat, so it never stalls into a freeze-frame
+            vf = (f"zoompan=z='{_zoom_expr(frames)}':d={frames}"
                   f":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={W}x{H}:fps={FPS},"
                   f"format=yuv420p")
             subprocess.run(
@@ -438,8 +462,12 @@ def build_carousel_reel(image_paths, dark, out_mp4, secs_per=2.8):
         for i, img in enumerate(image_paths):
             seg = work / f"s{i}.mp4"
             # zoom within the slide, then pad to 9:16 with the slide's bg (static letterbox)
+            # Same length-derived push as the narrated reel. At the 2.8s default the old
+            # fixed increment happened not to reach its ceiling (4.3s), so this never
+            # froze in practice — but any caller passing a longer secs_per would have hit
+            # exactly the same stall.
             vf = (f"scale=1080:1350,"
-                  f"zoompan=z='min(zoom+0.0007,1.09)':d={frames}"
+                  f"zoompan=z='{_zoom_expr(frames, 1.09)}':d={frames}"
                   f":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1350:fps={FPS},"
                   f"pad={W}:{H}:0:{y_off}:color={bg},format=yuv420p")
             subprocess.run(
