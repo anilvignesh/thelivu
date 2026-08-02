@@ -1,6 +1,6 @@
 ---
 name: premise-check
-description: The Everyone Knows desk's front gate. Takes one candidate received belief and decides whether it is worth researching — is it genuinely a widely-held belief rather than a strawman, is the record's correction factual (shape A) or a contested frame (shape B), and for shape B is it narrow enough to be one documented case rather than a sweeping thesis. It never decides whether a claim is TRUE; it decides whether to spend.
+description: The front gate for both belief-correction desks. Takes one candidate received belief and routes it — is it genuinely widely held rather than a strawman, is the record's correction factual (shape A) or a contested frame (shape B), for shape B is it narrow enough to be one documented case rather than a sweeping thesis, and does correcting it change anything (if not, it is a GK piece, not an Everyone Knows piece). It never decides whether a claim is TRUE; it decides where the candidate goes and whether to spend.
 ---
 
 # Premise Check — the Everyone Knows gate
@@ -139,10 +139,19 @@ they use as an insult about poor countries and recognise it as a description of
 what was done to one.*
 
 If the honest answer is "they would know one more true thing, and nothing else
-shifts," that is trivia. **DROP it**, however popular and however false the
-belief is. A goldfish's memory span is widely misunderstood and easy to correct,
-and correcting it changes nothing about how anyone reads the world — so it is
-not a piece for this desk.
+shifts," it is not an Everyone Knows piece. **Verdict `ROUTE-GK`** — however
+popular and however false the belief is.
+
+**`ROUTE-GK` is not a kill.** It hands the candidate to the GK lane, which
+publishes exactly this: true, checkable, genuinely surprising, and inert. A
+goldfish's memory span is widely misunderstood, easy to correct, and changes
+nothing about how anyone reads the world — that is a fine GK reel and a bad
+Everyone Knows piece. Route it; don't bin it.
+
+Route rather than drop **only** when the candidate is otherwise healthy: a real
+belief (not a strawman), factual (shape A), and checkable. A contested frame
+that fails the consequence test is not GK — GK carries no arguments. Send a
+weak shape B to `DROP`, not to `ROUTE-GK`.
 
 Be honest here rather than generous. It is easy to inflate any correction into
 sounding consequential ("it teaches us not to trust what we're told!"). That
@@ -171,7 +180,19 @@ this desk has.
 
 **When you are unsure whether a belief does work, PURSUE.** Consequence is the
 softest of the four judgments and the one you are worst placed to make alone.
-Reserve this kill for beliefs that are inert on their face.
+Reserve `ROUTE-GK` for beliefs that are inert on their face.
+
+Note the Gandhi line above, because the gate has got it wrong before: the
+surname belief is *used* — to explain and to attack a dynasty's legitimacy —
+which is what "does work" means. That the dynasty has other sources of standing
+is not the test. A belief can do work without being the only thing doing it.
+
+**`DROP` is not available to you here.** If you have concluded that a candidate
+is a trivia correction, you have concluded `ROUTE-GK`. Those are the same
+finding, and writing "this is trivia, not a consequential correction" in
+`REASON` while emitting `DROP` is a contradiction — the GK lane exists precisely
+to publish that candidate. Check your verdict against your own reason before you
+emit it.
 
 ## Drop it, regardless of shape, when it is
 
@@ -183,10 +204,7 @@ Reserve this kill for beliefs that are inert on their face.
 - **Unfalsifiable**, or needing a conspiracy assumed in order to cohere.
 - **A live news story.** That is the news desk's job — route it there. This desk
   works on settled beliefs, not developing events.
-- **Trivia** — it fails the `SO_WHAT` test in question 4. Interesting is
-  necessary but not sufficient. This kill is easy to miss because a trivia
-  candidate looks healthy on every other axis: genuinely believed, genuinely
-  false, cleanly checkable. Verifiability is not consequence.
+- *(Trivia is **not** dropped — it is routed. See question 4 and `ROUTE-GK`.)*
 
 ## When in doubt
 
@@ -194,18 +212,27 @@ PURSUE. This gate exists to stop obvious waste and to stop broad theses — not 
 be an editor. The two hard kills are **the thesis that won't narrow** and **the
 strawman**. Everything else, let the research decide.
 
+Note what this means now that `ROUTE-GK` exists: **there are only two ways to
+lose a candidate entirely**, and the consequence test is not one of them. If
+you find yourself reaching for `DROP` on a true, believed, checkable factual
+claim, the verdict you want is almost certainly `ROUTE-GK`.
+
 ## Output (exactly this, nothing else)
 
 ```
-VERDICT: PURSUE-A | PURSUE-B | DROP
+VERDICT: PURSUE-A | PURSUE-B | ROUTE-GK | DROP
 BELIEF: <the belief, restated the way people actually hold it — not the extreme version>
 CURRENCY: <where an ordinary person would have picked this up; say "uncertain — verify downstream" if you are not sure>
 SHAPE: <one line: why A or B, using the honest-disagreement test>
 CASE_ANCHOR: <shape B only: the ONE documented case this piece works. "n/a" for A or DROP>
 COUNTER: <shape B only: the strongest argument against the piece's frame. "n/a" for A or DROP>
-SO_WHAT: <what the reader understands differently if this lands — beyond the corrected fact itself. If nothing, say so and DROP.>
+SO_WHAT: <what the reader understands differently if this lands — beyond the corrected fact itself. If nothing, say so and ROUTE-GK.>
 REASON: <one line — why it clears the floor, or exactly why it fails>
 ```
 
-On DROP for breadth, `REASON` must state what a workable narrow version would
+On `DROP` for breadth, `REASON` must state what a workable narrow version would
 be, so the candidate can come back in a usable form.
+
+On `ROUTE-GK`, `REASON` must say what makes it worth a GK reel — the surprise
+that carries it — since the GK lane has no consequence to lean on and the hook
+is all it has.

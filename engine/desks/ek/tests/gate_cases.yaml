@@ -54,7 +54,7 @@ cases:
       correct it is fabrication with extra steps.
 
   - id: great-wall-space
-    expect: DROP
+    expect: ROUTE-GK
     belief: >
       The Great Wall of China is the only man-made structure visible from space
       with the naked eye.
@@ -62,8 +62,9 @@ cases:
       Written first as a shape-A control, then corrected: it fails the
       consequence test exactly as goldfish-memory does. Widespread, false,
       cleanly checkable — and correcting it changes nothing about how a reader
-      reads the world. Kept deliberately as a SECOND trivia case, because trivia
-      is the failure mode that looks healthiest on every other axis.
+      reads the world. Kept as a SECOND routing case, because this shape is the
+      one that looks healthiest on every other axis and so is easiest to
+      mis-sort. It is a good GK reel and a bad Everyone Knows piece.
 
   - id: gandhi-surname
     expect: PURSUE-A
@@ -80,15 +81,16 @@ cases:
       genealogical claim shifts little. That is a defensible editorial position,
       not a malfunction.
 
-      OPEN QUESTION FOR THE OWNER: is this a piece? Marked `known_gap` rather
-      than chased, because the prompt edits needed to force PURSUE here would
-      re-loosen the trivia floor that correctly kills goldfish-memory and
-      great-wall-space — and passing trivia is the more dangerous failure. If
-      the owner rules it IS a piece, the fix is a calibration example in the
-      skill's question 4, with that cost understood.
+      OPEN QUESTION FOR THE OWNER: is this an Everyone Knows piece or a GK one?
+      Kept as `known_gap`, but ROUTE-GK has lowered the stakes a great deal: a
+      miss here no longer bins the candidate, it publishes it in the lighter
+      lane. The question is now which series it belongs to, not whether it
+      survives — which is a much cheaper thing to be wrong about.
     also: >
       Watch which way this moves after any edit to the SO_WHAT test. It is the
-      suite's sensitivity marker for the consequence floor.
+      suite's sensitivity marker for the consequence floor. ROUTE-GK is an
+      acceptable outcome here; DROP is NOT — a true, believed, checkable claim
+      must never be binned.
 
   - id: colonialism-overstated
     expect: DROP
@@ -108,12 +110,14 @@ cases:
       strawman. Restating is the gate's job, not the owner's.
 
   - id: goldfish-memory
-    expect: DROP
+    expect: ROUTE-GK
     belief: A goldfish has a three-second memory.
     why: >
       True received belief, and false — but correcting it changes nothing about
-      how anyone understands the world. Tests the trivia floor: interesting is
-      necessary, not sufficient.
+      how anyone understands the world. The case that originally exposed the
+      missing consequence test, and now the canonical ROUTE-GK: it must reach
+      the GK lane, never DROP. Binning this was the bug the owner caught by
+      asking where the trivia department was.
 
   - id: kerala-development
     expect: DROP

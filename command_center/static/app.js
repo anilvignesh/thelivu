@@ -27,6 +27,19 @@ function ago(ts) {
   return `${Math.floor(s / 86400)}d ago`;
 }
 function fdate(ts) { return ts ? String(ts).slice(0, 10) : '—'; }
+/* Elapsed seconds → "9s" / "4m 12s" / "1h 06m". Jobs run from 3s (a post) to
+   20+ minutes (an illustrated reel render), so both ends have to read well. */
+function dur(secs) {
+  const s = Math.max(0, Math.round(secs || 0));
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
+  return `${Math.floor(s / 3600)}h ${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}m`;
+}
+/* Job timestamps are epoch seconds from the server's clock (the registry is RAM,
+   not a DB column) — local wall time is what you want next to a stage. */
+function clock(epoch) {
+  return epoch ? new Date(epoch * 1000).toTimeString().slice(0, 8) : '—';
+}
 function pill(status) { return `<span class="pill ${esc(status)}">${esc(status || '—')}</span>`; }
 function inr(usd) { return `₹${(usd * (state.inrRate || 84)).toFixed(2)}`; }
 
@@ -117,17 +130,25 @@ function editModal(title, initial, { mono = true, rows = 14, hint = '' } = {}) {
   });
 }
 
-/* ── Job watcher — polls /api/jobs/<id>, shows live progress ───────────── */
+/* ── Job watcher — polls /api/jobs/<id>, shows live progress ─────────────
+   The modal is a convenience, not the record: the job lives server-side and
+   Activity shows it whether or not this modal (or this tab) still exists. So
+   dismissing it is "watch it there" rather than "lose it", which is what
+   "Run in background" used to mean in practice. */
 function watchJob(jobId, title) {
   return new Promise(resolve => {
     let hidden = false;
     const box = el(`<div><h3>${esc(title)}</h3>
       <div class="prog"><div style="width:2%"></div></div>
       <div class="prog-msg">starting…</div>
-      <div class="modal-actions"><button class="btn small" data-x="hide">Run in background</button></div>
+      <div class="muted small" style="margin-top:8px">Safe to close — it keeps running and stays visible in <b>Activity</b>.</div>
+      <div class="modal-actions"><button class="btn small" data-x="hide">Watch in Activity →</button></div>
     </div>`);
     const close = openModal(box);
-    box.querySelector('[data-x=hide]').onclick = () => { hidden = true; close(); };
+    box.querySelector('[data-x=hide]').onclick = () => {
+      hidden = true; close();
+      location.hash = '#/activity';
+    };
     const tick = async () => {
       let j;
       try { j = await api(`/jobs/${jobId}`); }
@@ -151,10 +172,13 @@ function watchJob(jobId, title) {
    DOM, because almost every action calls route() and rebuilds the view — without this
    the screen snaps back to "all / newest" the moment you post or kill something, which
    is half of why finding anything was painful. */
-const state = { view: 'overview', gateCount: 0, inrRate: 84, list: {} };
+const state = { view: 'overview', gateCount: 0, jobsRunning: 0, inrRate: 84, list: {} };
 
 const VIEWS = [
   ['overview',  '◉',  'Overview',      vOverview],
+  /* Second in the list on purpose: "I started a reel build and can't find it
+     anywhere" is what this view exists to answer, so it sits where he looks. */
+  ['activity',  '⚡', 'Activity',      vActivity],
   ['gate',      '📬', 'Gate',          vGate],
   ['stories',   '📰', 'Stories',       vStories],
   ['carousels', '🖼', 'Carousels',     vCarousels],
@@ -171,9 +195,10 @@ function nav() {
   const wrap = $('#nav-items');
   wrap.innerHTML = '';
   for (const [name, icon, label] of VIEWS) {
+    const count = name === 'gate' ? state.gateCount : name === 'activity' ? state.jobsRunning : 0;
     const b = el(`<button class="nav-item ${state.view === name ? 'active' : ''}">
       <span>${icon}</span><span>${label}</span>
-      ${name === 'gate' && state.gateCount ? `<span class="badge">${state.gateCount}</span>` : ''}
+      ${count ? `<span class="badge">${count}</span>` : ''}
     </button>`);
     b.onclick = () => { location.hash = '#/' + name; };
     wrap.appendChild(b);
@@ -181,6 +206,10 @@ function nav() {
 }
 
 async function route() {
+  // Views have no teardown hook, so the one live-polling view parks its timer
+  // here and the router cancels it — otherwise leaving Activity leaves a poll
+  // running forever against a screen nobody is looking at.
+  if (state.pollTimer) { clearTimeout(state.pollTimer); state.pollTimer = null; }
   const name = (location.hash || '#/overview').replace('#/', '') || 'overview';
   const entry = VIEWS.find(v => v[0] === name) || VIEWS[0];
   state.view = entry[0];
@@ -220,8 +249,12 @@ const STATUS_LABELS = {
   held: 'Held / needs attention', investigating: 'Investigating', writing: 'Writing',
   recheck_requested: 'Recheck requested', killed: 'Killed', dropped: 'Dropped',
   ready: 'Ready', posted: 'Posted', pending_review: 'Pending review', queued: 'Queued',
+  // Activity: a background job's state is its status on the wire, same param.
+  running: 'Running now', done: 'Finished', failed: 'Failed',
 };
 const KIND_LABELS = { all: 'Any look', illustrated: 'Illustrated', narrated: 'Text slides' };
+const JOB_KIND_LABELS = { all: 'Any job', reel: 'Reel builds', post: 'Posting',
+                          publish: 'Publishing', suggest: 'AI suggestions' };
 
 function listBar(view, opts) {
   const sorts = opts.sorts || ['newest', 'oldest'];
@@ -237,7 +270,7 @@ function listBar(view, opts) {
   const node = el(`<div class="row" style="margin-bottom:12px">
     <input data-x="q" placeholder="Search…" value="${esc(st.q)}" style="flex:1;min-width:150px">
     ${sel('status', opts.statuses || ['all'], STATUS_LABELS)}
-    ${opts.kinds ? sel('kind', opts.kinds, KIND_LABELS) : ''}
+    ${opts.kinds ? sel('kind', opts.kinds, opts.kindLabels || KIND_LABELS) : ''}
     ${sel('sort', sorts, SORT_LABELS)}
     <button class="btn ghost small" data-x="clear" title="Clear search, filter and sort">↺</button>
   </div>`);
@@ -323,6 +356,16 @@ async function vOverview(main) {
       <span class="muted small">Model stages are parked until midnight UTC. Publishing and approvals still work.
       Change the cap in <a href="#/system">System</a>.</span></div></div>`));
 
+  // Above the gate banner: a build in flight is the thing you came to check on,
+  // and it is the state that used to be invisible from every screen.
+  const running = d.jobs_running || [];
+  state.jobsRunning = running.length; nav();
+  if (running.length)
+    main.appendChild(el(`<div class="banner"><span class="big">⚡</span><div>
+      <b>${running.length}</b> job${running.length > 1 ? 's' : ''} running —
+      ${running.map(j => `${esc(j.name)} <span class="muted small">(${Math.round(j.progress * 100)}%, ${dur(j.elapsed)})</span>`).join(' · ')}
+      <br><span class="muted small">Live progress in <a href="#/activity">Activity</a>.</span></div></div>`));
+
   main.appendChild(el(d.gate.length
     ? `<div class="banner"><span class="big">📬</span><div><b>${d.gate.length}</b> draft${d.gate.length > 1 ? 's' : ''} waiting at your gate
        — <a href="#/gate">review now</a></div></div>`
@@ -351,7 +394,7 @@ async function vOverview(main) {
   for (const r of d.recent) {
     left.appendChild(el(`<div class="item clickable" onclick="location.hash='#/stories';setTimeout(()=>openRun(${r.id}),50)">
       <div class="row between"><div>
-        <span class="id">#${r.id}</span> <span class="title">${esc((r.throughline || 'Untitled').slice(0, 80))}</span>
+        <span class="id">#${r.id}</span> <span class="title">${esc((r.throughline || 'Untitled').slice(0, 80))}</span>${deskBadge(r.desk)}
         <div class="meta">${fdate(r.created_at)} · ${esc(r.source || '')} · gate ${esc(r.trust_gate || '—')}</div>
       </div>${pill(r.status)}</div></div>`));
   }
@@ -376,6 +419,154 @@ async function vOverview(main) {
       <div class="meta">updated ${ago(dg.updated_at)} ${pill(dg.status)}</div></div>`));
   }
   main.appendChild(g);
+}
+
+/* ══ ACTIVITY ═══════════════════════════════════════════════════════════
+   Background work, visible. A reel build takes 15-20 minutes and used to exist
+   only inside the modal that started it: hide the modal or reload the tab and
+   there was nowhere to see it again. Job state is server-side (RAM, in the CC
+   process — see command_center/jobs.py), so this screen shows the same truth
+   after a reload, and on the phone over Tailscale.
+
+   Cards are updated in place rather than re-rendered: the list repaints every
+   2s, and rebuilding it would collapse the timeline you just opened and throw
+   away your scroll position mid-render. */
+
+const JOB_ICONS = { reel: '🎬', post: '📤', publish: '📰', suggest: '✨', job: '⚙' };
+
+function jobNode(j) {
+  const node = el(`<div class="item" data-job="${esc(j.id)}">
+    <div class="row between" style="gap:8px">
+      <div style="min-width:0">
+        <span class="id">${JOB_ICONS[j.kind] || JOB_ICONS.job} ${esc(j.name)}</span>
+        <div class="meta" data-x="story"></div>
+      </div><span data-x="pill"></span>
+    </div>
+    <div class="prog"><div style="width:2%"></div></div>
+    <div class="row between">
+      <span class="prog-msg" data-x="msg" style="min-width:0"></span>
+      <span class="muted small" data-x="time"></span>
+    </div>
+    <div class="small" data-x="err" style="color:var(--bad);margin-top:6px"></div>
+    <div class="actions" data-x="actions"></div>
+  </div>`);
+  node.querySelector('[data-x=story]').textContent =
+    (j.run_id ? `run #${j.run_id}` : '') + (j.story ? ` — ${String(j.story).slice(0, 80)}` : '');
+  addBtn(node.querySelector('[data-x=actions]'), 'Stages + detail', 'small', () => openJob(j.id));
+  return node;
+}
+
+function jobPaint(node, j) {
+  const bar = node.querySelector('.prog > div');
+  bar.style.width = `${Math.max(3, (j.state === 'done' ? 1 : j.progress) * 100)}%`;
+  bar.style.background = j.state === 'failed' ? 'var(--brick)'
+                       : j.state === 'done' ? 'var(--good)' : 'var(--gold)';
+  node.querySelector('[data-x=pill]').innerHTML = pill(j.state);
+  node.querySelector('[data-x=msg]').textContent = j.message || '';
+  // "Silent for 4m" is the difference between a slow ffmpeg and a wedged one —
+  // the render sits on one message for minutes, so elapsed alone tells you
+  // nothing. Only flagged past 2 min, which no healthy stage exceeds.
+  const quiet = j.state === 'running' && j.stale_secs > 120
+    ? ` · quiet ${dur(j.stale_secs)}` : '';
+  node.querySelector('[data-x=time]').textContent =
+    (j.state === 'running' ? '⏱ ' : '') + dur(j.elapsed) + quiet;
+  const errBox = node.querySelector('[data-x=err]');
+  errBox.textContent = j.error ? `✗ ${j.error}` : '';
+  errBox.style.display = j.error ? '' : 'none';
+}
+
+/* Sync a container to a list of jobs by id: update what's there, create what
+   isn't, drop what's gone. appendChild on an existing node MOVES it, so the
+   order follows the server without rebuilding anything. */
+function syncJobs(container, list) {
+  const seen = new Set();
+  for (const j of list) {
+    seen.add(j.id);
+    let node = container.querySelector(`[data-job="${j.id}"]`);
+    if (!node) node = jobNode(j);
+    jobPaint(node, j);
+    container.appendChild(node);
+  }
+  for (const n of [...container.querySelectorAll('[data-job]')])
+    if (!seen.has(n.getAttribute('data-job'))) n.remove();
+}
+
+window.openJob = async function (jid) {
+  let j;
+  try { j = await api(`/jobs/${jid}`); }
+  catch (e) { return toast(e.message, 'err'); }
+  const steps = j.steps || [];
+  const end = j.finished_at || (Date.now() / 1000);
+  const rows = steps.map((s, i) => {
+    const till = i + 1 < steps.length ? steps[i + 1].at : end;
+    return `<tr><td class="muted">${clock(s.at)}</td>
+      <td>${esc(s.message)}</td>
+      <td class="muted">${dur(till - s.at)}</td></tr>`;
+  }).join('');
+  const box = el(`<div>
+    <div class="row between"><h3>${JOB_ICONS[j.kind] || JOB_ICONS.job} ${esc(j.name)}</h3>${pill(j.state)}</div>
+    <div class="muted small">${j.run_id ? `run #${j.run_id} · ` : ''}${esc(j.story || '')}</div>
+    <div class="muted small">started ${clock(j.started_at)} · ${dur(j.elapsed)}${
+      j.finished_at ? ` · finished ${clock(j.finished_at)}` : ' · still running'}</div>
+    <div class="prog"><div style="width:${Math.max(3, j.progress * 100)}%"></div></div>
+    <div class="prog-msg">${esc(j.message || '')}</div>
+    ${j.error ? `<div class="card danger" style="margin-top:10px"><b>Failed</b><div class="small">${esc(j.error)}</div></div>` : ''}
+    <div class="eyebrow">Stages</div>
+    <div class="tablewrap"><table><tr><th>at</th><th>stage</th><th>took</th></tr>${rows}</table></div>
+    ${j.result ? `<details><summary>Result</summary><div><pre class="raw">${esc(JSON.stringify(j.result, null, 2))}</pre></div></details>` : ''}
+    <div class="modal-actions"><button class="btn" data-x="no">Close</button></div></div>`);
+  const close = openModal(box);
+  box.querySelector('[data-x=no]').onclick = close;
+};
+
+async function vActivity(main) {
+  main.innerHTML = '';
+  const head = el(`<div><h1>Activity</h1><div class="sub" data-x="sub">Loading…</div></div>`);
+  const now = el(`<div><div class="eyebrow" data-x="lbl">Running now</div><div data-x="list"></div></div>`);
+  main.append(head, now);
+
+  const bar = listBar('activity', {
+    pageSize: 25,
+    statuses: ['all', 'running', 'done', 'failed'],
+    kinds: ['all', 'reel', 'post', 'publish', 'suggest'],
+    kindLabels: JOB_KIND_LABELS,
+    sorts: ['newest', 'oldest'],
+  });
+  main.append(el(`<div class="eyebrow">History</div>`), bar.node);
+  const list = el(`<div></div>`);
+  main.append(list, bar.foot);
+  bar.onChange = () => tick(true);
+  await tick(true);
+
+  async function tick(first) {
+    if (state.view !== 'activity') return;
+    let d;
+    try { d = await api('/jobs?' + bar.qs()); }
+    catch (e) {
+      if (first) throw e;
+      return;                       // a blip mid-poll shouldn't blank the screen
+    }
+    if (state.view !== 'activity') return;
+    const s = d.summary;
+    state.jobsRunning = s.running; nav();
+    head.querySelector('[data-x=sub]').innerHTML =
+      `${s.running} running · ${s.done} finished · ${s.failed} failed
+       <span class="muted">— since the command center started at ${clock(s.boot_at)}.
+       Work runs inside this process, so a restart ends it and clears this list.</span>`;
+    now.querySelector('[data-x=lbl]').textContent =
+      d.running.length ? `Running now — ${d.running.length}` : 'Running now';
+    const nowList = now.querySelector('[data-x=list]');
+    const ph = nowList.querySelector('[data-x=ph]');
+    if (ph) ph.remove();            // syncJobs only owns [data-job] nodes
+    syncJobs(nowList, d.running);
+    if (!d.running.length)
+      nowList.appendChild(el('<div class="muted small" data-x="ph">Nothing building right now.</div>'));
+    syncJobs(list, d.jobs);
+    bar.setCount(d.jobs.length, d.total);
+    // Idle costs a poll every 6s; something building gets 2s. Both are pure RAM
+    // reads on the server (the story labels are cached), so this is cheap.
+    state.pollTimer = setTimeout(tick, s.running ? 2000 : 6000);
+  }
 }
 
 /* ══ RUN DETAIL (shared by Gate + Stories) ══════════════════════════════ */
@@ -473,10 +664,20 @@ function addBtn(parent, label, cls, fn) {
   parent.appendChild(b);
 }
 
+const DESK_LABEL = { news: 'News', ek: 'Everyone Knows', gk: 'Turns Out' };
+
+function deskBadge(desk) {
+  // 'news' is the overwhelming majority and the historical default — badging it
+  // would be noise on almost every row, so only the belief desks get a mark.
+  if (!desk || desk === 'news') return '';
+  const label = DESK_LABEL[desk] || desk;
+  return ` <span class="badge desk-${esc(desk)}">${esc(label)}</span>`;
+}
+
 function runCard(r) {
   const c = el(`<div class="item clickable">
     <div class="row between"><div style="min-width:0">
-      <span class="id">#${r.id}</span> <span class="title">${esc((r.throughline || 'Untitled').slice(0, 95))}</span>
+      <span class="id">#${r.id}</span> <span class="title">${esc((r.throughline || 'Untitled').slice(0, 95))}</span>${deskBadge(r.desk)}
       <div class="meta">${fdate(r.created_at)} · ${esc(r.source || '')} · gate ${esc(r.trust_gate || '—')}</div>
     </div>${pill(r.status)}</div></div>`);
   c.onclick = () => openRun(r.id);
@@ -1107,11 +1308,15 @@ async function vSystem(main) {
     bioWrap.appendChild(add);
   }).catch(() => { bioWrap.innerHTML = '<div class="muted small">Could not load bio links.</div>'; });
 
-  main.appendChild(el(`<div class="eyebrow">Background jobs (this session)</div>`));
-  if (!d.jobs.length) main.appendChild(el(`<div class="muted small">None yet.</div>`));
+  // A footnote now — Activity is the surface for background work; this stays so
+  // System still tells you at a glance whether anything is going on.
+  const js = d.jobs_summary || {};
+  main.appendChild(el(`<div class="eyebrow">Background jobs — ${js.running || 0} running ·
+    <a href="#/activity">open Activity</a> for live progress and stages</div>`));
+  if (!d.jobs.length) main.appendChild(el(`<div class="muted small">None since this process started.</div>`));
   for (const j of d.jobs)
-    main.appendChild(el(`<div class="item small"><div class="row between">
-      <span>${esc(j.name)} <span class="muted">· ${esc(j.message || '')}</span></span>${pill(j.state)}</div></div>`));
+    main.appendChild(el(`<div class="item small clickable" onclick="openJob('${esc(j.id)}')"><div class="row between">
+      <span>${esc(j.name)} <span class="muted">· ${esc(j.message || '')} · ${dur(j.elapsed)}</span></span>${pill(j.state)}</div></div>`));
 }
 
 /* ══ COSTS ══════════════════════════════════════════════════════════════ */
@@ -1172,6 +1377,7 @@ async function tryLogin() {
     $('#login').classList.add('hidden');
     $('#shell').classList.remove('hidden');
     route();
+    startJobBadgePoll();
   } catch (e) {
     $('#login-err').textContent = e.status === 401 ? 'Wrong password.' : e.message;
   }
@@ -1180,10 +1386,28 @@ $('#login-btn').onclick = tryLogin;
 $('#login-pw').addEventListener('keydown', e => { if (e.key === 'Enter') tryLogin(); });
 $('#nav-refresh').onclick = () => route();
 
+/* Nav badge poller. /api/jobs/summary is a RAM read with no DB behind it, so
+   every screen can know a reel is still building without being on Activity —
+   the badge is what makes "where did my build go?" answerable from anywhere.
+   Skipped while the tab is hidden (the phone would otherwise poll all night),
+   while logged out, and on Activity itself, which polls with more detail. */
+function startJobBadgePoll() {
+  if (state.badgePoll) return;        // boot and a fresh login both call this
+  state.badgePoll = setInterval(async () => {
+    if (document.hidden || state.view === 'activity') return;
+    if ($('#shell').classList.contains('hidden')) return;
+    try {
+      const s = await api('/jobs/summary');
+      if (s.running !== state.jobsRunning) { state.jobsRunning = s.running; nav(); }
+    } catch (e) { /* offline blip — a badge is not worth a toast */ }
+  }, 5000);
+}
+
 (async function boot() {
   try {
     await api('/overview');           // cookie still valid?
     $('#shell').classList.remove('hidden');
     route();
+    startJobBadgePoll();
   } catch (e) { /* showLogin already triggered on 401 */ }
 })();

@@ -51,7 +51,7 @@ def overview(request, data):
     # ~1s each on this ISP — every saved query is user-visible latency).
     def fetch_lists():
         return db.q(
-            "SELECT id, created_at, source, throughline, trust_gate, status "
+            "SELECT id, created_at, source, throughline, trust_gate, status, desk "
             "FROM pipeline_runs "
             "WHERE status IN ('pending_human','held','hold','needs_attention') "
             "   OR id > (SELECT COALESCE(MAX(id),0) - 10 FROM pipeline_runs) "
@@ -65,6 +65,8 @@ def overview(request, data):
 
     r = db.parallel(
         counts=lambda: db.q("SELECT status, COUNT(*) AS n FROM pipeline_runs GROUP BY status"),
+        desk_counts=lambda: db.q("SELECT desk, status, COUNT(*) AS n FROM pipeline_runs "
+                                 "GROUP BY desk, status"),
         lists=fetch_lists,
         agents=lambda: db.q("SELECT skill, model, topic, started_at "
                             "FROM active_agents ORDER BY started_at"),
@@ -93,6 +95,10 @@ def overview(request, data):
                     for x in r["daily"] if str(x["day"])[:10] == today)
     return J({
         "counts": counts,
+        # In-RAM, so the banner that tells him a reel is still building costs the
+        # overview nothing. It is on this screen because "I started a build and
+        # can't find it" was the failure — Activity has the detail.
+        "jobs_running": _label_jobs(jobs.active()),
         "gate": gate,
         "held": held,
         "agents": r["agents"],
@@ -150,7 +156,10 @@ def system_status(request, data):
         "queue": r["queue"],
         "env": env_checks,
         "attend_hint": "./attend cycle",
-        "jobs": jobs.recent(30),
+        # Kept as a pointer only — Activity owns background work now. Slim: the
+        # timelines and results would triple this payload for a footnote.
+        "jobs": jobs.recent(10, slim=True),
+        "jobs_summary": jobs.summary(),
     })
 
 
@@ -179,17 +188,114 @@ def voice_control(request, data):
               "output": (out.stdout + out.stderr)[-2000:]})
 
 
+# ── Background jobs (the Activity view) ───────────────────────────────────────
+#
+# The registry itself is RAM (see command_center/jobs.py for why). The only DB
+# work here is turning `meta` ids into a story title, and that is cached for the
+# life of the process: Activity polls every 2s, and a throughline that has
+# already been read cannot usefully change under a job that is mid-flight, so
+# re-reading it would spend a ~0.5s Railway round trip per poll on the one
+# screen that has to feel live. Cold, it is at most three batched queries in
+# parallel; warm, it is zero.
+_LABELS = {}
+
+
+def _in_sql(column, ids):
+    """Portable `column IN (…)` — ANY() on Postgres, placeholders on the scratch
+    sqlite the tests run against (db.q rewrites %s → ? for it)."""
+    if db.is_postgres():
+        return f"{column} = ANY(%s)", (list(ids),)
+    return f"{column} IN ({','.join(['%s'] * len(ids))})", tuple(ids)
+
+
+def _label_jobs(rows):
+    """Attach `story` (+ the owning `run_id`) to each job from its meta ids."""
+    want = {}   # (kind, id) -> None
+    for j in rows:
+        m = j.get("meta") or {}
+        for key in ("run_id", "carousel_id", "reel_id"):
+            if m.get(key) and (key, m[key]) not in _LABELS:
+                want.setdefault(key, set()).add(m[key])
+
+    def _fetch(sql_tpl, column, ids):
+        clause, params = _in_sql(column, ids)
+        return db.q(sql_tpl.format(where=clause), params)
+
+    tasks = {}
+    if want.get("run_id"):
+        tasks["run_id"] = lambda ids=want["run_id"]: _fetch(
+            "SELECT id, id AS run_id, throughline FROM pipeline_runs WHERE {where}",
+            "id", ids)
+    if want.get("carousel_id"):
+        tasks["carousel_id"] = lambda ids=want["carousel_id"]: _fetch(
+            "SELECT cr.id, cr.run_id, r.throughline FROM carousel_runs cr "
+            "LEFT JOIN pipeline_runs r ON r.id = cr.run_id WHERE {where}", "cr.id", ids)
+    if want.get("reel_id"):
+        tasks["reel_id"] = lambda ids=want["reel_id"]: _fetch(
+            "SELECT re.id, re.run_id, r.throughline FROM reels re "
+            "LEFT JOIN pipeline_runs r ON r.id = re.run_id WHERE {where}", "re.id", ids)
+    if tasks:
+        try:
+            for key, found in db.parallel(**tasks).items():
+                for row in found:
+                    _LABELS[(key, row["id"])] = {"story": row.get("throughline"),
+                                                 "run_id": row.get("run_id")}
+        except Exception:
+            pass    # a label is decoration; never let it fail the Activity poll
+
+    for j in rows:
+        m = j.get("meta") or {}
+        for key in ("run_id", "carousel_id", "reel_id"):
+            hit = _LABELS.get((key, m.get(key)))
+            if hit:
+                j["story"] = hit["story"]
+                j["run_id"] = hit["run_id"]
+                break
+    return rows
+
+
 @endpoint
 def job_status(request, data):
-    j = jobs.get(request.path_params["jid"])
+    """Full detail for one job — includes the stage timeline and the result."""
+    j = jobs.view(jobs.get(request.path_params["jid"]))
     if not j:
         return err("no such job", 404)
-    return J(j)
+    return J(_label_jobs([j])[0])
 
 
 @endpoint
 def jobs_recent(request, data):
-    return J({"jobs": jobs.recent(50)})
+    """The Activity list. Same five wire params as every other list surface
+    (q / status / sort / limit / offset) so the shared `listBar` drives it, plus
+    `kind`; `running` rides along unfiltered because "what is building right
+    now" must not be hideable behind a filter — that was the whole complaint."""
+    qp = request.query_params
+    try:
+        limit = min(max(int(qp.get("limit") or 40), 1), 200)
+    except ValueError:
+        limit = 40
+    try:
+        offset = max(int(qp.get("offset") or 0), 0)
+    except ValueError:
+        offset = 0
+    status = (qp.get("status") or "all").strip()
+    kind = (qp.get("kind") or "all").strip()
+    q = (qp.get("q") or "").strip()
+    rows, total = jobs.query(q=q, state=status, kind=kind, limit=limit, offset=offset)
+    if (qp.get("sort") or "newest") == "oldest":
+        rows = list(reversed(rows))     # `query` returns newest-first
+    running = jobs.active()
+    _label_jobs(rows + running)
+    return J({"jobs": rows, "running": running, "summary": jobs.summary(),
+              "total": total, "limit": limit, "offset": offset,
+              "sort": qp.get("sort") or "newest", "status": status or "all",
+              "kind": kind, "q": q})
+
+
+@endpoint
+def jobs_summary(request, data):
+    """Nav-badge poll — pure RAM, no DB, safe to hit every few seconds."""
+    return J(jobs.summary())
 
 
 @endpoint
@@ -222,5 +328,8 @@ routes = [
     Route("/system/breaker/clear", clear_breaker, methods=["POST"]),
     Route("/system/budget", set_budget, methods=["POST"]),
     Route("/jobs", jobs_recent, methods=["GET"]),
+    # Before the {jid} pattern — Starlette matches in order and "summary" is a
+    # legal job id as far as the path converter is concerned.
+    Route("/jobs/summary", jobs_summary, methods=["GET"]),
     Route("/jobs/{jid}", job_status, methods=["GET"]),
 ]

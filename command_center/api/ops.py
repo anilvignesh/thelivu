@@ -129,7 +129,8 @@ def sources_state(request, data):
                    SUM(CASE WHEN status IN ('killed','kill') THEN 1 ELSE 0 END) AS killed,
                    SUM(CASE WHEN status IN ('held','hold') THEN 1 ELSE 0 END) AS held,
                    MAX(created_at) AS last_seen
-            FROM pipeline_runs GROUP BY source ORDER BY COUNT(*) DESC
+            FROM pipeline_runs WHERE desk = 'news'
+            GROUP BY source ORDER BY COUNT(*) DESC
         """),
         approved=lambda: db.q("SELECT id, name, platform, feed_url, lean, tier, role, added_at "
                               "FROM approved_sources WHERE status='active' ORDER BY id DESC"),

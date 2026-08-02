@@ -78,6 +78,9 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
     legal_flag          BOOLEAN DEFAULT FALSE,
     legal_reason        TEXT,
     slug                TEXT,
+    -- Which desk produced this run: 'news' | 'ek' | 'gk'. Declared here as well as
+    -- in the ALTER migration so a fresh database can carry the index below.
+    desk                TEXT NOT NULL DEFAULT 'news',
     created_at          TIMESTAMP DEFAULT NOW(),
     updated_at          TIMESTAMP DEFAULT NOW()
 );
@@ -180,6 +183,20 @@ CREATE TABLE IF NOT EXISTS dig_updates (
     body        TEXT,
     created_at  TIMESTAMP DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_pipeline_runs_desk ON pipeline_runs(desk);
+
+CREATE TABLE IF NOT EXISTS belief_pieces (
+    id            SERIAL PRIMARY KEY,
+    run_id        INTEGER REFERENCES pipeline_runs(id),
+    belief        TEXT NOT NULL,
+    shape         TEXT,
+    currency      TEXT,
+    case_anchor   TEXT,
+    counter_case  TEXT,
+    so_what       TEXT,
+    created_at    TIMESTAMP DEFAULT NOW()
+);
 """
 
 # SQLite fallback schema (same structure, SQLite syntax)
@@ -257,6 +274,7 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
     legal_flag          INTEGER DEFAULT 0,
     legal_reason        TEXT,
     slug                TEXT,
+    desk                TEXT NOT NULL DEFAULT 'news',
     created_at          TEXT DEFAULT (datetime('now')),
     updated_at          TEXT DEFAULT (datetime('now'))
 );
@@ -359,6 +377,20 @@ CREATE TABLE IF NOT EXISTS dig_updates (
     body        TEXT,
     created_at  TEXT DEFAULT (datetime('now'))
 );
+
+CREATE INDEX IF NOT EXISTS idx_pipeline_runs_desk ON pipeline_runs(desk);
+
+CREATE TABLE IF NOT EXISTS belief_pieces (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id        INTEGER REFERENCES pipeline_runs(id),
+    belief        TEXT NOT NULL,
+    shape         TEXT,
+    currency      TEXT,
+    case_anchor   TEXT,
+    counter_case  TEXT,
+    so_what       TEXT,
+    created_at    TEXT DEFAULT (datetime('now'))
+);
 """
 
 
@@ -448,7 +480,12 @@ def init_db():
                     except Exception:
                         conn.rollback()
             # Migrations for existing tables
-            for col, defn in [("legal_flag", "BOOLEAN DEFAULT FALSE"), ("legal_reason", "TEXT"), ("slug", "TEXT")]:
+            for col, defn in [("legal_flag", "BOOLEAN DEFAULT FALSE"), ("legal_reason", "TEXT"), ("slug", "TEXT"),
+                              # Which desk produced this run. Everything that predates
+                              # the second desk is news, hence the default — and every
+                              # news-desk read filters on it explicitly rather than
+                              # relying on that default. See docs/everyone-knows-desk.md §7.
+                              ("desk", "TEXT NOT NULL DEFAULT 'news'")]:
                 try:
                     cur.execute(f"ALTER TABLE pipeline_runs ADD COLUMN {col} {defn}")
                     conn.commit()
@@ -467,9 +504,21 @@ def init_db():
                     conn.commit()
                 except Exception:
                     conn.rollback()  # column already exists
+            # Indexes over migrated columns must come AFTER the ALTERs. The copy in
+            # _SCHEMA only fires for a fresh database, where CREATE TABLE already
+            # carries the column; on an existing one it runs before `desk` exists,
+            # fails, and is swallowed by the per-statement rollback — which is how
+            # this index silently failed to appear the first time.
+            for stmt in ["CREATE INDEX IF NOT EXISTS idx_pipeline_runs_desk ON pipeline_runs(desk)"]:
+                try:
+                    cur.execute(stmt)
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
         else:
             cur.executescript(_SCHEMA_SQLITE)
-            for col, defn in [("legal_flag", "INTEGER DEFAULT 0"), ("legal_reason", "TEXT"), ("slug", "TEXT")]:
+            for col, defn in [("legal_flag", "INTEGER DEFAULT 0"), ("legal_reason", "TEXT"), ("slug", "TEXT"),
+                              ("desk", "TEXT NOT NULL DEFAULT 'news'")]:
                 try:
                     cur.execute(f"ALTER TABLE pipeline_runs ADD COLUMN {col} {defn}")
                 except Exception:
@@ -521,7 +570,8 @@ def mark_seen(video_id, source):
 
 
 def save_run(video_id, source, throughline, trust_gate,
-             draft_text=None, review_text=None, verification_report=None, status="investigating"):
+             draft_text=None, review_text=None, verification_report=None, status="investigating",
+             desk="news"):
     conn = _conn()
     try:
         cur = conn.cursor()
@@ -529,10 +579,10 @@ def save_run(video_id, source, throughline, trust_gate,
         cur.execute(
             f"""INSERT INTO pipeline_runs
                (video_id, source, throughline, trust_gate,
-                draft_text, review_text, verification_report, status)
-               VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})""",
+                draft_text, review_text, verification_report, status, desk)
+               VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})""",
             (video_id, source, throughline, trust_gate,
-             draft_text, review_text, verification_report, status),
+             draft_text, review_text, verification_report, status, desk),
         )
         if _is_postgres():
             cur.execute("SELECT lastval()")
@@ -572,7 +622,7 @@ def get_run(run_id):
         conn.close()
 
 
-def get_held_runs(older_than_days=3, limit=None):
+def get_held_runs(older_than_days=3, limit=None, desk="news"):
     """Held stories untouched for older_than_days, oldest first.
 
     Covers BOTH 'held' (owner/dashboard) and 'hold' (the verifier's gate
@@ -589,23 +639,25 @@ def get_held_runs(older_than_days=3, limit=None):
         if _is_postgres():
             cur.execute(
                 "SELECT * FROM pipeline_runs WHERE status IN ('held', 'hold') "
+                "AND desk = %s "
                 "AND updated_at < NOW() - INTERVAL '%s days' "
                 "ORDER BY updated_at" + lim,
-                (older_than_days,),
+                (desk, older_than_days),
             )
         else:
             cur.execute(
                 "SELECT * FROM pipeline_runs WHERE status IN ('held', 'hold') "
+                "AND desk = ? "
                 "AND updated_at < datetime('now', ?) "
                 "ORDER BY updated_at" + lim,
-                (f"-{older_than_days} days",),
+                (desk, f"-{older_than_days} days"),
             )
         return _fetchall(cur)
     finally:
         conn.close()
 
 
-def get_recheckable_runs(limit=30):
+def get_recheckable_runs(limit=30, desk="news"):
     """Held stories the owner can ask to re-develop — both human-held ('held') and
     verifier-held ('hold'), newest first."""
     conn = _conn()
@@ -613,23 +665,25 @@ def get_recheckable_runs(limit=30):
         cur = conn.cursor()
         cur.execute(
             "SELECT id, throughline, trust_gate, status, created_at "
-            "FROM pipeline_runs WHERE status IN ('held', 'hold') "
+            "FROM pipeline_runs WHERE status IN ('held', 'hold') AND desk = "
+            + ("%s" if _is_postgres() else "?") + " "
             "ORDER BY id DESC LIMIT " + ("%s" if _is_postgres() else "?"),
-            (limit,),
+            (desk, limit),
         )
         return _fetchall(cur)
     finally:
         conn.close()
 
 
-def get_runs_by_status(status, limit=20):
+def get_runs_by_status(status, limit=20, desk="news"):
     conn = _conn()
     try:
         cur = conn.cursor()
         ph = "%s" if _is_postgres() else "?"
         cur.execute(
-            f"SELECT * FROM pipeline_runs WHERE status = {ph} ORDER BY id LIMIT {ph}",
-            (status, limit),
+            f"SELECT * FROM pipeline_runs WHERE status = {ph} AND desk = {ph} "
+            f"ORDER BY id LIMIT {ph}",
+            (status, desk, limit),
         )
         return _fetchall(cur)
     finally:
@@ -855,7 +909,7 @@ def kv_get(key, default=None):
         conn.close()
 
 
-def get_queue_state():
+def get_queue_state(desk="news"):
     """Return pending topics + last pipeline run for /queue display."""
     conn = _conn()
     try:
@@ -877,9 +931,11 @@ def get_queue_state():
             )
         topics = _fetchall(cur)
         # Last 5 pipeline runs
+        ph = "%s" if _is_postgres() else "?"
         cur.execute(
             "SELECT id, throughline, source, status, trust_gate, created_at "
-            "FROM pipeline_runs ORDER BY id DESC LIMIT 5"
+            f"FROM pipeline_runs WHERE desk = {ph} ORDER BY id DESC LIMIT 5",
+            (desk,),
         )
         recent_runs = _fetchall(cur)
         return {"topics": topics, "recent_runs": recent_runs}
@@ -941,12 +997,14 @@ def record_usage(skill, model, input_tokens, output_tokens, run_id=None):
         conn.close()
 
 
-def get_pipeline_stats():
-    """Lifetime pipeline statistics for /stats command."""
+def get_pipeline_stats(desk="news"):
+    """Lifetime pipeline statistics for /stats command, for ONE desk."""
     conn = _conn()
     try:
         cur = conn.cursor()
-        cur.execute("SELECT status, COUNT(*) FROM pipeline_runs GROUP BY status")
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(f"SELECT status, COUNT(*) FROM pipeline_runs WHERE desk = {ph} "
+                    "GROUP BY status", (desk,))
         by_status = {r[0]: r[1] for r in cur.fetchall()}
         cur.execute("""
             SELECT source,
@@ -954,9 +1012,9 @@ def get_pipeline_stats():
                    SUM(CASE WHEN status='published' THEN 1 ELSE 0 END) AS published,
                    SUM(CASE WHEN status='killed' THEN 1 ELSE 0 END) AS killed
             FROM pipeline_runs
-            WHERE source IS NOT NULL
+            WHERE source IS NOT NULL AND desk = """ + ph + """
             GROUP BY source ORDER BY published DESC LIMIT 5
-        """)
+        """, (desk,))
         top_sources = _fetchall(cur)
         if _is_postgres():
             cur.execute("""
@@ -975,7 +1033,7 @@ def get_pipeline_stats():
                 )
             """)
         avg_tokens = cur.fetchone()[0] or 0
-        cur.execute("SELECT COUNT(*) FROM pipeline_runs")
+        cur.execute(f"SELECT COUNT(*) FROM pipeline_runs WHERE desk = {ph}", (desk,))
         total = cur.fetchone()[0]
         return {"by_status": by_status, "top_sources": top_sources,
                 "avg_tokens": int(avg_tokens), "total": total}
@@ -983,24 +1041,24 @@ def get_pipeline_stats():
         conn.close()
 
 
-def search_runs(query, limit=10):
-    """Search pipeline_runs by throughline keyword."""
+def search_runs(query, limit=10, desk="news"):
+    """Search pipeline_runs by throughline keyword, within one desk."""
     conn = _conn()
     try:
         cur = conn.cursor()
         if _is_postgres():
             cur.execute(
                 "SELECT id, throughline, status, trust_gate, created_at "
-                "FROM pipeline_runs WHERE throughline ILIKE %s "
+                "FROM pipeline_runs WHERE throughline ILIKE %s AND desk = %s "
                 "ORDER BY id DESC LIMIT %s",
-                (f"%{query}%", limit),
+                (f"%{query}%", desk, limit),
             )
         else:
             cur.execute(
                 "SELECT id, throughline, status, trust_gate, created_at "
-                "FROM pipeline_runs WHERE throughline LIKE ? "
+                "FROM pipeline_runs WHERE throughline LIKE ? AND desk = ? "
                 "ORDER BY id DESC LIMIT ?",
-                (f"%{query}%", limit),
+                (f"%{query}%", desk, limit),
             )
         return _fetchall(cur)
     finally:
@@ -1039,7 +1097,10 @@ def get_cost_report_data():
                 GROUP BY model
             """)
         rows = _fetchall(cur)
-        # runs today
+        # Runs today — deliberately ACROSS ALL DESKS, unlike every other read in
+        # this module. This is the spend report, and the budget cap is one shared
+        # pot: a day where Everyone Knows burned the cap is a day the news desk
+        # has no money left. Splitting this by desk would hide that.
         if _is_postgres():
             cur.execute("SELECT COUNT(*) FROM pipeline_runs WHERE created_at::date = CURRENT_DATE")
         else:
@@ -1125,13 +1186,17 @@ def get_approved_sources():
         conn.close()
 
 
-def get_pending_runs():
+def get_pending_runs(desk="news"):
+    """Runs awaiting the human gate. Per-desk: each desk has its own queue, and
+    mixing them would put an Everyone Knows piece in the news editor's list."""
     conn = _conn()
     try:
         cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
         cur.execute(
             "SELECT id, throughline, trust_gate, created_at FROM pipeline_runs "
-            "WHERE status = 'pending_human' ORDER BY id DESC"
+            f"WHERE status = 'pending_human' AND desk = {ph} ORDER BY id DESC",
+            (desk,),
         )
         return _fetchall(cur)
     finally:
@@ -1236,7 +1301,7 @@ def get_source_reliability():
                        COUNT(*) FILTER (WHERE trust_gate = 'KILL') as killed,
                        COUNT(*) FILTER (WHERE trust_gate = 'HOLD') as held
                 FROM pipeline_runs
-                WHERE source IS NOT NULL
+                WHERE source IS NOT NULL AND desk = 'news'
                 GROUP BY source
                 HAVING COUNT(*) >= 2
                 ORDER BY verified DESC
@@ -1249,7 +1314,7 @@ def get_source_reliability():
                        SUM(CASE WHEN trust_gate = 'KILL' THEN 1 ELSE 0 END) as killed,
                        SUM(CASE WHEN trust_gate = 'HOLD' THEN 1 ELSE 0 END) as held
                 FROM pipeline_runs
-                WHERE source IS NOT NULL
+                WHERE source IS NOT NULL AND desk = 'news'
                 GROUP BY source
                 HAVING COUNT(*) >= 2
                 ORDER BY verified DESC
@@ -1259,8 +1324,12 @@ def get_source_reliability():
         conn.close()
 
 
-def get_published_stories(days=90):
-    """Return published stories for follow-up tracking."""
+def get_published_stories(days=90, desk="news"):
+    """Return published stories for follow-up tracking.
+
+    Per-desk. This feeds the anti-repetition context, and an Everyone Knows
+    piece about a 1904 etymology is not competing for the same slot as today's
+    news story — blending them would suppress legitimate work on both sides."""
     conn = _conn()
     try:
         cur = conn.cursor()
@@ -1271,10 +1340,10 @@ def get_published_stories(days=90):
                        r.trust_gate
                 FROM pipeline_runs r
                 JOIN publications p ON p.run_id = r.id
-                WHERE r.created_at > NOW() - INTERVAL '%s days'
+                WHERE r.created_at > NOW() - INTERVAL '%s days' AND r.desk = %s
                 ORDER BY r.created_at DESC
                 LIMIT 20
-            """, (days,))
+            """, (days, desk))
         else:
             cur.execute("""
                 SELECT r.id, r.throughline, r.source, r.created_at,
@@ -1282,17 +1351,19 @@ def get_published_stories(days=90):
                        r.trust_gate
                 FROM pipeline_runs r
                 JOIN publications p ON p.run_id = r.id
-                WHERE r.created_at > datetime('now', ?)
+                WHERE r.created_at > datetime('now', ?) AND r.desk = ?
                 ORDER BY r.created_at DESC
                 LIMIT 20
-            """, (f"-{days} days",))
+            """, (f"-{days} days", desk))
         return _fetchall(cur)
     finally:
         conn.close()
 
 
-def get_all_runs_summary(limit=60):
-    """Return summary of all runs for meta-synthesis."""
+def get_all_runs_summary(limit=60, desk="news"):
+    """Return summary of all runs for meta-synthesis. Per-desk: meta-synthesis
+    reasons about one desk's editorial pattern, and blending desks would draw
+    conclusions from two different products."""
     conn = _conn()
     try:
         cur = conn.cursor()
@@ -1304,9 +1375,10 @@ def get_all_runs_summary(limit=60):
                        LEFT(r.review_text, 400) as review_summary,
                        EXISTS(SELECT 1 FROM publications p WHERE p.run_id = r.id) as published
                 FROM pipeline_runs r
+                WHERE r.desk = %s
                 ORDER BY r.created_at DESC
                 LIMIT %s
-            """, (limit,))
+            """, (desk, limit))
         else:
             cur.execute("""
                 SELECT r.id, r.throughline, r.source, r.trust_gate, r.status,
@@ -1314,9 +1386,10 @@ def get_all_runs_summary(limit=60):
                        SUBSTR(r.review_text, 1, 400) as review_summary,
                        EXISTS(SELECT 1 FROM publications p WHERE p.run_id = r.id) as published
                 FROM pipeline_runs r
+                WHERE r.desk = ?
                 ORDER BY r.created_at DESC
                 LIMIT ?
-            """, (limit,))
+            """, (desk, limit))
         return _fetchall(cur)
     finally:
         conn.close()

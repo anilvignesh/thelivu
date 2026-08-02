@@ -158,7 +158,8 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ph = "%s" if _is_postgres() else "?"
 
         def count(status):
-            cur.execute(f"SELECT COUNT(*) FROM pipeline_runs WHERE status = {ph}", (status,))
+            cur.execute(f"SELECT COUNT(*) FROM pipeline_runs WHERE status = {ph} "
+                        f"AND desk = 'news'", (status,))
             return cur.fetchone()[0]
 
         cur.execute("SELECT COUNT(*) FROM publications")
@@ -188,7 +189,8 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         stuck_topics = cur.fetchone()[0]
 
         # Latest run
-        cur.execute("SELECT id, status, LEFT(throughline, 60) FROM pipeline_runs ORDER BY id DESC LIMIT 1")
+        cur.execute("SELECT id, status, LEFT(throughline, 60) FROM pipeline_runs "
+                    "WHERE desk = 'news' ORDER BY id DESC LIMIT 1")
         row = cur.fetchone()
         latest = f"#{row[0]} [{row[1]}] {row[2]}" if row else "none"
 
@@ -375,7 +377,7 @@ async def cmd_track(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             cur.execute(
                 "SELECT id, throughline, source, status, trust_gate, created_at, updated_at "
-                "FROM pipeline_runs ORDER BY id DESC LIMIT 1"
+                "FROM pipeline_runs WHERE desk = 'news' ORDER BY id DESC LIMIT 1"
             )
         from shared.db import _fetchone
         run = _fetchone(cur)

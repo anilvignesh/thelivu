@@ -60,7 +60,10 @@ def compute_learned_priors(now=None):
     conn = _conn()
     try:
         cur = conn.cursor()
-        cur.execute("SELECT source, throughline, status, created_at FROM pipeline_runs")
+        # News desk only: this learns which SOURCES produce good stories, and the
+        # belief desks have no sources in that sense.
+        cur.execute("SELECT source, throughline, status, created_at FROM pipeline_runs "
+                    "WHERE desk = 'news'")
         rows = cur.fetchall()
     finally:
         conn.close()

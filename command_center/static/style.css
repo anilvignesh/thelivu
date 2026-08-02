@@ -71,6 +71,18 @@ a:hover { text-decoration: underline; }
   margin-left: auto; background: var(--gold); color: var(--ink);
   font-size: 11px; font-weight: 700; border-radius: 999px; padding: 0 7px;
 }
+/* Desk badge on a run row. Outlined rather than filled so it reads as a label on
+   the title, not as a status pill — `pill(status)` already owns the filled look
+   at the right-hand end of the same row, and two solid chips fight each other.
+   Only the belief desks are badged; news is the default and would be noise. */
+.badge.desk-ek, .badge.desk-gk {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .08em;
+  text-transform: uppercase; border-radius: 3px; padding: 1px 5px;
+  margin-left: 6px; white-space: nowrap; vertical-align: 1px;
+}
+.badge.desk-ek { color: var(--gold); border: 1px solid rgba(210,170,109,.5); }
+.badge.desk-gk { color: var(--info); border: 1px solid rgba(143,199,255,.45); }
+
 .nav-foot {
   padding: 10px 16px; border-top: 1px solid var(--line);
   display: flex; align-items: center; gap: 10px;

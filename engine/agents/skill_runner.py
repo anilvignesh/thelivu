@@ -245,11 +245,20 @@ _GEMINI_SKILLS = {
     # pages. The cheap grounded searcher is the apt tool, and the charter has no
     # stake in it — it never touches a story.
     "tech-steward",
+    # Belief desks: the record file is built from the open web and primary
+    # documents, which is exactly what the grounded searcher is for.
+    "ek:record-builder",
 }
 
 # Search-grounded skills that warrant the stronger (Pro) Gemini for sharper
 # adversarial reasoning. The trust gate is the most consequential decision.
 _GEMINI_PRO_SKILLS = {"source-verifier"}
+
+# The belief desks' trust gate, their writers and their reviewer stay on Claude —
+# same rule as the news desk: judgment, writing and gates never move to a cheaper
+# model. Listed here for the reader; they route to Claude by falling through.
+_BELIEF_CLAUDE_SKILLS = {"ek:record-verifier", "ek:explainer-writer",
+                         "ek:turns-out-writer", "ek:explainer-reviewer"}
 
 # PRESENTATION-side skills → free NVIDIA-hosted Gemma 4. These package an ALREADY
 # verified + human-approved story into slides / a reel script — they are POST-GATE,
