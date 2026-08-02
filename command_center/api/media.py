@@ -155,7 +155,7 @@ def post_carousel(request, data):
         return post_carousel_run(cid, progress=progress)
 
     return J({"ok": True, "job": jobs.submit(f"post carousel #{cid}", do_post,
-                                             {"carousel_id": cid})})
+                                             {"carousel_id": cid}, kind="post")})
 
 
 # ── Reels ─────────────────────────────────────────────────────────────────────
@@ -210,7 +210,7 @@ def make_reel(request, data):
                                   progress=progress, notes=notes)
 
     return J({"ok": True, "job": jobs.submit(f"build reel for run #{rid}", do_make,
-                                             {"run_id": rid})})
+                                             {"run_id": rid}, kind="reel")})
 
 
 @endpoint
@@ -238,7 +238,7 @@ def post_reel(request, data):
         return post_reel_run(reel_id, progress=progress)
 
     return J({"ok": True, "job": jobs.submit(f"post reel #{reel_id}", do_post,
-                                             {"reel_id": reel_id})})
+                                             {"reel_id": reel_id}, kind="post")})
 
 
 @endpoint

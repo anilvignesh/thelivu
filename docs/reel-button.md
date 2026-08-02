@@ -48,6 +48,14 @@ None of the three touches the trust gate or the human publish gate.
 - `engine/attend.py` — `./attend reel <run_id>` (the attended build path).
 - `dashboard.py` — the Reels row (batch-queried like the slide thumbnails).
 
+## Where to watch a build (added 2026-08-02)
+
+The **Activity** view in the command center — live progress, the current stage, elapsed
+time, and the full stage timeline per job; failures show the error. The build runs
+server-side, so closing the modal, reloading, or switching to the phone all keep it
+visible. `make_narrated_reel`'s existing `progress` callback is what feeds it, unchanged.
+See `docs/command-center-v2.md` § Activity.
+
 ## Requirements to actually build one
 - The **Chatterbox voice server** up on the laptop: `~/.jarvis/reel-voice.sh start`
   (on-demand, ~2GB resident, not autostart). `make_narrated_reel` fails fast with this

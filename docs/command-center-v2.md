@@ -46,11 +46,12 @@ architecture is open for whatever comes next.
 - **`engine/attend.py` is never automated.** When the breaker is open the UI
   *names* the attend command; it never runs it.
 
-## Layout — 11 views
+## Layout — 12 views
 
 | View | What it does |
 |---|---|
-| **Overview** | Needs-you banner (gate count), status tiles, breaker + voice-server status, live agents, digs in flight, recent runs, today's cost. The one screen. |
+| **Overview** | Needs-you banner (gate count), **jobs-running banner**, status tiles, breaker + voice-server status, live agents, digs in flight, recent runs, today's cost. The one screen. |
+| **Activity** | Background work, visible: what is building right now with live progress + stage, what recently finished or failed and why, per-job stage timeline. See below. |
 | **Gate** | The review desk. Pending + held runs: full draft (rendered), verification report, review notes. Actions: **Approve→publish** (gated, confirm), Kill, Hold, Requeue, **Recheck with editorial direction**, **Edit draft** (inline, human edit), **AI suggestions** (editorial-reviewer, quota-aware). |
 | **Stories** | Full pipeline browser: filter/search all runs, per-run detail (texts, publication, linked carousel + reel), article-page link, "make carousel", "make reel" from any published run. |
 | **Carousels** | Review desk for slides: preview strip, **edit any slide's headline** (re-renders via fileserver `?fresh=1`), edit caption, Rebuild (recompose), **Post** (gated), Kill. Breaker-aware compose warnings with the exact attend command. |
@@ -109,6 +110,54 @@ in the DOM, because nearly every action calls `route()` and rebuilds the view �
 that the screen snapped back to "all / newest" the moment you posted or killed something,
 which was half the reason browsing hurt. A fourth list screen gets this by calling
 `listBar`, not by inventing a fourth bar.
+
+## Activity: background work you can find again (added 2026-08-02)
+
+Starting a reel build put it somewhere unreachable. The job ran fine, but the only
+window onto it was the modal that launched it — tap "Run in background", reload the
+tab, or pick the phone up instead, and there was no screen anywhere that said what
+was building, how far along it was, or what happened to it. A 15-20 minute render
+with no status is indistinguishable from a render that died.
+
+The machinery already existed and did not need replacing: `command_center/jobs.py`
+had a registry, `make_narrated_reel` already reported ten-odd stages through its
+`progress` callback, and `/api/system` already carried a `jobs` key. What was
+missing was a surface, and enough per-job state to make one worth looking at.
+
+- **`jobs.py` keeps a stage timeline.** Each distinct progress message becomes a row
+  with a timestamp, so the detail view shows *when each stage started and how long it
+  took* — "Rendering 7 frames… 1m 28s" — instead of only the current line. Repeated
+  identical messages advance the row already there rather than printing 40 of them.
+  Entries also carry `elapsed` and `stale_secs` (seconds since the last callback):
+  the ffmpeg stage sits on one message for minutes, so *quiet for 4m* is the only
+  thing that distinguishes slow from wedged. History is 200 jobs, and `kind`
+  (reel / post / publish / suggest) is set at each `jobs.submit` call site.
+- **State is server-side, not in the browser** — that is the whole fix. Reload,
+  close the tab, open it on the phone over Tailscale: same job, same progress.
+- **It stays in RAM, deliberately.** A job *is* a daemon thread in this process, so
+  it cannot outlive it; persisted rows would only preserve corpses of work nothing
+  is doing, and the artefact a finished job produced is already a DB row with its
+  own view. Meanwhile Activity polls every 2s and a Railway round trip from the
+  laptop is 0.25-1s — a DB-backed registry would make the one screen that has to
+  feel live the slowest screen in the app. The cost is that a CC restart clears the
+  history, which is honest, because the restart killed the threads too; the header
+  states it with the boot time.
+- **The one DB read is cached.** Cards say "run #134 — <throughline>", resolved from
+  the job's meta ids in at most three batched, parallel queries, then kept for the
+  life of the process. Cold `/api/jobs` ≈ 2s (pool dial + labels), warm ≈ 1ms.
+- **`listBar` drives the history**, with the same wire params as every other list
+  surface. It is NOT `api/util.list_query`: that builds WHERE/ORDER BY for a table
+  and this registry is a list of dicts in RAM. Same params, same envelope, so the UI
+  control is unchanged — that is the part that had to match.
+- **Findable from anywhere.** A badge on the Activity nav item, fed by
+  `/api/jobs/summary` (pure RAM, no DB) polled every 5s while the tab is visible;
+  a banner on Overview; and "Run in background" is now **"Watch in Activity →"**,
+  which navigates there instead of dropping the job into the void.
+
+Endpoints: `/api/jobs` (list + `running` + `summary`), `/api/jobs/summary`
+(registered *before* `/api/jobs/{jid}` — Starlette matches in order), `/api/jobs/<id>`
+(detail with the timeline and result). Nothing in `publishing/` was changed; the reel
+builder's existing `_p(fraction, message)` calls were already exactly what this needed.
 
 ## Deployed-code touch (one, tiny)
 
