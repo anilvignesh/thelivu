@@ -20,7 +20,7 @@ from shared.config import (
     ANTHROPIC_API_KEY, GEMINI_API_KEY,
     NVIDIA_API_KEY, NVIDIA_MODEL, NVIDIA_BASE_URL,
     TELEGRAM_BOT_TOKEN, TELEGRAM_DRAFT_CHAT_ID,
-    SKILLS_DIR,
+    SKILLS_DIR, DESKS_DIR,
 )
 from engine.agents.tools import WEB_SEARCH_TOOL, execute_tool
 from shared import quota
@@ -33,7 +33,7 @@ log = logging.getLogger("skill_runner")
 # this stops them lapsing into conversational replies that poison downstream
 # stages (the run #18 "I'm ready to receive a fresh brief" incident).
 
-_PIPELINE_CONTRACT = (
+_CONTRACT_SHAPE = (
     "You are a pipeline function, not a chat assistant. Output ONLY the structured "
     "result your instructions specify — no greeting, preamble, acknowledgement, "
     "apology, question, sign-off, or commentary around it. Any conversational text "
@@ -42,7 +42,27 @@ _PIPELINE_CONTRACT = (
     "for further input — produce the complete result in one shot. If you cannot "
     "produce the result, emit the defined failure value your instructions give "
     "(e.g. a KILL/HOLD/DROP/NONE/DECLINE marker), never free-form prose.\n\n"
-    "THIS IS A NEWS AGENCY. Your own training knowledge is NEVER authoritative for "
+)
+
+# The one line that differs per desk. Everything else in the contract is shared,
+# and the epistemic clause below is IDENTICAL for both — it is the part that must
+# never drift. See docs/everyone-knows-desk.md §2.
+_DESK_PREAMBLE = {
+    "news": "THIS IS A NEWS AGENCY.",
+    "ek": (
+        "THIS IS THE 'EVERYONE KNOWS' DESK. You work on received beliefs — things "
+        "widely taken as settled — and on the documented historical record behind "
+        "them. Note the specific hazard of this desk: you are working on material "
+        "your training data covers heavily, which is exactly the condition under "
+        "which a model states a remembered 'fact' with false confidence. "
+        "Familiarity is not a source. A claim you are sure about still needs a "
+        "citation, and the more obvious it feels, the more suspicious you should "
+        "be that you are reciting a popular story rather than the record."
+    ),
+}
+
+_CONTRACT_EPISTEMICS = (
+    " Your own training knowledge is NEVER authoritative for "
     "any fact. Every fact — a name, number, date, price, valuation, net worth, "
     "status, quote, ranking, count, or event — must come from a source you retrieve "
     "live (if you have search) or from the source material provided in your input "
@@ -52,6 +72,20 @@ _PIPELINE_CONTRACT = (
     "source conflict, the source wins — always, without exception.\n\n"
     "---\n\n"
 )
+
+
+def _desk_of(skill_name):
+    """Desk a skill belongs to. 'ek:premise-check' -> 'ek'; bare name -> 'news'."""
+    return skill_name.split(":", 1)[0] if ":" in skill_name else "news"
+
+
+def _contract_for(skill_name):
+    desk = _desk_of(skill_name)
+    return _CONTRACT_SHAPE + _DESK_PREAMBLE.get(desk, _DESK_PREAMBLE["news"]) + _CONTRACT_EPISTEMICS
+
+
+# Kept as a name because other modules import it; it is the news desk's contract.
+_PIPELINE_CONTRACT = _contract_for("news-monitor")
 
 
 class StructuredOutputError(RuntimeError):
@@ -230,7 +264,12 @@ _NVIDIA_SKILLS = {"carousel-composer", "video-script"}
 # 2026-07-26: they were ~$20 of the ~$34/mo burn while the writing core was
 # ~$5.4. The trust-critical chain (article-writer, editorial-reviewer,
 # pattern-synthesizer, news-investigator, source-verifier) stays on CLAUDE_MODEL.
-_HAIKU_SKILLS = {"news-monitor", "topic-intake", "chief-of-staff", "newsworthiness-gate"}
+_HAIKU_SKILLS = {"news-monitor", "topic-intake", "chief-of-staff", "newsworthiness-gate",
+                 # Everyone Knows desk. premise-check sifts against a strict output
+                 # contract and writes no prose — same profile as the news triage
+                 # skills. It decides only whether to SPEND, never whether a claim is
+                 # true; record-verifier (Claude) is this desk's trust gate.
+                 "ek:premise-check"}
 
 # Everything else routes to Claude (judgment / structured decisions / writing):
 # pattern-synthesizer, meta-synthesizer, article-writer, editorial-reviewer,
@@ -249,12 +288,37 @@ _CLAUDE_SKILL_TOOLS = {
 
 # ── Skill loader ──────────────────────────────────────────────────────────────
 
+def _skill_path(skill_name):
+    """Resolve a skill name to its SKILL.md.
+
+    'news-monitor'      -> engine/skills/news-monitor/SKILL.md      (news desk)
+    'ek:premise-check'  -> engine/desks/ek/skills/premise-check/SKILL.md
+
+    The desks are deliberately separate roots rather than a flat namespace: the
+    two desks have different gates and different failure modes, and a skill from
+    one must never be reachable by the other's name.
+    """
+    if ":" in skill_name:
+        desk, name = skill_name.split(":", 1)
+        return DESKS_DIR / desk / "skills" / name / "SKILL.md"
+    return SKILLS_DIR / skill_name / "SKILL.md"
+
+
+def _available_skills():
+    names = [p.name for p in SKILLS_DIR.iterdir() if p.is_dir()]
+    if DESKS_DIR.exists():
+        for desk in sorted(d for d in DESKS_DIR.iterdir() if d.is_dir()):
+            sk = desk / "skills"
+            if sk.exists():
+                names += [f"{desk.name}:{p.name}" for p in sk.iterdir() if p.is_dir()]
+    return sorted(names)
+
+
 def _load_skill(skill_name):
-    skill_path = SKILLS_DIR / skill_name / "SKILL.md"
+    skill_path = _skill_path(skill_name)
     if not skill_path.exists():
         raise FileNotFoundError(
-            f"Skill not found: {skill_name}. "
-            f"Available: {[p.name for p in SKILLS_DIR.iterdir() if p.is_dir()]}"
+            f"Skill not found: {skill_name}. Available: {_available_skills()}"
         )
     return skill_path.read_text(encoding="utf-8")
 
@@ -601,7 +665,7 @@ def run_skill(skill_name, input_text, extra_tools=None, max_tokens=4096,
         f"search for developments up to today; never rely on training memory for "
         f"recent events. If live sources and your memory disagree, the sources win.\n\n"
     )
-    system_prompt = date_anchor + _PIPELINE_CONTRACT + _load_skill(skill_name)
+    system_prompt = date_anchor + _contract_for(skill_name) + _load_skill(skill_name)
 
     # Presentation-side skills (carousel + video) → free NVIDIA-hosted Gemma 4.
     # Checked BEFORE attended mode and BEFORE the paid providers: these are post-gate

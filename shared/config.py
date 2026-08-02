@@ -93,6 +93,10 @@ GEMINI_PRO_MODEL = os.environ.get("GEMINI_PRO_MODEL", "gemini-2.5-pro")
 # --- Paths ---
 REPO_ROOT = Path(__file__).parent.parent
 SKILLS_DIR = REPO_ROOT / "engine" / "skills"
+# Second-desk skills live under their own root, one directory per desk:
+# engine/desks/<desk>/skills/<skill>/SKILL.md. The news desk keeps SKILLS_DIR
+# unprefixed so nothing about it moves. See docs/everyone-knows-desk.md.
+DESKS_DIR = REPO_ROOT / "engine" / "desks"
 SOURCES_YAML = REPO_ROOT / "engine" / "sources.yaml"
 WATCHLIST_YAML = REPO_ROOT / "engine" / "watchlist.yaml"
 ARTICLES_DIR = REPO_ROOT / "articles"

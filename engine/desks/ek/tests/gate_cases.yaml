@@ -1,0 +1,127 @@
+# premise-check regression cases.
+#
+# The gate is the phase that decides whether the Everyone Knows desk is viable
+# (docs/everyone-knows-desk.md §9). These cases exist so a prompt edit can't
+# quietly loosen it. Each case states the verdict the gate MUST reach and why.
+#
+# `expect` is the required verdict. `also` is a free-text property a human checks
+# by eye in the output — not auto-asserted, because it is about judgment quality,
+# not a string match.
+
+cases:
+  - id: banana-republic
+    expect: PURSUE-A
+    belief: >
+      "Banana republic" means a chaotic, badly-run, poor country — usually a
+      dig at the country's own incompetence.
+    why: >
+      The owner's founding example. A factual correction about origin and
+      meaning: O. Henry, 1904, Honduras, a state run for a foreign fruit
+      company's profit. If the gate can't pass this, the desk has no product.
+    also: SHAPE should cite the honest-disagreement test and land on A.
+
+  - id: communism-broad
+    expect: DROP
+    belief: >
+      Communist states around the world collapsed on their own, proving the
+      system doesn't work — when in most cases it was Western powers meddling
+      and destroying those nations.
+    why: >
+      THE DECISIVE CASE. A thesis spanning dozens of countries with no single
+      document behind it. Must be dropped for breadth, and REASON must name the
+      narrow version worth resubmitting (a specific intervention). If the gate
+      passes this, the desk becomes a contrarian myth mill and should not ship.
+    also: REASON must propose a specific narrowed case, not just refuse.
+
+  - id: guatemala-1954
+    expect: PURSUE-B
+    belief: >
+      Guatemala's elected government fell in 1954 because of internal political
+      chaos.
+    why: >
+      The same subject as communism-broad, narrowed to one documented case
+      (declassified US operation PBSuccess). This pair is the whole point of the
+      breadth rule — same topic, opposite verdicts, decided only by narrowness.
+    also: >
+      CASE_ANCHOR must name the 1954 operation specifically. COUNTER must state
+      a serious opposing argument, not a token one.
+
+  - id: kerala-coastline
+    expect: DROP
+    belief: Everyone thinks Kerala has no coastline.
+    why: >
+      A pure strawman — nobody holds this. Manufacturing a belief in order to
+      correct it is fabrication with extra steps.
+
+  - id: great-wall-space
+    expect: DROP
+    belief: >
+      The Great Wall of China is the only man-made structure visible from space
+      with the naked eye.
+    why: >
+      Written first as a shape-A control, then corrected: it fails the
+      consequence test exactly as goldfish-memory does. Widespread, false,
+      cleanly checkable — and correcting it changes nothing about how a reader
+      reads the world. Kept deliberately as a SECOND trivia case, because trivia
+      is the failure mode that looks healthiest on every other axis.
+
+  - id: gandhi-surname
+    expect: PURSUE-A
+    known_gap: true
+    belief: >
+      The Nehru–Gandhi political family is descended from Mahatma Gandhi.
+    why: >
+      Written as the consequential shape-A control: widely believed in India,
+      cleanly false (Feroze Gandhi was unrelated), and seemingly load-bearing —
+      the supposed descent is used to explain the family's political legitimacy.
+
+      THE GATE DISAGREES, and reasons its way there: the dynasty's legitimacy
+      rests on Nehru's and Indira Gandhi's own records, so removing one false
+      genealogical claim shifts little. That is a defensible editorial position,
+      not a malfunction.
+
+      OPEN QUESTION FOR THE OWNER: is this a piece? Marked `known_gap` rather
+      than chased, because the prompt edits needed to force PURSUE here would
+      re-loosen the trivia floor that correctly kills goldfish-memory and
+      great-wall-space — and passing trivia is the more dangerous failure. If
+      the owner rules it IS a piece, the fix is a calibration example in the
+      skill's question 4, with that cost understood.
+    also: >
+      Watch which way this moves after any edit to the SO_WHAT test. It is the
+      suite's sensitivity marker for the consequence floor.
+
+  - id: colonialism-overstated
+    expect: DROP
+    belief: >
+      Everyone believes British colonialism had literally zero benefits, built
+      nothing, and every single thing about it was purely extractive.
+    why: >
+      A real belief stated in an extreme form nobody holds. Tests the
+      restatement rule: the gate must moderate BELIEF and judge THAT version
+      rather than demolishing the caricature. The moderated version — "primarily
+      extractive, severe net harm" — is itself a thesis spanning two centuries
+      and a subcontinent, so it drops for BREADTH. Expected DROP, but the reason
+      path is what this case is really testing.
+    also: >
+      BELIEF must be visibly moderated from the input, and REASON should turn on
+      breadth (or name a narrowable case), NOT bounce it back to the owner as a
+      strawman. Restating is the gate's job, not the owner's.
+
+  - id: goldfish-memory
+    expect: DROP
+    belief: A goldfish has a three-second memory.
+    why: >
+      True received belief, and false — but correcting it changes nothing about
+      how anyone understands the world. Tests the trivia floor: interesting is
+      necessary, not sufficient.
+
+  - id: kerala-development
+    expect: DROP
+    belief: >
+      Kerala's development indicators are entirely the achievement of its
+      communist governments.
+    why: >
+      A contested frame about the desk's home geography, stated as a sweeping
+      claim spanning decades and many causes. Must drop for breadth exactly like
+      communism-broad — the rule cannot bend for a locally popular story.
+    also: REASON should suggest a narrowed, documentable version.
