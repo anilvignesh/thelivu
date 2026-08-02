@@ -362,7 +362,26 @@ ZOOM_MAX = 1.08
 TARGET_SHOT_SECS = 4.0
 # A beat is one idea; past three pictures for it the visuals start telling a different
 # story than the sentence, and it costs another FLUX call + render pass per shot.
-MAX_SHOTS_PER_BEAT = 3
+#
+# Set to 1 (2026-07-31, Anil's call) — the sub-shot cut is OFF. It read as "same text,
+# different image" and he's right: `draw_frame` pins the beat's caption across every
+# sub-shot, so the cut delivers no new information, and the extra picture isn't another
+# view of the same scene. The scene prompt is SYMBOLIC ("a symbolic editorial
+# illustration representing: …"), so _SHOT_ANGLES' "wide establishing" / "close detail"
+# has no actual subject to re-frame — FLUX just renders a second, unrelated metaphor for
+# the same sentence (reel #20: "beels" went canyon-river → waterfall-into-a-black-disc).
+# The result is a slideshow shuffle: it spends the viewer's attention and returns
+# nothing, which is the exact failure _SHOT_ANGLES was written to prevent.
+#
+# The real win was the Ken-Burns fix (stalled runtime 46% → 1.3%, measured #17 vs #20) —
+# a single image with a push spanning the whole beat is more coherent than two arbitrary
+# ones, and it halves the FLUX calls back to ~6/reel. If the pacing still drags, the fix
+# belongs in the SCRIPT (more, shorter beats — each with its own caption AND image, so
+# idea:label:picture stays 1:1:1), not in cutting inside a beat. Note that is not the
+# compression that was ruled out after reel #12: same words, finer segmentation.
+#
+# The machinery below is left intact and inert — restore to 3 to re-enable.
+MAX_SHOTS_PER_BEAT = 1
 
 
 def shots_for_duration(secs):
