@@ -1,5 +1,14 @@
 # Everyone Knows — the second desk
 
+> **Status 2026-08-03.** Built and proven end to end. TWO series now share this
+> desk's pipeline and trust floor: **Everyone Knows** (`desk='ek'`) and **Turns
+> Out** (`desk='gk'`, the GK/curiosity lane — added after the owner asked where
+> the trivia department was, because the consequence rule below was binning
+> exactly the GK material he had asked for). A failed consequence test is now
+> `ROUTE-GK`, not a kill. Phases 1-5 of §9 are done; §6 (scout + themes.yaml +
+> cadence) is not. Run one belief through it with:
+> `python -m engine.desks.ek.pipeline "<the belief>"`
+
 *Spec and context file. Written 2026-08-02, before any code. Build against this,
 then check what shipped against it.*
 
@@ -285,11 +294,35 @@ always.
      grounds), but it may be too strict. Owner's ruling needed. Forcing it to
      pass would loosen the floor that correctly kills the two trivia cases —
      see the case's note in `gate_cases.yaml`.
-3. **Research + verify.** `record-builder` + `record-verifier`, tested on both
-   worked examples end to end, output inspected by hand.
-4. **Write + review.** `explainer-writer` + `explainer-reviewer`, producing a
-   receipt page for banana republic. First human-gate review.
-5. **Presentation.** EK reel script + the shape-B label design; one reel end to
-   end.
-6. **Intake + scheduling.** `themes.yaml`, `belief-scout`, owner-supplied path,
-   CC view, cadence.
+3. ~~**Research + verify.**~~ **Done.** `record-builder` (Gemini, grounded) +
+   `record-verifier` (Claude). The verifier held the goldfish piece (#137) on the
+   two-source floor unprompted — the floor is real, not decorative.
+4. ~~**Write + review.**~~ **Done.** `explainer-writer`, `turns-out-writer`,
+   `explainer-reviewer`, plus `pipeline.py` chaining the whole spine to
+   `pending_human`. Two pieces at the gate: #139 and #140.
+5. **Presentation — NOT DONE.** No reel or carousel has been built from a belief
+   piece. The pieces already emit a `SPOKEN SPINE` written to be said aloud, so
+   the reel should consume that directly rather than re-running the news
+   `video-script` skill over the draft — re-scripting would throw away the
+   verified narration and re-introduce a generation step after the trust gate.
+   The shape-B on-screen view label is also still undesigned.
+6. **Intake + scheduling — not done.** `themes.yaml`, `belief-scout`, owner
+   submit path from the CC, cadence.
+
+### The citation check (added 2026-08-03, not in the original spec)
+
+`engine/desks/ek/linkcheck.py` tests every URL a piece cites and holds the run if
+any are dead. It exists because the desk's first output passed the trust gate and
+a clean editorial review while citing three 404s. Two findings worth keeping:
+
+- **A model cannot catch this by reading, and prompting does not fix it.** The
+  URLs were plausible and correctly shaped for real-sounding articles that are
+  not at those addresses. Only asking the network settles it.
+- **403 is not 404.** Merriam-Webster and Dictionary.com bot-block a scripted
+  request while being perfectly real pages; treating those as dead would strip
+  the best sources out of every piece.
+
+Fixing it created the next failure, which is why "cites no URLs at all" is also
+held: told it could omit addresses it had not retrieved, the writer emitted zero
+URLs and degraded its sources into unfalsifiable categories. Silence is not a
+pass.
