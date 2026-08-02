@@ -266,7 +266,8 @@ def _illustrate(fields, out_dir, _p, shots=None):
     def _step(k, total):
         _p(0.15 + 0.35 * (k / max(total, 1)), f"Illustrating shot {k + 1}/{total}…")
 
-    flat = generate_beat_images(scenes, out_dir, progress=_step)
+    flat = generate_beat_images(scenes, out_dir, progress=_step,
+                                place=fields.get("place"))
     if any(p is None for p in flat):
         missing = sorted({owner[k] for k, p in enumerate(flat) if p is None})
         log.warning("illustrations missing for beats %s — text-slide fallback", missing)

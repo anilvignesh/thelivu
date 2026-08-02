@@ -61,6 +61,11 @@ def parse_script(text):
 
     title = one("TITLE")
     kicker = one("KICKER")   # small context tag shown on every slide
+    # Where the story happens — never rendered, only handed to the illustrator so a
+    # symbolic scene is anchored to the right country. Reel #22 closed a Karnataka
+    # High Court story on the US Capitol because nothing in the image prompt said
+    # where it was. Absent in older scripts; the illustrator then adds no anchor.
+    place = one("PLACE")
     beats = []
     # Optional per-beat scene description for the illustrated look. Absent in
     # older scripts (and when a model skips it) — publishing.illustrate falls
@@ -100,7 +105,8 @@ def parse_script(text):
     # acronym/number is correct in text. Built here so post-time can reuse it.
     narration = " ".join(sp for sp, _ in beats)
     return {"title": title, "kicker": kicker, "beats": beats, "images": images,
-            "hashtags": hashtags, "narration": narration, "hook": hook}
+            "hashtags": hashtags, "narration": narration, "hook": hook,
+            "place": place}
 
 
 # ── frame rendering (Dossier look, 9:16) ────────────────────────────────────────
