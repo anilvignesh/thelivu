@@ -62,6 +62,24 @@ writes a script only — it never fabricates, never overstates, and never publis
 - **Hook (first 3 seconds / ~1 sentence):** the sharpest fact or the stakes. This is
   the whole reel's fate — earn the next 3 seconds. No throat-clearing, no "in this
   video."
+
+  **The hook must carry a stake in its own words.** Someone who sees only that one
+  line must already know what is at issue — a number, a name, a loss, or a
+  contradiction. A line that merely *introduces* the story is not a hook, however
+  well written, because nothing in it makes the next three seconds worth spending:
+
+  - ✗ "Karnataka promised farmers a highway."  ← setup. Promised what? So?
+  - ✓ "Karnataka took farmers' land for a highway the High Court says was never
+    theirs to take."
+  - ✗ "A judge granted a land activist bail."  ← an event with no stake shown.
+  - ✓ "A land activist spent nine months in jail for a case the judge called
+    'manufactured'."
+  - ✓ "India is spending ninety-eight crore rupees to study if cow urine cures
+    cancer."  ← a number and a contradiction; nothing else needed.
+
+  The stake must be one the article established — sharpening is selection, never
+  escalation. If the piece does not support a sharp hook, the honest fix is a
+  narrower story, not a bigger claim.
 - **Body (3–4 short beats):** the key fact → the context that reframes it → the
   evidence → the turn. One idea per beat, plain spoken sentences, short words.
 - **Close (1 line):** the "so what," or the question left hanging. Then a soft share

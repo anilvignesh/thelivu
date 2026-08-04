@@ -122,6 +122,46 @@ def _has_hook(script):
     return bool(_HOOK_RE.search(script or ""))
 
 
+def _hook_line(script):
+    m = re.search(r"^HOOK:[ \t]*(.+)$", script or "", re.IGNORECASE | re.MULTILINE)
+    return m.group(1).strip() if m else ""
+
+
+# Words that mark a stake without naming one: a contradiction, a reversal, a
+# denial. Paired with digits and proper nouns below, these cover what a hook has
+# to contain to be worth three seconds. Deliberately a HEURISTIC — it cannot
+# judge whether a line is interesting, only whether it is empty of specifics.
+_STAKE_WORDS = {"but", "not", "never", "no", "none", "instead", "while",
+                "despite", "although", "though", "yet", "without", "failed",
+                "refused", "denied", "says", "found", "ruled", "shows",
+                "wrong", "cost", "spent", "lost", "took", "crore", "lakh",
+                "crores", "lakhs", "million", "billion", "percent"}
+
+
+def hook_is_sharp(hook):
+    """Does the hook carry a specific — a number, a named thing, or a
+    contradiction — rather than merely introducing the story?
+
+    "Karnataka promised farmers a highway" passes every structural check the
+    engine had and is still a setup line: it tells the viewer nothing is at
+    stake, which is the only question the first three seconds answer. This looks
+    for the marks a stake leaves behind. It is advisory, never a blocker: a
+    genuinely sharp hook can carry none of these, and refusing to build a reel on
+    a word-list would be worse than a flat opening. The prompts do the enforcing;
+    this decides whether to spend a free retry and what to warn about.
+    """
+    words = (hook or "").split()
+    if len(words) < 4:
+        return False
+    if any(ch.isdigit() for ch in hook):
+        return True
+    # A capitalised word that is not the first is a name, a place or an
+    # institution — the hook is about something in particular.
+    if any(w[:1].isupper() for w in words[1:] if w[:1].isalpha()):
+        return True
+    return bool({w.strip(".,;:—-").lower() for w in words} & _STAKE_WORDS)
+
+
 def _gen_script_nvidia(draft, run_id=None):
     """Generate the video-script via NVIDIA-hosted Gemma 4 (free) instead of Claude.
 
@@ -169,6 +209,20 @@ def _gen_script_nvidia(draft, run_id=None):
                     "MUST open on a hook — the sharpest fact or the stakes, in one "
                     "sentence, no throat-clearing. Output ONLY the structured script now, "
                     "starting at TITLE:, no preamble.")
+    elif not hook_is_sharp(_hook_line(out)):
+        # This engine is free, so a setup line costs one more call and nothing
+        # else. Only once: if it comes back flat again, a flat hook still beats
+        # burning the build.
+        log.warning("nvidia video-script hook has no stake in it — retrying once "
+                    "(run #%s): %r", run_id, _hook_line(out)[:80])
+        out = _call("\n\n---\nYour HOOK line only introduces the story. A hook must carry "
+                    "the stake in its own words — a number, a name, a loss, or a "
+                    "contradiction — so someone who sees ONLY that line knows what is at "
+                    "issue. 'Karnataka promised farmers a highway' is a setup line; "
+                    "'Karnataka took farmers' land for a highway the High Court says was "
+                    "never theirs to take' is a hook. Use only what the article "
+                    "establishes. Output ONLY the structured script now, starting at "
+                    "TITLE:, no preamble.")
     # strip stray code fences some models wrap around the block
     out = out.replace("```", "").strip()
     # Fail rather than ship a hookless script. The old code returned `out` regardless of
@@ -469,6 +523,17 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
                 "the script's spoken lines are not the verified spine — a belief reel "
                 "may not say anything the trust gate did not pass. Edit the piece and "
                 "re-run the desk if the narration needs to change.")}
+    # One sharpness check for every path, after parsing, so what is judged is what
+    # actually became beat one. Advisory by design — see hook_is_sharp. Where the
+    # words can still be regenerated the generators have already spent their retry;
+    # on the belief desks they cannot be (the spine is post-gate), so this is the
+    # only signal there is, and it names the fix: the hook comes from the writer.
+    if not hook_is_sharp(fields.get("hook") or ""):
+        log.warning("run #%s: the hook carries no stake — %r%s", run_id,
+                    (fields.get("hook") or "")[:90],
+                    " (belief desk: sharpen the spine's first line and re-run the "
+                    "desk; the reel may not rewrite it)" if spine else "")
+
     # Captured before the silent sign-off beat is appended below.
     narration = fields.get("narration") or ""
 
