@@ -1399,11 +1399,28 @@ async function vSystem(main) {
     <b>Tech steward:</b> ${recs.length} open recommendation${recs.length === 1 ? '' : 's'}
     <span class="muted small">— last sweep ${ago(sw.last)}</span>
     <div class="muted small">Watches model catalogues, pricing and routing. Advisory — it never switches a model or spends.</div>
+    ${sw.error ? `<div class="banner warn" style="margin-top:8px"><span class="big">⚠</span>
+      <div>${esc(sw.error)}</div></div>` : ''}
     <div class="actions" data-x="a"></div><div data-x="recs"></div></div>`);
   addBtn(st.querySelector('[data-x=a]'), 'Run sweep now', 'small', async () => {
     const r = await api('/system/signal', { method: 'POST', body: { key: 'force_tech_steward', value: '1' } });
     toast(r.note, 'ok');
   });
+  /* The memo leaves the dashboard as text. The point of a sweep is that work
+     starts from it, and that means it has to be pasteable into wherever the work
+     happens — not read off a screen and retyped. */
+  if (sw.paste)
+    addBtn(st.querySelector('[data-x=a]'), '📋 Copy as checklist', 'small ghost', async () => {
+      try {
+        await navigator.clipboard.writeText(sw.paste);
+        toast('Recommendations copied — paste them wherever the work happens.', 'ok');
+      } catch (e) {
+        /* clipboard blocked (non-https origin, or denied): show it so it can be
+           selected by hand rather than failing with nothing on screen. */
+        openModal(el(`<div><h3>Recommendations</h3>
+          <pre class="small" style="white-space:pre-wrap;max-height:60vh;overflow:auto">${esc(sw.paste)}</pre></div>`));
+      }
+    });
   const rbox = st.querySelector('[data-x=recs]');
   for (const r of recs) {
     const saves = (r.saves_usd_mo === null || r.saves_usd_mo === undefined || r.saves_usd_mo === '')

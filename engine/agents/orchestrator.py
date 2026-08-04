@@ -2090,6 +2090,20 @@ def run_tech_steward():
         return
 
     recs = _extract_block_array(output, "RECOMMENDATIONS")
+    # A sweep that FOUND things and then lost them must not read as a quiet week.
+    # 2026-08-04: the model repeated its brief, ran out of budget mid-string
+    # before the first object closed, and the owner saw an empty list under a
+    # brief describing a deprecation problem. Silence and "nothing to report"
+    # have to look different.
+    if not recs and "RECOMMENDATIONS" in output:
+        log.error("tech-steward: RECOMMENDATIONS block present but unparseable "
+                  "(truncated?) — %d chars of output", len(output))
+        kv_set("latest_tech_recs_error",
+               "The last sweep produced recommendations that could not be parsed — "
+               "the block was truncated before any complete item. The brief below "
+               "is what survived; re-run the sweep for the list.")
+    else:
+        kv_set("latest_tech_recs_error", "")
     kv_set("latest_tech_brief", output[:6000])
     kv_set("latest_tech_recs", json.dumps(recs)[:6000])
     kv_set("last_tech_steward_at", datetime.now(timezone.utc).isoformat())

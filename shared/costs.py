@@ -8,7 +8,7 @@ presentation calls were being billed at Claude rates in the daily report).
 Everything imports from here now.
 
 Rates are USD per million tokens, verified against the providers' current
-pricing pages on 2026-07-26. `RATES` is the introspectable table (the tech
+pricing pages on 2026-07-26, Gemini re-verified 2026-08-04. `RATES` is the introspectable table (the tech
 steward reads it); `cost_usd` is the resolver — model strings in `token_usage`
 are whatever the provider was called with, so matching is substring-based.
 """
@@ -19,7 +19,12 @@ RATES = {
     "claude":        (3.00, 15.00),   # sonnet-class, the default
     "claude-haiku":  (1.00,  5.00),
     "gemini-pro":    (1.25, 10.00),
-    "gemini":        (0.30,  1.00),   # flash
+    # Flash OUTPUT was raised to $2.50 (it is $1.00 in plenty of older
+    # write-ups, which is where the stale value came from). Verified against
+    # ai.google.dev/gemini-api/docs/pricing on 2026-08-04, page updated
+    # 2026-07-30. Understating this by 2.5x understated every research call the
+    # engine makes — the budget governor's whole job is to be right about this.
+    "gemini":        (0.30,  2.50),   # flash
     "free":          (0.00,  0.00),   # NVIDIA-hosted Gemma/FLUX, attended work
 }
 

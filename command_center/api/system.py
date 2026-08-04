@@ -138,6 +138,33 @@ def overview(request, data):
     })
 
 
+def _steward_paste(recs):
+    """The recommendations as a copy-pasteable checklist."""
+    if not recs:
+        return ""
+    out = ["TECH STEWARD — recommendations", ""]
+    for i, r in enumerate(recs, 1):
+        g = lambda k: str(r.get(k) or "").strip()
+        line = f"{i}. [{g('area') or '?'}] {g('action')}"
+        bits = []
+        if g("from") or g("to"):
+            bits.append(f"{g('from') or '?'} -> {g('to') or '?'}")
+        if g("where"):
+            bits.append(f"where: {g('where')}")
+        if g("risk"):
+            bits.append(f"risk: {g('risk')}")
+        if r.get("saves_usd_mo") not in (None, ""):
+            bits.append(f"saves ~${r['saves_usd_mo']}/mo")
+        if bits:
+            line += "\n   " + " · ".join(bits)
+        if g("why"):
+            line += f"\n   why: {g('why')}"
+        if g("verify"):
+            line += f"\n   verify: {g('verify')}"
+        out.append(line)
+    return "\n".join(out)
+
+
 @endpoint
 def system_status(request, data):
     r = db.parallel(
@@ -148,7 +175,8 @@ def system_status(request, data):
         breaker=breaker_state,
         budget=budget_state,
         steward=lambda: db.kv_many(["latest_tech_brief", "latest_tech_recs",
-                                    "last_tech_steward_at"]),
+                                    "last_tech_steward_at",
+                                    "latest_tech_recs_error"]),
     )
     scheds = []
     for label, key, cadence, sig, sigval in SCHEDULES:
@@ -177,7 +205,13 @@ def system_status(request, data):
         "budget": r["budget"],
         "steward": {"last": sw.get("last_tech_steward_at"),
                     "brief": sw.get("latest_tech_brief"),
-                    "recs": steward_recs},
+                    "recs": steward_recs,
+                    "error": sw.get("latest_tech_recs_error") or "",
+                    # A plain-text rendering of the same list, so the memo can be
+                    # copied out of the dashboard and pasted straight into a
+                    # working session. The JSON is for the UI; this is for a human
+                    # who wants the work started.
+                    "paste": _steward_paste(steward_recs)},
         "voice_up": voice_status(),
         "schedules": scheds,
         "queue": r["queue"],
