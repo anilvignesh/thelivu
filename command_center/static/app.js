@@ -172,7 +172,12 @@ function watchJob(jobId, title) {
    DOM, because almost every action calls route() and rebuilds the view — without this
    the screen snaps back to "all / newest" the moment you post or kill something, which
    is half of why finding anything was painful. */
-const state = { view: 'overview', gateCount: 0, jobsRunning: 0, inrRate: 84, list: {} };
+/* `desk` is the News/Belief scope, and it is deliberately ONE value shared by every
+   screen rather than a per-page setting: the point of the split is to work one desk
+   at a time, so choosing Belief on Stories and finding News on the Gate would defeat
+   it. Persisted, because the scope you work in should survive a reload. */
+const state = { view: 'overview', gateCount: 0, jobsRunning: 0, inrRate: 84, list: {},
+                desk: localStorage.getItem('cc.desk') || 'news' };
 
 const VIEWS = [
   ['overview',  '◉',  'Overview',      vOverview],
@@ -224,6 +229,34 @@ async function route() {
   }
 }
 window.addEventListener('hashchange', route);
+
+/* ── Shared: the desk tabs (News · Belief) ─────────────────────────────────
+   Two desks, three desk tags: `belief` covers both the Everyone Knows and Turns Out
+   series, because they share a pipeline and a queue and are worked together. The
+   server knows that mapping (util.DESK_GROUPS) so no screen has to.
+
+   Every scoped view calls this and every list request carries `desk` — see qs()
+   below. Views with only one possible desk (Beliefs, Digs, Sources, Ingest) do NOT
+   get tabs: a tab that can only be pressed one way is furniture, not a control. */
+const DESK_TABS = [['news', '📰', 'News'], ['belief', '🧠', 'Belief']];
+
+function deskTabs(counts) {
+  const node = el(`<div class="desktabs">${DESK_TABS.map(([k, icon, label]) => {
+    const n = counts && counts[k];
+    return `<button class="desktab ${state.desk === k ? 'active' : ''}" data-d="${k}">
+      ${icon} ${label}${n ? ` <span class="badge">${n}</span>` : ''}</button>`;
+  }).join('')}</div>`);
+  for (const b of node.querySelectorAll('.desktab'))
+    b.onclick = () => {
+      if (state.desk === b.dataset.d) return;
+      state.desk = b.dataset.d;
+      localStorage.setItem('cc.desk', state.desk);
+      /* Filters are per-desk in spirit — a status filter that made sense for news
+         holds fine, but the page must reload against the new scope. */
+      route();
+    };
+  return node;
+}
 
 /* ── Shared: the list controls (Stories · Carousels · Reels) ───────────────
    ONE control for every browse surface — same markup, same wording, same keys on the
@@ -284,7 +317,7 @@ function listBar(view, opts) {
     node, foot, onChange: () => {},
     qs(extra) {
       const p = new URLSearchParams({ q: st.q, status: st.status, sort: st.sort,
-                                      limit: st.limit, offset: 0 });
+                                      limit: st.limit, offset: 0, desk: state.desk });
       if (opts.kinds) p.set('kind', st.kind);
       for (const k in (extra || {})) p.set(k, extra[k]);
       return p.toString();
@@ -335,14 +368,20 @@ function paintStatus(breaker, voiceUp) {
 
 /* ══ OVERVIEW ═══════════════════════════════════════════════════════════ */
 async function vOverview(main) {
-  const d = await api('/overview');
-  state.gateCount = (d.gate || []).length;
+  const d = await api('/overview?desk=' + state.desk);
+  /* The sidebar badge is the WHOLE backlog, never the scoped one: the tab you are
+     standing on must not be able to hide the other desk's queue. desk_tabs carries
+     both counts for exactly this. (It also fixes an old off-by-cap — the gate list
+     is sliced to 30, so a 37-deep queue used to badge as 30.) */
+  const t = d.desk_tabs || {};
+  state.gateCount = (t.news || 0) + (t.belief || 0);
   state.breaker = d.breaker;
   paintStatus(d.breaker, d.voice_up); nav();
   const c = d.counts || {};
   main.innerHTML = '';
   main.appendChild(el(`<div><h1>Overview</h1>
     <div class="sub">The engine at a glance — ${new Date().toUTCString().slice(17, 25)} UTC</div></div>`));
+  main.appendChild(deskTabs(t));
 
   if (d.breaker.open)
     main.appendChild(el(`<div class="banner warn"><span class="big">⛔</span><div>
@@ -687,14 +726,22 @@ function runCard(r) {
 
 /* ══ GATE ═══════════════════════════════════════════════════════════════ */
 async function vGate(main) {
-  const [pending, held] = await Promise.all([
-    api('/runs?status=pending_human&limit=50'),
-    api('/runs?status=held&limit=30'),
+  /* Four calls, one round trip's worth of wall time: the two lists for the desk
+     being viewed, and a count-only query per desk so the tabs can say what is
+     waiting on the OTHER side. Without those counts, working one desk means
+     losing sight of the other's backlog, which is the one thing this split must
+     not cost. */
+  const [pending, held, nNews, nBelief] = await Promise.all([
+    api(`/runs?status=pending_human&limit=50&desk=${state.desk}`),
+    api(`/runs?status=held&limit=30&desk=${state.desk}`),
+    api('/runs?status=pending_human&limit=1&desk=news'),
+    api('/runs?status=pending_human&limit=1&desk=belief'),
   ]);
-  state.gateCount = pending.runs.length; nav();
+  state.gateCount = nNews.total + nBelief.total; nav();
   main.innerHTML = '';
   main.appendChild(el(`<div><h1>The gate</h1>
     <div class="sub">${pending.runs.length} pending · ${held.runs.length} held — <b>approving is the only action that publishes.</b></div></div>`));
+  main.appendChild(deskTabs({ news: nNews.total, belief: nBelief.total }));
   if (!pending.runs.length && !held.runs.length)
     main.appendChild(el(`<div class="card">Nothing at the gate. The engine will bring drafts here.</div>`));
   for (const r of pending.runs) main.appendChild(runCard(r));
@@ -708,6 +755,7 @@ async function vGate(main) {
 async function vStories(main) {
   main.innerHTML = '';
   main.appendChild(el(`<div><h1>Stories</h1><div class="sub">Every pipeline run — click any to open the full dossier.</div></div>`));
+  main.appendChild(deskTabs());
   const bar = listBar('stories', {
     pageSize: 30,
     statuses: ['all', 'pending_human', 'published', 'held', 'investigating', 'writing',
@@ -733,6 +781,7 @@ async function vCarousels(main) {
   main.appendChild(el(`<div><h1>Carousels</h1>
     <div class="sub">The "receipts" deep-dive — optional per story, reels are the reach default.
     Click a slide to edit its headline.</div></div>`));
+  main.appendChild(deskTabs());
 
   const mk = el(`<div class="card"><div class="row">
     <input type="number" placeholder="published run #" style="width:150px">
@@ -876,6 +925,7 @@ async function vReels(main) {
   const mkb = el(`<div class="actions" style="margin-bottom:14px"><button class="btn primary">🎬 Make a reel…</button></div>`);
   mkb.querySelector('button').onclick = () => makeReelFlow(null);
   main.appendChild(mkb);
+  main.appendChild(deskTabs());
 
   const bar = listBar('reels', {
     statuses: ['all', 'ready', 'posted', 'killed'],

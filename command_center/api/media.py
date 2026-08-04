@@ -35,6 +35,9 @@ CAROUSEL_SORTS = {"newest": "cr.id DESC", "oldest": "cr.id ASC",
 def list_carousels(request, data):
     lq = list_query(request, sorts=CAROUSEL_SORTS, default_limit=20, max_limit=100)
     lq.filter_status("cr.status", {})
+    # Desk scope: carousels and reels have no desk of their own — they inherit
+    # the run's, which the LEFT JOIN above already has in `r`.
+    lq.filter_desk("r.desk", request.query_params.get("desk"))
     lq.search("r.throughline", "cr.caption")
     r = db.parallel(
         cars=lambda: db.q("SELECT cr.id, cr.run_id, cr.status, cr.caption, cr.ig_permalink, "
@@ -174,6 +177,7 @@ def list_reels(request, data):
     kind = (request.query_params.get("kind") or "").strip()
     if kind and kind != "all":
         lq.add("re.kind = %s", kind)
+    lq.filter_desk("r.desk", request.query_params.get("desk"))
     lq.search("r.throughline", "re.caption")
     size = "OCTET_LENGTH(re.mp4)" if db.is_postgres() else "LENGTH(re.mp4)"
     reels = db.q(f"SELECT re.id, re.run_id, re.kind, re.caption, re.status, "

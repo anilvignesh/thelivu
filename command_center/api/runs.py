@@ -44,21 +44,14 @@ RUN_STATUS_GROUPS = {
 
 RUN_SORTS = dict(SORTS_BASE, updated="updated_at DESC NULLS LAST")
 
-# The desks that may appear in a `desk=` filter. A whitelist for the same reason
-# the sorts are one: this value reaches a WHERE clause.
-DESKS = ("news", "ek", "gk")
-
-
 @endpoint
 def list_runs(request, data):
     lq = list_query(request, sorts=RUN_SORTS)
     lq.filter_status("status", RUN_STATUS_GROUPS)
     lq.search("throughline", "source")
-    # Desk filter. Whitelisted like the sorts are — request text never reaches SQL,
-    # and an unknown value falls through to "all" rather than erroring.
-    desk = (request.query_params.get("desk") or "all").lower()
-    if desk in DESKS:
-        lq.add("desk = %s", desk)
+    # Desk scope — "news", "belief" (both series), or one series by name.
+    # Whitelisted in util.DESK_GROUPS; request text never reaches SQL.
+    lq.filter_desk("desk", request.query_params.get("desk"))
     rows = db.q("SELECT id, created_at, updated_at, source, throughline, trust_gate, "
                 "status, slug, desk FROM pipeline_runs" + lq.where_sql() + lq.page_sql(),
                 lq.page_params())

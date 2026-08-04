@@ -83,6 +83,28 @@ a:hover { text-decoration: underline; }
 .badge.desk-ek { color: var(--gold); border: 1px solid rgba(210,170,109,.5); }
 .badge.desk-gk { color: var(--info); border: 1px solid rgba(143,199,255,.45); }
 
+/* Desk tabs (News · Belief) — the scope switch at the top of every screen that
+   can show either. Underline-style rather than boxed: it sits directly under an
+   <h1> and a boxed control there reads as a second navigation bar competing with
+   the sidebar, when it is really saying "which desk am I looking at". */
+.desktabs {
+  display: flex; gap: 2px; margin: 0 0 14px;
+  border-bottom: 1px solid var(--line);
+}
+.desktab {
+  background: none; border: none; cursor: pointer;
+  padding: 8px 16px; margin-bottom: -1px;
+  color: var(--muted); font-family: var(--mono); font-size: 13px;
+  border-bottom: 2px solid transparent; white-space: nowrap;
+}
+.desktab:hover { color: var(--kraft); }
+.desktab.active { color: var(--gold); border-bottom-color: var(--gold); }
+.desktab .badge {
+  background: var(--gold); color: var(--ink); font-size: 11px; font-weight: 700;
+  border-radius: 999px; padding: 0 7px; margin-left: 4px;
+}
+.desktab:not(.active) .badge { background: #3a3a3a; color: var(--kraft); }
+
 .nav-foot {
   padding: 10px 16px; border-top: 1px solid var(--line);
   display: flex; align-items: center; gap: 10px;

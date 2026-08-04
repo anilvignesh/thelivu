@@ -26,6 +26,14 @@ def err(message, status=400):
     return J({"ok": False, "error": message}, status)
 
 
+# The desk scopes a list surface can be filtered to. "belief" spans both series
+# because that is how the desks are actually worked — Everyone Knows and Turns
+# Out share a pipeline, a trust floor and a queue. "all" is the absence of a
+# filter and is deliberately not a key here.
+DESK_GROUPS = {"news": ["news"], "belief": ["ek", "gk"],
+               "ek": ["ek"], "gk": ["gk"]}
+
+
 class ListQuery:
     """The parsed shared list controls (search / status / sort / page) for one request.
 
@@ -54,6 +62,21 @@ class ListQuery:
         if not self.status or self.status == "all":
             return
         values = groups.get(self.status, [self.status])
+        marks = ",".join(["%s"] * len(values))
+        self.add(f"{column} IN ({marks})", *values)
+
+    def filter_desk(self, column, desk):
+        """Scope a list to one desk, or to the belief desks as a pair.
+
+        `belief` is a GROUP for the same reason the status filter has groups:
+        Everyone Knows and Turns Out are two series of one desk, and every screen
+        that offers a News/Belief choice would otherwise have to know that the
+        belief side is spelled with two values. Unknown input falls through to
+        "all" rather than erroring, and nothing from the request ever reaches SQL
+        — only the whitelisted values below do."""
+        values = DESK_GROUPS.get((desk or "all").strip().lower())
+        if not values:
+            return
         marks = ",".join(["%s"] * len(values))
         self.add(f"{column} IN ({marks})", *values)
 

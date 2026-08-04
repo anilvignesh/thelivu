@@ -7,7 +7,7 @@ import subprocess
 from starlette.routing import Route
 
 from command_center import db, jobs
-from command_center.api.util import (J, endpoint, err, cost_usd, INR,
+from command_center.api.util import (DESK_GROUPS, J, endpoint, err, cost_usd, INR,
                                      breaker_state, budget_state)
 from shared import budget
 from shared.db import kv_set, list_digs
@@ -67,7 +67,10 @@ def overview(request, data):
             return []
 
     r = db.parallel(
-        counts=lambda: db.q("SELECT status, COUNT(*) AS n FROM pipeline_runs GROUP BY status"),
+        # (desk, status) counts serve BOTH the stat tiles and the desk tabs — the
+        # tiles are just this aggregated over whichever desk is being viewed, so
+        # the old separate status-only query was a second round trip for a number
+        # already in this one.
         desk_counts=lambda: db.q("SELECT desk, status, COUNT(*) AS n FROM pipeline_runs "
                                  "GROUP BY desk, status"),
         lists=fetch_lists,
@@ -89,15 +92,32 @@ def overview(request, data):
         if t is not None and t.tzinfo is None:
             t = t.replace(tzinfo=datetime.timezone.utc)
         a["secs"] = int((now - t).total_seconds()) if t else 0
-    counts = {row["status"]: row["n"] for row in r["counts"]}
-    gate = [x for x in r["lists"] if x["status"] == "pending_human"][:30]
-    held = [x for x in r["lists"] if x["status"] in ("held", "hold", "needs_attention")][:20]
-    recent = r["lists"][:10]
+    # Desk scope. The lists are already in memory, so this filters rather than
+    # re-queries; the tab counts are always for BOTH desks, because a tab that
+    # only knows its own number can't tell you there is work on the other one.
+    desks = DESK_GROUPS.get((request.query_params.get("desk") or "all").lower())
+
+    def in_scope(row):
+        return desks is None or (row.get("desk") or "news") in desks
+
+    counts, tabs = {}, {"news": 0, "belief": 0}
+    for row in r["desk_counts"]:
+        d, st, n = (row.get("desk") or "news"), row["status"], row["n"]
+        if desks is None or d in desks:
+            counts[st] = counts.get(st, 0) + n
+        if st == "pending_human":
+            tabs["belief" if d in ("ek", "gk") else "news"] += n
+
+    lists = [x for x in r["lists"] if in_scope(x)]
+    gate = [x for x in lists if x["status"] == "pending_human"][:30]
+    held = [x for x in lists if x["status"] in ("held", "hold", "needs_attention")][:20]
+    recent = lists[:10]
     today = datetime.date.today().isoformat()
     today_usd = sum(cost_usd(x["model"], x["in_tok"], x["out_tok"])
                     for x in r["daily"] if str(x["day"])[:10] == today)
     return J({
         "counts": counts,
+        "desk_tabs": tabs,
         # In-RAM, so the banner that tells him a reel is still building costs the
         # overview nothing. It is on this screen because "I started a build and
         # can't find it" was the failure — Activity has the detail.
