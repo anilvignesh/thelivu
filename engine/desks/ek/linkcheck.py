@@ -96,3 +96,52 @@ def report(results):
     head = (f"**{dead} of {len(results)} cited URLs are dead.**" if dead
             else f"All {len(results)} cited URLs resolve (or are bot-blocked but real).")
     return head + "\n\n" + "\n".join(lines)
+
+# ── Are the sources checkable at all? ────────────────────────────────────────
+# The URL check above answers "does this address resolve". This answers the
+# question underneath it, which is the one the desk actually promises: can a
+# reader go and find what this rests on?
+#
+# The two are not the same, and conflating them cost a good piece. Run #147 cited
+# Guha's `India After Gandhi` (Macmillan, 2007), Nanda's `The Nehrus` (1962),
+# Gopal's `Jawaharlal Nehru` (Harvard, 1975) and a dated Economic Times
+# fact-check — every one findable in seconds — and was held purely for having no
+# URL, because the search-grounded builder surfaces no addresses on some topics.
+# Meanwhile run #146 offered "Biographical records of Feroze Gandhi — minimum
+# three independent sources per record", which has no URL either and names
+# nothing at all. Holding both for the same reason treated a named book as though
+# it were a category.
+#
+# So the rule is: every source entry must NAME A WORK — carry a URL, a quoted
+# title, or an italicised title. A category with a source count bolted on is the
+# shape of a citation with the citation removed, and it is what this catches.
+# (Owner's ruling, 2026-08-04.)
+
+_SOURCES_RE = re.compile(r"^##+[ 	]*sources[ 	]*$(.*?)(?=^##+[ 	]|\Z)",
+                         re.IGNORECASE | re.MULTILINE | re.DOTALL)
+# A numbered or bulleted entry in that block.
+_ENTRY_RE = re.compile(r"^[ 	]*(?:\d+[.)]|[-*•])[ 	]+(.+?)(?=^[ 	]*(?:\d+[.)]|[-*•])[ 	]|\Z)",
+                       re.MULTILINE | re.DOTALL)
+# What makes an entry name something: an address, a quoted title, or an
+# italicised title. Deliberately structural — it cannot judge whether the work is
+# any good, only whether one was named.
+_TITLE_RE = re.compile(r"https?://|[\"“][^\"”]{4,}[\"”]|\*[^*\n]{4,}\*|_[^_\n]{4,}_")
+
+
+def source_entries(text):
+    """The numbered entries of the piece's Sources block, or [] if it has none."""
+    m = _SOURCES_RE.search(text or "")
+    if not m:
+        return []
+    body = m.group(1)
+    entries = [e.strip() for e in _ENTRY_RE.findall(body)]
+    if entries:
+        return entries
+    # A sources block written as prose lines rather than a list.
+    return [l.strip() for l in body.splitlines() if l.strip()]
+
+
+def unnamed_sources(text):
+    """Source entries that name no findable work. Empty list = every source is
+    checkable, whether or not any of them carries a URL."""
+    return [e for e in source_entries(text) if not _TITLE_RE.search(e)]

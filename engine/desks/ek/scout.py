@@ -202,7 +202,7 @@ def run_belief_cycle():
     log.info("belief cycle: running queue #%s — %s", row["id"], row["belief"][:80])
 
     try:
-        res = run_belief(row["belief"])
+        res = run_belief(row["belief"], note=row.get("note") or "")
     except Exception as e:
         set_belief_status(row["id"], "queued", result=f"failed: {e}")
         log.error("belief cycle failed on queue #%s: %s", row["id"], e, exc_info=True)

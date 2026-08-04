@@ -47,7 +47,11 @@ collection"), and list sources at the end.
 
 **Every source must be specifically identifiable.** Title, author, publication,
 date. A category is not a citation: "NASA astronaut testimony", "visual acuity
-analysis", "two independent accounts" name no document a reader can find. If the
+analysis", "two independent accounts" name no document a reader can find.
+**Adding a count does not fix it** — "biographical records of X — minimum three
+independent sources per record" is the shape of a citation with the citation
+taken out, and it reads as rigour while giving the reader nothing. Name the work
+or drop the claim. If the
 record file gave you only a category, you do not have a source — drop the claim
 or state it with the one specific source you do have.
 

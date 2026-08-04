@@ -84,6 +84,45 @@ useful as the evidence — it tells the verifier exactly where the piece is thin
   work but not a live address, give the citation **without** a URL — title,
   author, publication, date — and say "no retrieved URL". A downstream check
   tests every link, and a dead one holds the piece.
+- **But you must actually land some.** Honesty about what you could not retrieve
+  is not a licence to retrieve nothing: a file with no live address at all
+  produces a piece a reader cannot check, and the same downstream check holds it
+  for that too. Aim to carry **at least three retrieved addresses** on the
+  load-bearing claims. If you genuinely cannot, say so in COULD NOT ESTABLISH and
+  name what you searched — the piece will be held, and that is the correct
+  outcome, but it must be a stated result rather than something the writer
+  discovers.
+- **A category is not a source, and a category with a number on it is still not
+  a source.** "Biographical records of Feroze Gandhi — minimum three independent
+  sources" names nothing anyone can open; it is the shape of a citation with the
+  citation removed. Every entry names ONE work: title, author, publication, date.
+  If you have three sources for a claim, name the three.
+
+## Name the document that would settle it, then go and get it
+
+Do this BEFORE you finish, not after. Your `WEAKEST LINK` is worthless if you
+only work it out once the research is over — at that point you have identified a
+hole you are no longer doing anything about.
+
+So, part-way through: look at what you have, find the claim carrying the most
+weight with the least behind it, and ask **"what kind of document would settle
+this, and does it exist?"** Then search for that document *by name*. A
+biography of the person. A birth or marriage record. The commission report. The
+original paper. The dictionary entry with a date on it. Search the title, not
+the topic.
+
+This is the difference between a broad sweep and research. Measured, 2026-08-04:
+a piece on the Nehru-Gandhi surname reported that Feroze Gandhi "was born Ghandy"
+as something "widely reported" with no primary source — because the file had been
+built by searching the topic. One targeted search for the obvious document,
+Bertil Falk's biography *Feroze: The Forgotten Gandhi*, surfaces a birth
+certificate naming his father as Jehangirji Furdoosji Ghandhy. Same subject, same
+tools, ten minutes apart. The only difference was asking which document would
+end the argument.
+
+If you look and it genuinely is not findable, that is a real result — say so in
+COULD NOT ESTABLISH, and name what you searched for. The verifier needs to know
+the difference between "no such document" and "nobody looked".
 
 ## Output (exactly this, nothing else)
 

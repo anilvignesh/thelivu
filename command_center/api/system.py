@@ -168,7 +168,11 @@ def system_status(request, data):
         steward_recs = json.loads(sw.get("latest_tech_recs") or "[]")
     except (ValueError, TypeError):
         steward_recs = []
+    from publishing import voices
     return J({
+        "reel_voices": voices.available(),
+        "reel_voice": (db.kv_many(["reel_voice"]).get("reel_voice") or "").strip()
+                      or voices.default_name(),
         "breaker": r["breaker"],
         "budget": r["budget"],
         "steward": {"last": sw.get("last_tech_steward_at"),
@@ -322,6 +326,22 @@ def jobs_summary(request, data):
 
 
 @endpoint
+def set_reel_voice(request, data):
+    """The default voice for reels. Stored in kv so it survives a restart and so
+    the engine and the command centre agree without a config file each."""
+    from publishing import voices
+    name = (data.get("voice") or "").strip()
+    if name:
+        try:
+            voices.resolve(name)
+        except ValueError as e:
+            return err(str(e))
+    kv_set("reel_voice", name)
+    return J({"ok": True, "voice": name or voices.default_name(),
+              "note": f"Reels will be narrated by {name or voices.default_name()}."})
+
+
+@endpoint
 def set_budget(request, data):
     """Set the daily spend cap. 0 disables the governor entirely."""
     try:
@@ -350,6 +370,7 @@ routes = [
     Route("/system/voice", voice_control, methods=["POST"]),
     Route("/system/breaker/clear", clear_breaker, methods=["POST"]),
     Route("/system/budget", set_budget, methods=["POST"]),
+    Route("/system/voice-default", set_reel_voice, methods=["POST"]),
     Route("/jobs", jobs_recent, methods=["GET"]),
     # Before the {jid} pattern — Starlette matches in order and "summary" is a
     # legal job id as far as the path converter is concerned.

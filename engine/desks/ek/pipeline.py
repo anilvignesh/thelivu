@@ -85,8 +85,16 @@ def _save_belief(run_id, belief, shape, gate_out):
         conn.close()
 
 
-def run_belief(belief, *, dry_run=False):
+def run_belief(belief, *, note="", dry_run=False):
     """Take one candidate belief to the human gate. Returns a result dict.
+
+    `note` is the owner's steer from the command centre's submit box — where he
+    heard the belief, a document worth looking for, a trap to avoid. It reaches
+    the RESEARCH step only, as direction and never as fact: the record file is
+    built from retrieved sources, and a note saying "it was X" does not make it
+    so. It was being stored on the queue row and read by nothing, which is why
+    the note on run #146 ("the Feroze-Khan claim is the replacement story, do not
+    let it carry the piece") had no effect on the piece at all.
 
     `dry_run` runs every skill but writes nothing to the database — for checking
     a prompt change without leaving rows behind.
@@ -117,9 +125,17 @@ def run_belief(belief, *, dry_run=False):
     out.update(desk=desk, series=SERIES_NAME[desk], belief=belief, shape=shape)
 
     # ── 2. the record ────────────────────────────────────────────────────────
+    note_block = ""
+    if (note or "").strip():
+        note_block = (
+            "\n\nOWNER'S NOTE — direction for your search, NOT evidence and NOT a "
+            "finding. It may name a document worth hunting, a trap to avoid, or where "
+            "the belief was heard. Verify anything in it like anything else; if the "
+            "record contradicts it, the record wins and you say so.\n"
+            f"{note.strip()}\n")
     record = run_skill(
         "ek:record-builder",
-        f"BELIEF: {belief}\nSHAPE: {shape}\n\nPREMISE CHECK:\n{gate_out}",
+        f"BELIEF: {belief}\nSHAPE: {shape}\n\nPREMISE CHECK:\n{gate_out}{note_block}",
         max_tokens=8192, topic=belief[:60])
     out["record"] = record
 
@@ -209,13 +225,21 @@ def run_belief(belief, *, dry_run=False):
     out["links"] = link_results
     out["dead_links"] = dead
     link_block = "\n\n## CITATION CHECK (automated)\n" + linkcheck.report(link_results)
+    # The check underneath the link check: does every source NAME a work a reader
+    # could find? An address that resolves and a book with a publisher and a year
+    # are both checkable; "biographical records of X — minimum three independent
+    # sources" is not, and carries no URL to test. Holding on missing URLs alone
+    # treated those two as the same thing and parked a piece sourced to Guha,
+    # Nanda and Gopal. (Owner's ruling, 2026-08-04.)
+    unnamed = linkcheck.unnamed_sources(page_md)
+    if unnamed:
+        link_block += ("\n\n**%d source(s) name no findable work:**\n" % len(unnamed)
+                       + "\n".join(f"- {u[:160]}" for u in unnamed))
     review = (review or "") + link_block
-    # No URLs at all is held for the same reason a dead one is — it defeats the
-    # check rather than passing it.
-    no_links = not link_results
-    if dead or no_links:
+    if dead or unnamed:
         log.warning("citation problem: %s",
-                    f"{len(dead)} dead" if dead else "no URLs cited at all")
+                    f"{len(dead)} dead" if dead else f"{len(unnamed)} unnamed source(s)")
+    out["unnamed_sources"] = unnamed
 
     out["review_verdict"] = rverdict
     out["draft"] = page_md
@@ -226,7 +250,7 @@ def run_belief(belief, *, dry_run=False):
     # it must not reach the human as if it were ready. A dead citation is held for
     # the same reason: the reader cannot check it, which is the one thing this
     # desk promises they can.
-    status = ("needs_attention" if (rverdict.startswith("BLOCK") or dead or no_links)
+    status = ("needs_attention" if (rverdict.startswith("BLOCK") or dead or unnamed)
               else "pending_human")
     save_belief_parts(run_id, spine=spine, label=draft_mod.view_label(
         dict(parts, shape=shape)))

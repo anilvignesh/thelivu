@@ -307,7 +307,7 @@ def _write_silence(wav_path, secs):
     )
 
 
-def _synth(text, wav_path, backend=None):
+def _synth(text, wav_path, backend=None, voice=None):
     """Synthesize one line to a wav via the configured backend. Returns seconds.
     `backend` overrides the module-level TTS_BACKEND (env is bound at import time,
     so a caller that only sets os.environ afterwards can't change it — passing it
@@ -321,7 +321,7 @@ def _synth(text, wav_path, backend=None):
         return SILENT_BEAT_SECONDS
     backend = backend or TTS_BACKEND
     if backend == "chatterbox":
-        _synth_chatterbox(text, wav_path)
+        _synth_chatterbox(text, wav_path, voice=voice)
     elif backend == "omnivoice":
         _synth_omnivoice(text, wav_path)
     else:
@@ -329,11 +329,15 @@ def _synth(text, wav_path, backend=None):
     return _duration(wav_path)
 
 
-def _synth_chatterbox(text, wav_path):
-    """POST to the Chatterbox voice server (Anil's cloned voice) → write a wav.
-    Generation is ~5x realtime on CPU, so the timeout is generous."""
+def _synth_chatterbox(text, wav_path, voice=None):
+    """POST to the Chatterbox voice server → write a wav. `voice` names a
+    registered voice (publishing/voices.py); omitted, the server's default
+    narrates. Generation is ~5x realtime on CPU, so the timeout is generous."""
     import requests
-    r = requests.post(f"{CHATTERBOX_URL}/synth", json={"text": text}, timeout=600)
+    body = {"text": text}
+    if voice:
+        body["voice"] = voice
+    r = requests.post(f"{CHATTERBOX_URL}/synth", json=body, timeout=600)
     r.raise_for_status()
     Path(wav_path).write_bytes(r.content)
 
@@ -481,7 +485,7 @@ def plan_cuts(total, k, pauses):
     return parts
 
 
-def synth_beats(beats, backend, work_dir):
+def synth_beats(beats, backend, work_dir, voice=None):
     """Voice every beat FIRST, so shots can be planned from real durations and real
     pauses rather than from a word-count guess. Returns
     [(wav_path, duration_including_gap, [pause_times])] aligned with `beats`.
@@ -496,7 +500,7 @@ def synth_beats(beats, backend, work_dir):
     out = []
     for i, (spoken, _caption) in enumerate(beats):
         wav = work_dir / f"a{i}.wav"
-        dur = _synth(spoken, wav, backend) + GAP_SECS
+        dur = _synth(spoken, wav, backend, voice=voice) + GAP_SECS
         pauses = find_pauses(wav) if (spoken or "").strip() else []
         out.append((wav, dur, pauses))
     return out
@@ -535,7 +539,7 @@ def _zoom_expr(frames, zmax=ZOOM_MAX):
     inc = (zmax - 1.0) / max(frames, 1)
     return f"min(zoom+{inc:.8f},{zmax})"
 def build_reel(fields, dark, out_mp4, kicker=None, backend=None, render_frame=None,
-               shots_per_beat=None, voiced=None, label=""):
+               shots_per_beat=None, voiced=None, label="", voice=None):
     """Render frames + VO for each beat, animate with a gentle zoom, mux to MP4.
     `fields` is parse_script() output. `backend` overrides the module TTS_BACKEND
     for the voice (see _synth). `render_frame` overrides the frame renderer —
@@ -579,7 +583,7 @@ def build_reel(fields, dark, out_mp4, kicker=None, backend=None, render_frame=No
                 wav, dur, pauses = voiced[i]
             else:
                 wav = work / f"a{i}.wav"
-                dur = _synth(spoken, wav, backend) + GAP_SECS  # hold through the gap too
+                dur = _synth(spoken, wav, backend, voice=voice) + GAP_SECS  # hold through the gap too
                 pauses = []
             wav_paths.append((wav, dur))
 

@@ -334,7 +334,8 @@ def _illustrate(fields, out_dir, _p, shots=None):
 
 
 def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
-                       mode=None, illustrated=True, script=None, notes=None):
+                       mode=None, illustrated=True, script=None, notes=None,
+                       voice=None):
     """Generate a narrated reel (Anil's cloned voice) for an approved run and store
     it. Returns a result dict — never raises for the expected failure modes so the
     dashboard can render a clean message:
@@ -361,6 +362,12 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
     illustration fails it falls back to text-slide frames for the whole reel, so
     this never turns a working reel into a failed job.
 
+    `voice` names a registered reel voice (publishing/voices.py). Omitted, the
+    engine's configured default narrates — the kv key `reel_voice` when set,
+    otherwise the voice server's own default. The voice reaches only the audio:
+    a reel's words, pictures and cut are identical whoever reads it, which is
+    what makes an A/B between voices worth anything.
+
     `notes` is free text from the command centre's remake suggestion box — what to
     change about the cut he just watched ("hook is flat, open on the pellet round",
     "cut the fourth beat"). It shapes the script step only, is stored on the reel it
@@ -380,6 +387,9 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
             except Exception:
                 pass
 
+    if voice is None:
+        from shared.db import kv_get
+        voice = (kv_get("reel_voice") or "").strip() or None
     mode = (mode or REEL_MODE or "attended").strip().lower()
     attended = mode == "attended"
     nvidia = mode == "nvidia"
@@ -550,9 +560,11 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
         #    estimate over-cut a 5.8s beat into two 2.9s shots) and its real pause
         #    positions (so a cut lands on a breath, not mid-clause). build_reel is
         #    handed these wavs, so the slowest step still runs exactly once.
-        _p(0.12, f"Voicing {len(fields['beats'])} beats…")
+        _p(0.12, f"Voicing {len(fields['beats'])} beats"
+                 + (f" as {voice}…" if voice else "…"))
         try:
-            voiced = synth_beats(fields["beats"], "chatterbox", tmpdir / "vo")
+            voiced = synth_beats(fields["beats"], "chatterbox", tmpdir / "vo",
+                                 voice=voice)
         except Exception as e:
             log.error("voicing failed for run #%s: %s", run_id, e)
             return {"ok": False, "error": f"voicing failed: {e}"}
@@ -592,7 +604,7 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
         try:
             build_reel(fields, bool(dark), out_mp4, backend="chatterbox",
                        render_frame=render_frame, shots_per_beat=shots_per_beat,
-                       voiced=voiced, label=view_label)
+                       voiced=voiced, label=view_label, voice=voice)
         except Exception as e:
             log.error("build_reel failed for run #%s: %s", run_id, e)
             return {"ok": False, "error": f"reel render failed: {e}"}

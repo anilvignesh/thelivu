@@ -10,7 +10,11 @@ Voice = the cloned reference at CBX_REF, with the settings Anil picked
 
 Run:  ~/cbx/bin/python -m publishing.chatterbox_server      (from ~/thelivu)
   or: cd ~/thelivu && ~/cbx/bin/python publishing/chatterbox_server.py
-Health: GET /health   ·   Synthesize: POST /synth {"text": "..."} -> audio/wav
+Health: GET /health -> {status, default, voices}
+Synth:  POST /synth {"text": "...", "voice": "anil"} -> audio/wav
+        `voice` is optional and names an entry in publishing/voices.py; omitted,
+        the configured default narrates. Switching costs nothing — the model
+        takes the reference wav on every call, so there is no reload.
 """
 import io
 import json
@@ -21,13 +25,33 @@ import torch  # noqa: F401  (imported so a bad install fails loudly at startup)
 import torchaudio as ta
 from chatterbox.tts_turbo import ChatterboxTurboTTS
 
-REF = os.environ.get("CBX_REF", os.path.expanduser("~/thelivu_voice_ref2.wav"))
+from publishing import voices
+
+# CBX_REF still wins when set — that is how this server was driven before the
+# registry existed, and a running setup should not change under anyone's feet.
+# Otherwise the voice comes from the registry, per request.
+REF = os.environ.get("CBX_REF", "")
 EXAGGERATION = float(os.environ.get("CBX_EXAGGERATION", "0.45"))
 CFG_WEIGHT = float(os.environ.get("CBX_CFG", "0.4"))
 TEMPERATURE = float(os.environ.get("CBX_TEMPERATURE", "0.7"))
 PORT = int(os.environ.get("CBX_PORT", "3901"))
 
-print(f"[chatterbox] loading Turbo (CPU)…  ref={REF}", flush=True)
+
+def _voice(name):
+    """(label, ref path, settings dict) for this request. The model takes the
+    reference on every generate() call, so switching voices costs nothing and
+    needs no restart."""
+    if REF:
+        return "CBX_REF", REF, {"exaggeration": EXAGGERATION,
+                                "cfg_weight": CFG_WEIGHT,
+                                "temperature": TEMPERATURE}
+    label, spec = voices.resolve(name)
+    return label, spec["ref"], {k: spec[k] for k in
+                                ("exaggeration", "cfg_weight", "temperature")}
+
+print(f"[chatterbox] loading Turbo (CPU)…  "
+      f"{'ref=' + REF if REF else 'voices=' + ','.join(voices.available())}",
+      flush=True)
 _MODEL = ChatterboxTurboTTS.from_pretrained(device="cpu")
 print(f"[chatterbox] ready on :{PORT}  (exag={EXAGGERATION} cfg={CFG_WEIGHT} temp={TEMPERATURE})", flush=True)
 
@@ -35,7 +59,14 @@ print(f"[chatterbox] ready on :{PORT}  (exag={EXAGGERATION} cfg={CFG_WEIGHT} tem
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
-            body = b'{"status":"ok","voice":"anil"}'
+            # Report the voice actually loaded, not a hardcoded name — it said
+            # "anil" regardless of CBX_REF, which would have been a lie the
+            # moment a second voice existed.
+            body = json.dumps({
+                "status": "ok",
+                "default": "CBX_REF" if REF else voices.default_name(),
+                "voices": ["CBX_REF"] if REF else voices.available(),
+            }).encode()'
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
@@ -50,13 +81,12 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(404); self.end_headers(); return
         try:
             n = int(self.headers.get("Content-Length", 0))
-            text = (json.loads(self.rfile.read(n) or b"{}").get("text") or "").strip()
+            payload = json.loads(self.rfile.read(n) or b"{}")
+            text = (payload.get("text") or "").strip()
             if not text:
                 raise ValueError("empty text")
-            wav = _MODEL.generate(
-                text, audio_prompt_path=REF,
-                exaggeration=EXAGGERATION, cfg_weight=CFG_WEIGHT, temperature=TEMPERATURE,
-            )
+            label, ref, settings = _voice(payload.get("voice"))
+            wav = _MODEL.generate(text, audio_prompt_path=ref, **settings)
             buf = io.BytesIO()
             ta.save(buf, wav, _MODEL.sr, format="wav")
             data = buf.getvalue()

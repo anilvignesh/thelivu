@@ -186,7 +186,11 @@ def list_reels(request, data):
                  + _REEL_FROM + lq.where_sql() + lq.page_sql(), lq.page_params())
     total = db.q(lq.count_sql(_REEL_FROM), tuple(lq.params))[0]["n"]
     from command_center.api.system import voice_status
+    from publishing import voices
+    from shared.db import kv_get
     return J({"reels": reels, "voice_up": voice_status(), "kind": kind or "all",
+              "voices": voices.available(),
+              "voice_default": (kv_get("reel_voice") or "").strip() or voices.default_name(),
               **lq.envelope(total)})
 
 
@@ -203,6 +207,15 @@ def make_reel(request, data):
         return err("no such run", 404)
     dark = data.get("dark")
     notes = (data.get("notes") or "").strip() or None
+    # Which voice narrates. Validated here rather than 600s later inside the
+    # render: an unknown name should fail the click, not the job.
+    voice = (data.get("voice") or "").strip() or None
+    if voice:
+        from publishing import voices
+        try:
+            voices.resolve(voice)
+        except ValueError as e:
+            return err(str(e))
     article_url = None
     base = _BASE()
     if base and run.get("slug"):
@@ -211,7 +224,7 @@ def make_reel(request, data):
     def do_make(progress):
         from publishing.make_reel import make_narrated_reel
         return make_narrated_reel(rid, dark=dark, article_url=article_url,
-                                  progress=progress, notes=notes)
+                                  progress=progress, notes=notes, voice=voice)
 
     return J({"ok": True, "job": jobs.submit(f"build reel for run #{rid}", do_make,
                                              {"run_id": rid}, kind="reel")})

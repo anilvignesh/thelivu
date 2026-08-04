@@ -883,11 +883,21 @@ function renderCarousels(list, d) {
    usually the first note plus one more, not a fresh thought. */
 async function makeReelFlow(rid, opts = {}) {
   const remake = !!opts.remake;
+  /* The voice picker appears only when there is more than one voice to pick —
+     a control with a single option is furniture. state.voices is filled by the
+     Reels view; absent (arrived from elsewhere), the engine default narrates. */
+  const voices = state.voices || [];
+  const voicePick = voices.length > 1
+    ? `<label class="f">Voice</label><select data-x="voice">${voices.map(v =>
+        `<option value="${esc(v)}"${v === state.voiceDefault ? ' selected' : ''}>${esc(v)}</option>`
+      ).join('')}</select>`
+    : '';
   const box = el(`<div><h3>${remake ? '🔁 Remake reel' : '🎬 Make reel'}${rid ? ` — run #${rid}` : ''}</h3>
     <p class="muted small">Free Gemma 4 writes the script, your Chatterbox voice + ffmpeg render locally (a few minutes). You preview before anything posts.</p>
     ${rid ? '' : '<label class="f">Published run #</label><input type="number" data-x="rid">'}
     <label class="f">Theme</label>
     <select data-x="dark"><option value="1" selected>Ink-dark (brand default)</option><option value="0">Light kraft</option></select>
+    ${voicePick}
     <label class="f">${remake ? 'What to change' : 'Suggestions'} <span class="muted small">(optional)</span></label>
     <textarea data-x="notes" rows="4" placeholder="${remake
       ? 'Hook is flat — open on the police diary entry. Cut the fourth beat. Slower on the closing line.'
@@ -905,7 +915,10 @@ async function makeReelFlow(rid, opts = {}) {
     const notes = box.querySelector('[data-x=notes]').value.trim();
     close();
     try {
-      const r = await api('/reels', { method: 'POST', body: { run_id: runId, dark, notes } });
+      const voiceSel = box.querySelector('[data-x=voice]');
+      const body = { run_id: runId, dark, notes };
+      if (voiceSel) body.voice = voiceSel.value;
+      const r = await api('/reels', { method: 'POST', body });
       const j = await watchJob(r.job, `Build reel for run #${runId}`);
       if (j && j.state === 'done') { location.hash = '#/reels'; route(); }
       else if (j && j.result) {
@@ -940,6 +953,8 @@ async function vReels(main) {
   async function paintReels() {
     list.innerHTML = '<div class="muted">Loading…</div>';
     const d = await api('/reels?' + bar.qs());
+    state.voices = d.voices || [];
+    state.voiceDefault = d.voice_default || '';
     paintStatus(undefined, d.voice_up);
     head.querySelector('[data-x=sub]').innerHTML =
       `The reach surface — narrated in your cloned voice, rendered on this laptop.
