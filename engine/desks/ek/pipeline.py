@@ -29,7 +29,11 @@ import re
 import sys
 
 from engine.agents.skill_runner import run_skill, run_structured_skill, StructuredOutputError
-from engine.desks.ek import draft as draft_mod, gate, linkcheck
+# Imported under a distinct name on purpose: `gate` is already the local for the
+# TRUST gate's verdict inside run_belief, and the collision made Python treat the
+# module reference as a local read-before-assignment — the whole desk raised
+# UnboundLocalError on its first real call.
+from engine.desks.ek import draft as draft_mod, gate as premise_gate, linkcheck
 from shared.db import save_run, update_run, save_belief_parts, _conn, _is_postgres
 
 log = logging.getLogger("belief-desk")
@@ -96,7 +100,7 @@ def run_belief(belief, *, dry_run=False):
     # The verdict is computed from the gate's four judgments, not read off its
     # VERDICT line — the two have disagreed, and the disagreement binned a
     # candidate the gate itself had reasoned into the GK lane. See gate.py.
-    verdict = gate.verdict(gate_out, topic=belief[:60])
+    verdict = premise_gate.verdict(gate_out, topic=belief[:60])
     out["verdict"] = verdict
     out["premise_check"] = gate_out
     log.info("premise-check: %s", verdict)
