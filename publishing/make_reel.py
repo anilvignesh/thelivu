@@ -314,7 +314,7 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
     Ignored when an explicit `script=` is supplied — a hand-corrected script is
     already the final word, so there is nothing left to direct.
     """
-    from shared.db import get_run, save_reel
+    from shared.db import get_belief, get_run, save_reel
     from shared import quota
     from shared.config import REEL_MODE
     from engine.agents.skill_runner import attended_mode
@@ -337,6 +337,25 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
     if not draft:
         return {"ok": False, "error": f"run #{run_id} has no draft text to script from"}
 
+    # A belief piece is scripted from its stored spine, not from the article: the
+    # spine IS the narration the verifier passed and the reviewer read, so there
+    # is no script step to run. See publishing/belief_reel.py.
+    desk = (run.get("desk") or "news").lower()
+    belief = get_belief(run_id) if desk in ("ek", "gk") else None
+    spine = (belief or {}).get("spine") or ""
+    if desk in ("ek", "gk") and not spine:
+        return {"ok": False, "error": (
+            f"run #{run_id} is a {desk} piece with no stored spine — it was written "
+            "before the spine was split out. Run "
+            "`python -m engine.desks.ek.backfill_drafts` and try again.")}
+    # The shape-B view label rides on every frame of a contested-frame reel — the
+    # viewer most likely to take an argued frame as a finding is the one watching
+    # muted who never taps through, and the label is the only thing that reaches
+    # them. Fixed wording, not the writer's sentence: a label that changes per
+    # piece is not a label.
+    from engine.desks.ek.draft import REEL_VIEW_LABEL
+    view_label = REEL_VIEW_LABEL if (belief or {}).get("label") else ""
+
     # 1) Route the model step (the video-script — a POST-GATE step; the article is
     #    already verified + human-approved, so which model writes the script never
     #    touches the trust gate).
@@ -347,7 +366,9 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
     #  - attended mode: no API at all; the script is a terminal handoff, which can
     #    only happen inside an attended process (the blocking wait is the compliance
     #    boundary). From the dashboard (non-attended) return the command, never the API.
-    if nvidia:
+    if spine:
+        pass  # no script step at all — the words are already written and verified
+    elif nvidia:
         pass  # free engine, own key — no breaker, no attended requirement
     elif not attended:
         blocked = quota.is_blocked()
@@ -388,6 +409,26 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
         if notes:
             log.info("run #%s: script supplied by hand — revision notes not applied "
                      "to it (they are stored with the reel)", run_id)
+    elif spine:
+        # The belief desks. Words copied from the spine; only the captions,
+        # illustration scenes and hashtags are chosen, and a caption has to be a
+        # faithful span of the line it sits under or it is replaced by one.
+        _p(0.10, "Laying out the verified spine…")
+        from publishing import belief_reel
+        from publishing.parser import extract_headline
+        from engine.desks.ek.draft import spine_lines
+        lines = spine_lines(spine)
+        if not lines:
+            return {"ok": False, "error": f"run #{run_id}'s spine has no spoken lines"}
+        headline = extract_headline(draft)
+        captions, scenes, tags = belief_reel.dress_spine(
+            lines, headline=headline, series=belief_reel.SERIES_KICKER.get(desk, ""))
+        script = belief_reel.script_from_spine(
+            lines, headline=headline, desk=desk,
+            captions=captions, scenes=scenes, hashtags=tags)
+        if notes:
+            log.info("run #%s: belief reel — revision notes do not reach the "
+                     "narration (it is the verified spine); stored with the reel", run_id)
     else:
         _p(0.10, "Rewriting the reel script to your notes…" if notes
                  else "Writing the reel script (free Gemma 4)…" if nvidia
@@ -416,6 +457,18 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
     if not fields.get("hook"):
         return {"ok": False, "error": "the script's HOOK line did not parse — a reel has "
                                       "to open on a hook, so nothing was rendered"}
+    # The belief desks' one hard rule at this stage: what the voice says must still
+    # be the spine the verifier passed. Checked AFTER parsing, so it covers a spine
+    # mangled by the script format and a hand-corrected script whose words drifted.
+    # Captions, pictures and hashtags are free; the words are not.
+    if spine:
+        from publishing import belief_reel
+        from engine.desks.ek.draft import spine_lines
+        if not belief_reel.spoken_matches_spine(script, spine_lines(spine)):
+            return {"ok": False, "error": (
+                "the script's spoken lines are not the verified spine — a belief reel "
+                "may not say anything the trust gate did not pass. Edit the piece and "
+                "re-run the desk if the narration needs to change.")}
     # Captured before the silent sign-off beat is appended below.
     narration = fields.get("narration") or ""
 
@@ -474,7 +527,7 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
         try:
             build_reel(fields, bool(dark), out_mp4, backend="chatterbox",
                        render_frame=render_frame, shots_per_beat=shots_per_beat,
-                       voiced=voiced)
+                       voiced=voiced, label=view_label)
         except Exception as e:
             log.error("build_reel failed for run #%s: %s", run_id, e)
             return {"ok": False, "error": f"reel render failed: {e}"}

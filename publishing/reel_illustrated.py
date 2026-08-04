@@ -62,8 +62,13 @@ def _scrims(base):
     return Image.alpha_composite(base.convert("RGBA"), scrim).convert("RGB")
 
 
-def draw_illustrated_frame(image_path, caption, idx, n_illustrated, out_png):
-    """One story frame: the illustration, scrims, masthead, caption, progress."""
+def draw_illustrated_frame(image_path, caption, idx, n_illustrated, out_png, label=""):
+    """One story frame: the illustration, scrims, masthead, caption, progress.
+
+    `label` is the belief desk's shape-B view marker, drawn under the masthead on
+    every frame. The top scrim already darkens that band, so an outlined pill
+    reads over any illustration.
+    """
     base = Image.open(image_path).convert("RGB").resize((W, H))
     img = _scrims(base)
     d = ImageDraw.Draw(img)
@@ -73,6 +78,9 @@ def draw_illustrated_frame(image_path, caption, idx, n_illustrated, out_png):
     d.text((pad_x, 96), "THELIVU", font=mark_f, fill=ACCENT)
     d.text((pad_x + d.textlength("THELIVU", font=mark_f) + 22, 104), "· reel",
            font=_font(MONO, 32), fill=(238, 232, 222))
+    if label:
+        from publishing.reel import _draw_view_label
+        _draw_view_label(d, label, pad_x, 160, ACCENT, ACCENT)
 
     f = _font(SERIF_BOLD, 92)
     # No _font_safe here — _draw_emph_block renders the serif's missing math
@@ -144,8 +152,9 @@ def make_renderer(image_paths):
     """
     n_ill = len(image_paths)
 
-    def render(caption, dark, idx, total, kicker, out_png, shot=0):
+    def render(caption, dark, idx, total, kicker, out_png, shot=0, label=""):
         if idx >= n_ill:
+            # The sign-off card carries no label: it makes no claim to qualify.
             return draw_signoff_card(out_png)
         entry = image_paths[idx]
         shots = entry if isinstance(entry, (list, tuple)) else [entry]
@@ -153,6 +162,6 @@ def make_renderer(image_paths):
         # asked for (a FLUX refusal on one sub-shot), hold the last good one instead
         # of raising in the middle of a 15-minute render.
         path = shots[min(shot, len(shots) - 1)]
-        return draw_illustrated_frame(path, caption, idx, n_ill, out_png)
+        return draw_illustrated_frame(path, caption, idx, n_ill, out_png, label=label)
 
     return render

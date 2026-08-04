@@ -192,7 +192,23 @@ def _needs_fallback(token):
     return any(c in _SERIF_MISSING for c in token)
 
 
-def _render_frame(caption, dark, idx, total, kicker, out_png, shot=0):
+def _draw_view_label(d, text, x, y, fill, box):
+    """The shape-B marker: a small outlined pill reading A VIEW FROM THE RECORD.
+
+    Outlined rather than plain text because it has to survive being drawn over an
+    illustration, and it must not read as part of the story's own typography —
+    it is a statement ABOUT the piece. Returns the y below the pill.
+    """
+    f = _font(MONO_BOLD, 30)
+    tw = d.textlength(text, font=f)
+    pad_x, pad_y = 18, 12
+    d.rounded_rectangle([x, y, x + tw + 2 * pad_x, y + 30 + 2 * pad_y],
+                        radius=8, outline=box, width=3)
+    d.text((x + pad_x, y + pad_y - 2), text, font=f, fill=fill)
+    return y + 30 + 2 * pad_y
+
+
+def _render_frame(caption, dark, idx, total, kicker, out_png, shot=0, label=""):
     # `shot` is the sub-shot index within this beat. The text-slide look has nothing
     # to vary per sub-shot (the caption is the frame), so it ignores it — and
     # build_reel only ever splits a beat that has more than one illustration, so a
@@ -217,9 +233,13 @@ def _render_frame(caption, dark, idx, total, kicker, out_png, shot=0):
     d.line([(pad_x, 235), (W - pad_x, 235)], fill=accent, width=3)
 
     # optional kicker: a small uppercase tag under the rule (story context)
+    y = 270
     if kicker:
         kf = _font(MONO_BOLD, 34)
-        d.text((pad_x, 270), kicker.upper(), font=kf, fill=muted)
+        d.text((pad_x, y), kicker.upper(), font=kf, fill=muted)
+        y += 52
+    if label:
+        _draw_view_label(d, label, pad_x, y, accent, accent)
 
     # centre band: the highlight, big serif, wrapped, emphasis on numbers/acronyms
     size = 122
@@ -515,7 +535,7 @@ def _zoom_expr(frames, zmax=ZOOM_MAX):
     inc = (zmax - 1.0) / max(frames, 1)
     return f"min(zoom+{inc:.8f},{zmax})"
 def build_reel(fields, dark, out_mp4, kicker=None, backend=None, render_frame=None,
-               shots_per_beat=None, voiced=None):
+               shots_per_beat=None, voiced=None, label=""):
     """Render frames + VO for each beat, animate with a gentle zoom, mux to MP4.
     `fields` is parse_script() output. `backend` overrides the module TTS_BACKEND
     for the voice (see _synth). `render_frame` overrides the frame renderer —
@@ -536,6 +556,11 @@ def build_reel(fields, dark, out_mp4, kicker=None, backend=None, render_frame=No
     `voiced` is `synth_beats()` output — pass it when the caller already voiced the
     beats to plan the shots from real durations, so the slowest step does not run
     twice. Omit it and the beats are voiced here, as before.
+
+    `label` is a standing marker drawn on every story frame — the belief desk's
+    shape-B "A VIEW FROM THE RECORD". Empty for everything else, which is every
+    news reel: a reported story is not an argued frame and must not wear the
+    label that says it is.
     """
     draw_frame = render_frame or _render_frame
     beats = fields["beats"]
@@ -570,7 +595,7 @@ def build_reel(fields, dark, out_mp4, kicker=None, backend=None, render_frame=No
 
             for j, sub in enumerate(cuts):
                 png = work / f"f{i}_{j}.png"
-                draw_frame(caption, dark, i, n, kicker, png, shot=j)
+                draw_frame(caption, dark, i, n, kicker, png, shot=j, label=label)
                 seg = work / f"s{i}_{j}.mp4"
                 frames = max(int(round(sub * FPS)), 1)
                 # gentle Ken-Burns zoom-in on the still (retention on a static frame) —
