@@ -67,8 +67,7 @@ cases:
       mis-sort. It is a good GK reel and a bad Everyone Knows piece.
 
   - id: gandhi-surname
-    expect: PURSUE-A
-    known_gap: true
+    expect: [PURSUE-A, ROUTE-GK]
     belief: >
       The Nehru–Gandhi political family is descended from Mahatma Gandhi.
     why: >
@@ -76,21 +75,26 @@ cases:
       cleanly false (Feroze Gandhi was unrelated), and seemingly load-bearing —
       the supposed descent is used to explain the family's political legitimacy.
 
-      THE GATE DISAGREES, and reasons its way there: the dynasty's legitimacy
-      rests on Nehru's and Indira Gandhi's own records, so removing one false
-      genealogical claim shifts little. That is a defensible editorial position,
-      not a malfunction.
+      RULED 2026-08-04. Two verdicts are acceptable and one is not. Whether this
+      is an Everyone Knows piece (the descent is used to explain the dynasty's
+      legitimacy — the belief is doing work) or a Turns Out one (the legitimacy
+      rests on Nehru's and Indira's own records, so correcting it shifts little)
+      is a genuinely close editorial call, and the gate reasoning its way to
+      either is the gate working. DROP is not on the table: the claim is
+      believed, false, and cleanly checkable, and binning that is the one thing
+      the consequence floor must never do.
 
-      OPEN QUESTION FOR THE OWNER: is this an Everyone Knows piece or a GK one?
-      Kept as `known_gap`, but ROUTE-GK has lowered the stakes a great deal: a
-      miss here no longer bins the candidate, it publishes it in the lighter
-      lane. The question is now which series it belongs to, not whether it
-      survives — which is a much cheaper thing to be wrong about.
+      It was dropping — but NOT on consequence, which is what the earlier note
+      here assumed. It dropped as a STRAWMAN, on the reasoning that "no
+      well-informed person holds that as a settled fact" and that the correction
+      "has been repeatedly published" — while its own CURRENCY line said the
+      belief was widespread. That is the skill contradicting itself, so the fix
+      went into premise-check (a correction's existence is evidence a belief was
+      common, not evidence it was rare) rather than into this expectation.
     also: >
-      Watch which way this moves after any edit to the SO_WHAT test. It is the
-      suite's sensitivity marker for the consequence floor. ROUTE-GK is an
-      acceptable outcome here; DROP is NOT — a true, believed, checkable claim
-      must never be binned.
+      Still the suite's sensitivity marker for the consequence floor — watch
+      which of the two acceptable verdicts it lands on after any edit to the
+      SO_WHAT test, and treat a move to DROP as a regression, not a preference.
 
   - id: colonialism-overstated
     expect: DROP

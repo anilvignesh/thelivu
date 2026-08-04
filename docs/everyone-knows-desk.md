@@ -1,13 +1,21 @@
 # Everyone Knows — the second desk
 
-> **Status 2026-08-03.** Built and proven end to end. TWO series now share this
-> desk's pipeline and trust floor: **Everyone Knows** (`desk='ek'`) and **Turns
-> Out** (`desk='gk'`, the GK/curiosity lane — added after the owner asked where
-> the trivia department was, because the consequence rule below was binning
-> exactly the GK material he had asked for). A failed consequence test is now
-> `ROUTE-GK`, not a kill. Phases 1-5 of §9 are done; §6 (scout + themes.yaml +
-> cadence) is not. Run one belief through it with:
-> `python -m engine.desks.ek.pipeline "<the belief>"`
+> **Status 2026-08-04. Complete — all six phases of §9 are done.** TWO series
+> share this desk's pipeline and trust floor: **Everyone Knows** (`desk='ek'`)
+> and **Turns Out** (`desk='gk'`, the GK/curiosity lane — added after the owner
+> asked where the trivia department was, because the consequence rule below was
+> binning exactly the GK material he had asked for). A failed consequence test
+> is `ROUTE-GK`, not a kill.
+>
+> As of today the desk has an intake (owner submit + weekly scout), a cadence,
+> a reader-facing page distinct from the reel's narration, a shape-B view label
+> on both, and a green gate suite (9/9). Two reels exist: **#26** (Turns Out,
+> illustrated, from run #140) and **#27** (Everyone Knows shape B, from run
+> #145) — the first pieces this desk has put on screen.
+>
+> Run one belief by hand with
+> `python -m engine.desks.ek.pipeline "<the belief>"`, or use the command
+> centre's **Beliefs** view, which is the normal way in.
 
 *Spec and context file. Written 2026-08-02, before any code. Build against this,
 then check what shipped against it.*
@@ -239,6 +247,9 @@ Sites: `shared/db.py` (25), `thelivu_bot/bot.py` (4), `command_center/api/system
 
 ## 8. Open items
 
+**Status 2026-08-04:** 1, 2, 3, 4 and 5 are closed; 6 is decided. What remains
+open is listed at the end.
+
 1. **`_PIPELINE_CONTRACT` is news-specific.** "THIS IS A NEWS AGENCY" is
    prepended to every skill's system prompt. Needs to become per-desk without
    weakening the "your training knowledge is never authoritative" clause, which
@@ -256,8 +267,30 @@ Sites: `shared/db.py` (25), `thelivu_bot/bot.py` (4), `command_center/api/system
    it competes for the same daily budget cap ($1.00) and the same reel-render
    time on the laptop.
 6. **Does EK share the anti-repetition memory** (`_published_context`) with the
-   news desk, or keep its own? Probably its own — a 1904 etymology and a
-   current story are not competing for the same reader slot.
+   news desk, or keep its own? **Its own, decided by default:** the belief
+   pipeline never reads `_published_context`, and the scout dedupes against
+   `taken_beliefs()` — the belief queue plus this desk's own runs — instead. A
+   1904 etymology and a current story are not competing for the same reader
+   slot, so the news desk's repetition memory would only have suppressed
+   material for the wrong reason.
+
+### Still open after 2026-08-04
+
+- **No carousel has been built from a belief piece.** See §9.5.
+- **A refused illustration takes the whole reel down to text slides.** Reel #27
+  (Guatemala 1954) fell back because FLUX declined one shot out of eight —
+  covert-action imagery is close to the model's refusal boundary, and the
+  all-or-nothing rule means one refusal costs the illustrated look for the piece
+  most likely to trigger it. The fallback is correct (a half-illustrated reel
+  looks broken); what is wrong is that a whole class of this desk's subjects
+  will reliably hit it.
+- **Cadence has never actually fired on the Railway engine** — every belief run
+  so far was started by hand or by `run_belief_cycle()` locally. The tick code is
+  in `run.py`; the first unattended run is the thing to watch after this deploy.
+- **The scout has not run against the live web yet.** `parse_candidates()` is
+  checked against a hand-written sample in the prompt's exact format (two
+  candidates, both lanes, trailing commentary ignored), but no real proposal has
+  come back, so nobody has judged whether its candidates are any good.
 
 ## 9. Build order
 
@@ -289,25 +322,104 @@ always.
      and judge that version", the model restated correctly and then bounced the
      candidate back as a strawman anyway. Numbering the steps, and reserving
      the strawman verdict for beliefs with no moderate version at all, fixed it.
-   - **Open editorial question:** `gandhi-surname` is dropped as trivia. The
-     gate's reasoning is defensible (the dynasty's legitimacy rests on other
-     grounds), but it may be too strict. Owner's ruling needed. Forcing it to
-     pass would loosen the floor that correctly kills the two trivia cases —
-     see the case's note in `gate_cases.yaml`.
+   - **`gandhi-surname` — ruled 2026-08-04, suite now 9/9.** The case was
+     failing, and not for the reason the note here assumed. Three findings, in
+     the order they surfaced, because each was hiding the next:
+     1. It was dropping as a **strawman**, not on consequence — reasoning that
+        "no well-informed person holds that" and that the correction "has been
+        repeatedly published", while its own `CURRENCY` line called the belief
+        widespread. The skill now says plainly that a correction's existence is
+        evidence a belief was common, and that the CURRENCY line and the verdict
+        may not contradict each other.
+     2. With that fixed it dropped again — and its `REASON` ended with the words
+        "Route to GK lane." The prompt already forbade this in a worked example,
+        a rule, and a paragraph headed "`DROP` is not available to you here".
+        **More prompt was not going to fix it.** So the routing stopped being
+        the model's to choose: `premise-check` now answers the four judgments as
+        separate fields and `engine/desks/ek/gate.py` computes the verdict from
+        them, logging any disagreement. The model judges; the arithmetic is
+        arithmetic.
+     3. The fields then exposed an older bug wearing a passing verdict.
+        `colonialism-overstated` and `kerala-development` were being dropped as
+        strawmen — the right verdict, the wrong reason, which the cases' own
+        `also` notes had already said was unacceptable. `REAL_BELIEF` was being
+        answered against the raw input rather than the moderated restatement, so
+        `BELIEF` now comes FIRST in the output and every later field is defined
+        as being about that sentence. Breadth is also asked of both shapes now:
+        as a shape-B-only test, the gate escaped it by labelling a seventy-year
+        causal thesis "factual".
+
+     The editorial ruling itself: `expect` is `[PURSUE-A, ROUTE-GK]`. Which
+     series the surname belief belongs to is a genuinely close call and either
+     is the gate working; `DROP` is not, because binning a true, believed,
+     checkable claim is the one thing the consequence floor must never do.
+     Listing the acceptable verdicts says that; a single value plus `known_gap`
+     only said "we know this one is off".
 3. ~~**Research + verify.**~~ **Done.** `record-builder` (Gemini, grounded) +
    `record-verifier` (Claude). The verifier held the goldfish piece (#137) on the
    two-source floor unprompted — the floor is real, not decorative.
 4. ~~**Write + review.**~~ **Done.** `explainer-writer`, `turns-out-writer`,
    `explainer-reviewer`, plus `pipeline.py` chaining the whole spine to
    `pending_human`. Two pieces at the gate: #139 and #140.
-5. **Presentation — NOT DONE.** No reel or carousel has been built from a belief
-   piece. The pieces already emit a `SPOKEN SPINE` written to be said aloud, so
-   the reel should consume that directly rather than re-running the news
-   `video-script` skill over the draft — re-scripting would throw away the
-   verified narration and re-introduce a generation step after the trust gate.
-   The shape-B on-screen view label is also still undesigned.
-6. **Intake + scheduling — not done.** `themes.yaml`, `belief-scout`, owner
-   submit path from the CC, cadence.
+5. ~~**Presentation.**~~ **Done (2026-08-04).** Reels **#26** (run #140, Turns
+   Out, illustrated) and **#27** (run #145, Everyone Knows shape B) are built.
+   Three things had to be true first:
+   - **The spine had to leave `draft_text`.** The writers emit one block —
+     headline, dek, article, sources, spine — and runs #136-#140 stored it whole,
+     so `/a/<slug>` would have taken its title from the `## ARTICLE` heading and
+     printed the reel's narration under the sources. `engine/desks/ek/draft.py`
+     splits it at write time: the reader-facing page (house markdown, same shape
+     as a news piece, so publish/teaser/carousel/CC all work unchanged) into
+     `draft_text`, the spine and the view label onto `belief_pieces`. Existing
+     runs were migrated with `backfill_drafts.py`, which is idempotent.
+   - **The reel is scripted from the spine, not from the article.**
+     `publishing/belief_reel.py`. No `video-script` call, so no generation step
+     lands downstream of the trust gate — the thing §9.5 said not to do. The
+     words are copied; what is still chosen is captions, illustration scenes and
+     hashtags. **A caption is read, so it is not free either:** a model proposes
+     one and `caption_ok` accepts it only if it is a contiguous span of that
+     spoken line, ≤8 words, that keeps the negation of the clause it quotes.
+     It cannot introduce a word the verifier never saw, and it cannot turn "no
+     man-made object is visible" into "man-made object is visible" by dropping
+     the "no". Failing that test falls back to a deterministic clause cut —
+     worse copy, identical guarantee. Cases:
+     `python -m engine.desks.ek.tests.run_caption_cases` (no key, no network).
+     After parsing, `spoken_matches_spine` re-checks the whole narration word for
+     word, so a hand-edited script whose words drifted is refused too.
+     Measured: the negation rule was per-sentence at first and rejected a good
+     caption whose clause carried no negation at all; it is per-clause now.
+   - **The shape-B label had to reach the muted viewer.** `A VIEW FROM THE
+     RECORD`, an outlined pill on every story frame of both reel looks (never on
+     the sign-off card — it makes no claim to qualify), and on the page as a
+     `> [!VIEW]` callout rendered as a bordered aside rather than a blockquote,
+     because italics say "nice line", which is the opposite of what it means.
+     The wording is fixed, not the writer's sentence: a label that changes per
+     piece is not a label.
+
+   Not done here, and deliberately: **no carousel from a belief piece yet.** The
+   slide composer is news-shaped and the belief page now parses like a news
+   piece, so it is likely close to working — but "likely" is not "tried", and
+   nobody has looked at the slides.
+6. ~~**Intake + scheduling.**~~ **Done (2026-08-04).**
+   - `engine/desks/ek/themes.yaml` — eight standing curiosities, same shape as
+     `engine/watchlist.yaml`, each with the records that would settle it and a
+     `caution` where the territory is dangerous.
+   - `ek:belief-scout` (Gemini, grounded) proposes candidates weekly into a new
+     `belief_queue` table, deduped against every belief the desk has already
+     taken. `engine/desks/ek/scout.py`.
+   - Intake is the command centre's **Beliefs** view: an owner-supplied belief
+     lands `queued` (his submission IS the approval — §6), the scout's land
+     `proposed` and wait for a nod. Everything there writes a row and sets a kv
+     flag; the desk itself runs on the Railway engine, so a click never spends.
+   - Cadence: one piece every `belief_cadence_days` (default 3), and it stands
+     down for the day when more than 55% of the daily cap is already spent —
+     the news desk has a clock and this desk does not, so it defers rather than
+     competes. `run_belief_cycle()` returns the reason it did nothing, so a
+     quiet desk is explicable.
+   - `belief_auto_pursue` (default OFF) lets the cycle promote the scout's
+     oldest proposal when nothing is approved. Off means Anil chooses what gets
+     researched; on means the desk keeps working while he is away. Drafts stop
+     at the human gate either way.
 
 ### The citation check (added 2026-08-03, not in the original spec)
 

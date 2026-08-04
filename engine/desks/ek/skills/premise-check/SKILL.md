@@ -75,6 +75,26 @@ Handle that case like this, and do not skip a step:
 Do not bounce a candidate back merely because it arrived overstated. Fixing the
 statement of the belief is your job, not the owner's.
 
+**"The correction is well known" is NOT evidence against currency.** Two ways of
+saying it, both wrong, both seen from this gate:
+
+- *"No well-informed person holds that."* The desk does not write for
+  well-informed people; it writes about what is widely held. A belief that
+  survives among everyone except specialists is the desk's core material, not a
+  strawman.
+- *"It has been repeatedly corrected in reliable sources."* Corrections are what
+  this desk builds ON. That a fact-check exists is evidence the belief was
+  common enough to be worth correcting — the opposite of the inference you want
+  to draw from it.
+
+The currency test is whether the belief **circulates**, not whether it survives
+scrutiny. If it did survive scrutiny there would be no piece.
+
+**Your CURRENCY line and your verdict must not contradict each other.** If you
+write that a belief is widespread and then drop it as a strawman, one of the two
+is wrong, and it is almost always the verdict. Re-read them together before you
+answer.
+
 ### 2. Shape A or shape B?
 
 **Shape A — the record corrects a factual belief.** The popular belief contains
@@ -219,16 +239,47 @@ claim, the verdict you want is almost certainly `ROUTE-GK`.
 
 ## Output (exactly this, nothing else)
 
+Answer the four judgments as their own fields. **The verdict is computed from
+them** — a `VERDICT` line that contradicts your own four answers is overridden
+by the answers, and the override is logged, so there is nothing to be gained by
+disagreeing with yourself. Your job is the four judgments; the routing is
+arithmetic.
+
+**Write these fields in this order and do not reorder them.** `BELIEF` comes
+first because every judgment below is about *that* sentence — the moderated one
+you wrote — and not about the wording you were handed. Answering in the other
+order is how this gate has twice restated a belief correctly and then dropped
+the original as a strawman anyway.
+
 ```
-VERDICT: PURSUE-A | PURSUE-B | ROUTE-GK | DROP
 BELIEF: <the belief, restated the way people actually hold it — not the extreme version>
 CURRENCY: <where an ordinary person would have picked this up; say "uncertain — verify downstream" if you are not sure>
-SHAPE: <one line: why A or B, using the honest-disagreement test>
+
+REAL_BELIEF: <yes | no>   — does the belief AS YOU JUST RESTATED IT circulate (question 1)? Answer "no" ONLY when no version of it is held by anyone. If you were handed a caricature and wrote a moderate version above, the answer here is YES, and any failure is judged below on breadth or consequence — not bounced back as a strawman.
+NARROW: <yes | no>        — is this ONE documented case or claim, or a thesis spanning many countries, decades or policies (question 3)? Asked for BOTH shapes: a causal claim about seventy years of governments is a thesis whether or not you called it factual.
+SHAPE: <A | B>            — factual correction, or contested frame (question 2)?
+DOES_WORK: <yes | no | unsure>  — is the belief used to explain, justify, blame, dismiss or claim authority (question 4)? "unsure" is allowed and means pursue.
+UNFALSIFIABLE: <yes | no> — does it need a conspiracy assumed, or admit no evidence against it?
+MYTH_SWAP: <yes | no>     — is the correction itself an under-documented story that flatters a different audience?
+LIVE_NEWS: <yes | no>     — is this a developing event, i.e. the news desk's job?
+
+VERDICT: PURSUE-A | PURSUE-B | ROUTE-GK | DROP
+SHAPE_WHY: <one line: why A or B, using the honest-disagreement test>
 CASE_ANCHOR: <shape B only: the ONE documented case this piece works. "n/a" for A or DROP>
 COUNTER: <shape B only: the strongest argument against the piece's frame. "n/a" for A or DROP>
-SO_WHAT: <what the reader understands differently if this lands — beyond the corrected fact itself. If nothing, say so and ROUTE-GK.>
-REASON: <one line — why it clears the floor, or exactly why it fails>
+SO_WHAT: <what the reader understands differently if this lands — beyond the corrected fact itself. If nothing, say so; that is DOES_WORK: no, which routes to GK and does not bin anything.>
+REASON: <one line — why it clears the floor, or exactly why it fails. It must explain the answers you gave ABOVE: if you answered "no" to any of them, that "no" is the story, and a REASON that reads as an argument for pursuing a candidate you just marked un-narrowable is you talking past your own judgment.>
 ```
+
+For reference, this is the arithmetic (`engine/desks/ek/gate.py`):
+
+| answers | verdict |
+|---|---|
+| REAL_BELIEF no · UNFALSIFIABLE yes · MYTH_SWAP yes · LIVE_NEWS yes | DROP |
+| NARROW no (either shape) | DROP — the thesis that will not narrow |
+| shape A and DOES_WORK no | **ROUTE-GK** |
+| shape B and DOES_WORK no | DROP (GK carries no arguments) |
+| everything else | PURSUE-A / PURSUE-B |
 
 On `DROP` for breadth, `REASON` must state what a workable narrow version would
 be, so the candidate can come back in a usable form.

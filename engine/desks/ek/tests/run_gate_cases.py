@@ -21,10 +21,11 @@ CASES = Path(__file__).parent / "gate_cases.yaml"
 
 
 def _verdict(out):
-    for line in out.splitlines():
-        if line.strip().upper().startswith("VERDICT:"):
-            return line.split(":", 1)[1].strip().upper()
-    return "(no VERDICT line)"
+    """The verdict the pipeline would act on — computed from the gate's own
+    judgments, exactly as engine/desks/ek/gate.py does it in production. Testing
+    the raw VERDICT line would test something the desk no longer reads."""
+    from engine.desks.ek import gate
+    return gate.verdict(out) or "(no VERDICT line)"
 
 
 def main(argv):
@@ -50,7 +51,15 @@ def main(argv):
             continue
 
         got = _verdict(out)
-        ok = got == c["expect"]
+        # `expect` may be a list. Some candidates have more than one defensible
+        # home — gandhi-surname is a real, checkable, believed claim whose only
+        # open question is WHICH series it belongs to, and asserting one lane
+        # there would be testing a coin flip. What the suite must hold is the
+        # rule underneath: it may not be binned. Listing the acceptable verdicts
+        # says that precisely, where a single value plus `known_gap` only said
+        # "we know this one is off".
+        want = c["expect"] if isinstance(c["expect"], list) else [c["expect"]]
+        ok = got in want
         # A `known_gap` case is a calibration boundary we have decided NOT to
         # chase — the gate disagrees with the expectation on a genuinely
         # borderline candidate, and tightening the prompt until it complies
@@ -66,7 +75,7 @@ def main(argv):
         print(out.strip())
         print("-" * 72)
         label = "PASS" if ok else ("KNOWN GAP" if c.get("known_gap") else "FAIL")
-        print(f"  {label}: got {got}, expected {c['expect']}")
+        print(f"  {label}: got {got}, expected {' or '.join(want)}")
         if c.get("also"):
             print(f"  check by eye: {c['also'].strip()}")
         print()

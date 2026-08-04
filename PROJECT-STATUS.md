@@ -23,6 +23,73 @@ chat. To bootstrap it:
 
 ---
 
+## The belief desks are finished (2026-08-04)
+
+All six phases of `docs/everyone-knows-desk.md` §9 are done. **Everyone Knows**
+(`desk='ek'`) and **Turns Out** (`desk='gk'`) now have an intake, a cadence, a
+reader page, reels, and a green gate suite. Two reels exist — #26 (run #140,
+Turns Out) and #27 (run #145, Everyone Knows shape B) — and run #145 is the
+desk's first contested-frame piece, produced end to end by the cadence path from
+a belief typed into the command centre.
+
+**The spine was on the reader's page.** The writers emit headline, dek, article,
+sources and SPOKEN SPINE as one block, and runs #136-#140 stored it whole in
+`draft_text`. Published as-is, `/a/<slug>` would have taken its title from the
+`## ARTICLE` heading and printed the reel's narration under the sources.
+`engine/desks/ek/draft.py` splits it at write time — the page into `draft_text`
+in the same house markdown a news piece uses (so publish, teaser, carousel and
+the CC all work untouched), the spine and view label onto `belief_pieces`.
+`backfill_drafts.py` migrated the existing rows; it is idempotent.
+
+**A belief reel is not scripted.** `publishing/belief_reel.py` builds it from the
+stored spine with no `video-script` call, because re-scripting would put a
+generation step downstream of the trust gate. The words are copied. Captions,
+illustration scenes and hashtags are still chosen — and a caption is read, so
+`caption_ok` accepts a model's proposal only when it is a contiguous span of that
+spoken line, ≤8 words, keeping the negation of the clause it quotes. It cannot
+add a word the verifier never saw, and it cannot make "no man-made object is
+visible" say the opposite by dropping the "no". Anything else falls back to a
+deterministic clause cut. `spoken_matches_spine` then re-checks the whole
+narration after parsing, so a hand-edited script that drifted is refused.
+Cases: `python -m engine.desks.ek.tests.run_caption_cases`.
+
+**Shape B wears its label where a muted viewer sees it** — an outlined
+`A VIEW FROM THE RECORD` pill on every story frame of both reel looks, and a
+`> [!VIEW]` callout on the page rendered as a bordered aside, not a blockquote.
+
+**Intake + cadence.** `themes.yaml` (8 standing curiosities), an `ek:belief-scout`
+proposing weekly into the new `belief_queue`, and a **Beliefs** view in the
+command centre. Owner-supplied beliefs land approved; the scout's wait for a nod.
+One piece every 3 days by default, and the desk stands down when the news desk
+has already spent 55% of the daily cap. `belief_auto_pursue` (default off) lets
+it promote its own scout's proposal when the queue is empty.
+
+**The gate suite is 9/9, and getting there was three bugs deep.**
+`gandhi-surname` was dropping — but as a *strawman*, not on consequence, on the
+reasoning that "no well-informed person holds that" while its own CURRENCY line
+called the belief widespread. Fixed, it dropped again with the words "Route to
+GK lane." in its REASON. The prompt already forbade that in an example, a rule,
+and a paragraph headed "`DROP` is not available to you here" — so **the routing
+stopped being the model's to choose.** `premise-check` now answers the four
+judgments as separate fields and `engine/desks/ek/gate.py` computes the verdict,
+logging any disagreement. That immediately exposed a third bug wearing a passing
+verdict: two cases were being dropped as strawmen rather than for breadth,
+because `REAL_BELIEF` was answered against the raw input instead of the
+moderated restatement. `BELIEF` now comes first in the output, and breadth is
+asked of both shapes — as a shape-B-only test, the gate escaped it by calling a
+seventy-year causal thesis "factual".
+
+Editorial ruling on `gandhi-surname`: either lane is acceptable (`expect` is a
+list now), `DROP` is not. Binning a true, believed, checkable claim is the one
+thing the consequence floor must never do.
+
+**Still open:** no carousel from a belief piece; a single FLUX refusal drops a
+whole reel to text slides (reel #27, covert-action imagery — a class of subject
+this desk will keep hitting); the cadence has never fired unattended on Railway;
+the scout has not run against the live web.
+
+---
+
 ## Reel pacing + command-centre browse (2026-07-30)
 
 Six changes, all on `main`. Four of them are bug fixes to things that looked finished.
