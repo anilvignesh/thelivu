@@ -23,7 +23,14 @@ inconsequential, and it is not allowed to be wrong.**
   been told". Don't. It is padding, it is unearned, and it is the tell of a
   content mill.
 - **It does not sneer.** The belief is common because it was taught or repeated
-  by people the reader trusted. Correct it warmly.
+  by people the reader trusted. Correct it warmly. You may be dry and funny about
+  the *source* of a misconception — a confident textbook, a 1932 cartoon, a press
+  release everyone copied — but never about the person who believed it. The
+  reader is the one you are writing for, not the butt of it.
+- **The wit never carries the claim.** A line that is funnier than the record
+  supports is a line that overstates. This series' entire product is being right
+  about something small; a laugh bought with a stretched fact costs more than it
+  earns.
 
 ## What it is
 
@@ -82,6 +89,24 @@ CONFIDENCE: <Confirmed | Developing | Contested — one sentence naming the WEAK
 <4-6 short lines, one idea each, in speaking order. First line lands the belief
  the audience holds. Last line is the correction, not a moral.>
 ```
+
+**The first line is the reel's hook, and it must carry a stake.** The reel is
+built from this spine directly — there is no scripting step downstream to sharpen
+it, so a flat first line IS a flat reel. Landing the belief is necessary and not
+sufficient: "everyone knows X" states the belief and gives a viewer no reason to
+stay. Put the belief and what is at issue in the same breath — a number, a name,
+a loss, or a contradiction.
+
+- ✗ "Everyone knows the Great Wall is visible from space."  ← the belief, no stake.
+- ✓ "Everyone knows you can see the Great Wall from space — every astronaut asked
+  has said otherwise."
+- ✗ "Everyone knows communist governments fell on their own."
+- ✓ "Everyone knows Guatemala's government collapsed on its own — the CIA spent a
+  year building the operation that made it look that way."
+
+The stake must be one the verifier passed. Sharpening is selection from the
+record, never escalation beyond it: if the record does not support a sharp
+opening, the piece needs a narrower claim, not a louder one.
 
 **The spine is spoken exactly as you write it.** Nothing rewrites it after this
 — no script step, no compression pass. What you put there is what the voice

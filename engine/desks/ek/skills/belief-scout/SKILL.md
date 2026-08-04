@@ -67,6 +67,25 @@ best guess and let the gate rule:
   Say so plainly rather than inflating its stakes to look consequential; the
   gate reads inflation as a reason to drop.
 
+## The desk's standing interest
+
+A large share of what this desk exists to correct is framing the reader absorbed
+from a global press that covered one side generously and the other barely at all
+— whose violence is "excesses", whose election is "disputed", whose economy is
+"mismanaged". Beliefs of that shape are this desk's best material and you should
+actively look for them.
+
+Two rules make that safe rather than cheap, and they are not negotiable:
+
+- **The bar goes UP, not down, when a correction flatters the audience.** A
+  candidate our readers will enjoy is the one most likely to get published
+  under-sourced, so name a harder record for it than you would otherwise, not a
+  softer one. If your `RECORD` for such a candidate is a blog, an opinion piece
+  or "widely noted", you have not got a candidate.
+- **One case, never a pattern.** "The West topples governments it dislikes" is
+  not a candidate; "Guatemala's government fell on its own in 1954" is. If you
+  cannot name the single documented case, leave it out.
+
 ## Geography
 
 Follow the desk's rule: Kerala → India → world, ordered by impact, with the pull

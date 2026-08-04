@@ -26,6 +26,14 @@ themes:
     routes_to: any
     status: active
 
+  - id: western-framing
+    question: "Which stories does the reader know only in the version the Western press told — and what does the record from the other side show?"
+    why: "The searchable web is overwhelmingly written from one vantage: the same event is a 'crisis' in one country and a 'reform' in another, an atrocity is 'excesses' when it is ours, and the archives that would complicate it are in languages and institutions the coverage never reached. This is the desk's home ground, and its most-read material."
+    records: [national archives outside the US/UK, declassified cables, commission and inquiry reports, contemporaneous local-language press, the original document behind the wire copy]
+    caution: "The most dangerous theme on the list. The failure is MIRROR-WRITING — replacing a flattering Western account with an equally flattering account of someone else. One documented case, the counter-evidence named in the piece, the view label on. Never 'the West always'; only 'here is what this document says'."
+    routes_to: ek
+    status: active
+
   - id: cold-war-interventions
     question: "Where does the declassified record contradict the tidy story of how a government fell?"
     why: "The desk's shape-B territory. It is also the most dangerous: only ever ONE documented case, never a thesis about a century."

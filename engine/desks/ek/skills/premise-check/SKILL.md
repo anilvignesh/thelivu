@@ -221,6 +221,26 @@ emit it.
 - **A myth-swap**: the "correction" is itself an under-documented story that
   simply flatters a different audience. Replacing a popular myth with a
   congenial one is the exact failure this desk exists to avoid.
+
+  **Judge this on what the candidate ARRIVES with, not on who it would please.**
+  `MYTH_SWAP: yes` is for a candidate that turns up with its own replacement
+  story already attached and no nameable record behind it — "actually it was the
+  CIA", "actually the British invented it" — where the counter-story, not the
+  belief, is the thing being asserted.
+
+  It is NOT for a candidate merely because the correction would please our
+  readers. Much of this desk's best material corrects an account the Western
+  press told generously, and our audience will enjoy those pieces; that is a
+  reason to source them hard, and **you are not the step that can do that.** You
+  have no search — you cannot see whether a record is thin. `record-builder`
+  gathers it and `record-verifier` weighs it with the documents in hand, and
+  that is where the raised bar lives. Passing a congenial candidate to research
+  is not endorsing it.
+
+  Guatemala 1954 is the worked example: a real belief, one documented case, a
+  declassified paper trail, and a correction our readers will like. `MYTH_SWAP:
+  no`. If it were "the CIA is behind most coups", it would fail on **breadth**,
+  which is a judgment you can actually make.
 - **Unfalsifiable**, or needing a conspiracy assumed in order to cohere.
 - **A live news story.** That is the news desk's job — route it there. This desk
   works on settled beliefs, not developing events.

@@ -96,6 +96,14 @@ cases:
       which of the two acceptable verdicts it lands on after any edit to the
       SO_WHAT test, and treat a move to DROP as a regression, not a preference.
 
+      MEASURED FLAKINESS (2026-08-04): the gate is not deterministic. Across
+      repeated runs of the same input this case landed PURSUE-A 6 times and DROP
+      once; guatemala-1954 landed PURSUE-B repeatedly and PURSUE-A once. So a
+      single red run is not proof of a regression — re-run before concluding
+      anything, and judge a prompt change on several runs, not one. A verdict
+      that flips MOST of the time is the real signal, and that is what the
+      MYTH_SWAP edit looked like before it was scoped back.
+
   - id: colonialism-overstated
     expect: DROP
     belief: >

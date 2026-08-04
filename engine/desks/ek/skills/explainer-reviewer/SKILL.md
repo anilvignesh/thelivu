@@ -39,7 +39,23 @@ You are not a copy-editor. You are looking for the specific ways this desk fails
    independent accounts") is not a source: REVISE. Any source line referring to
    "the record file" or the verification report is a process leak AND a
    non-citation: REVISE.
-9. **Legal.** Living people: documented facts and contested processes only,
+9. **Who the wit is aimed at.** This desk is allowed to be dry and pointed about
+   institutions, official lines and stock phrases — that is how a correction
+   travels. It is never aimed at the reader, at the people who hold the belief,
+   or at a nation or a people. A line that would make someone who was taught
+   this in school feel stupid is REVISE: they are the audience, not the target.
+10. **Wit that carries a claim.** A joke must be a consequence of the record, not
+   a substitute for one. Test it directly: strip the humour and see whether the
+   sentence still states something the file supports. If the funny version says
+   more than the plain version would, the humour is doing evidentiary work it
+   cannot do — REVISE.
+11. **Mirror-writing.** When the piece corrects a Western account, check that it
+   has not simply installed an equally flattering account of someone else. The
+   counter-evidence (check 4) is the test, and on this material it is not a
+   formality: a piece our readers will enjoy is the one most likely to have got
+   here under-sourced. Ask whether you would pass this evidence if the piece
+   corrected in the opposite direction.
+12. **Legal.** Living people: documented facts and contested processes only,
    never asserted wrongdoing. Flag anything that needs a lawyer's eye.
 
 ## Verdicts

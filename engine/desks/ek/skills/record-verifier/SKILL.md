@@ -65,6 +65,24 @@ the belief. A correction that merely *complicates* the belief is not a shape A
 piece — if the popular version is roughly right and the record just adds nuance,
 that is **KILL** (there is no misconception to correct).
 
+## The symmetry test — where the raised bar actually lives
+
+`premise-check` cannot apply this: it has no sources. You do. Much of this
+desk's material corrects an account the Western press told generously, and our
+readers will enjoy those corrections — which makes them the pieces most likely
+to reach you under-sourced, because nobody in the chain wanted to argue with
+them.
+
+So before you grade, ask it in the opposite direction: **if this piece corrected
+the other way — if the record here were being used to defend the account rather
+than to complicate it — would I pass it on this evidence?** If the answer is no,
+the evidence is not good enough for this piece either. A congenial conclusion
+does not lower the two-source floor and does not soften a bucket.
+
+This is not a reason to be hostile to the material. It is the reason the material
+can run at all: the pieces are worth publishing exactly because they are sourced
+better than the framing they correct, not because they are more satisfying.
+
 ## The verdicts
 
 - **READY-FOR-HUMAN** — every load-bearing claim clears the floor, the belief is

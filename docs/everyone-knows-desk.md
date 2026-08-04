@@ -59,6 +59,47 @@ Two worked examples, from the owner, that define the two shapes the desk handles
 
 Keeping those two apart is the whole design. See §3.
 
+## 1b. The aim, stated by the owner (2026-08-04)
+
+> "One main aim for this desk is battling the bias from Western media. The
+> entire web is dominated by them — praising them, covering their atrocities and
+> stupidities. We will bring them out with satire, harmless yet knowledgable."
+> …"we never mock the user, we will never bend the facts and truth. We uncover
+> it and present it better and make sure it reaches people."
+
+This is the desk's home ground, not a new direction: "banana republic" and
+Guatemala 1954 are both exactly this shape. What the aim adds is a licence to be
+**dry and pointed** about it, and two hard limits on that licence, which are now
+written into the writers, the reviewer, the scout and the gate:
+
+- **The target is fixed and it is never the reader.** Aim at the institution, the
+  official line, the stock phrase. Someone who repeats what they were taught in
+  school is who the piece is FOR. A line that makes them feel stupid is the wrong
+  line however good the joke. (`explainer-writer` §Voice, reviewer check 9.)
+- **The joke is a consequence of the record, never a substitute for one.** Strip
+  the humour; if the plain sentence says less than the funny one did, the humour
+  was doing evidentiary work it cannot do. (Reviewer check 10.)
+
+**Where the raised bar lives, and where it must NOT.** The instinct is to make
+`premise-check` suspicious of congenial corrections. That was tried on
+2026-08-04 and it broke the desk's flagship case: guatemala-1954 started coming
+back `MYTH_SWAP: yes` and dropping, about half the time. The reason is
+structural — **premise-check has no web search.** Asked whether a correction is
+under-documented, it cannot look, so it substitutes the only signal it has: does
+this correction flatter our audience? That is the gate's own "strict on
+narrowness, lenient on truth and currency" rule being violated by an edit meant
+to strengthen it.
+
+So `MYTH_SWAP` at the gate now means only what the gate can see — a candidate
+arriving with its own replacement story attached and no nameable record — and
+the symmetry test lives in `record-verifier`, which has the documents in front of
+it: *if this piece corrected in the opposite direction, would I pass it on this
+evidence?* A congenial conclusion lowers no floor and softens no bucket.
+
+The failure mode to keep watching is **mirror-writing** — answering a flattering
+Western account with an equally flattering account of someone else. The
+counter-evidence requirement, the view label and reviewer check 11 exist for it.
+
 ## 2. Why it is a separate desk, not a mode of the news desk
 
 Decided by the owner, 2026-08-02: separate unit, separate roles, separate
