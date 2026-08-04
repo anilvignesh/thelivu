@@ -94,6 +94,29 @@ CONFIDENCE: <Confirmed | Developing | Contested — one sentence naming the WEAK
  the audience holds. Last line is the correction, not a moral.>
 ```
 
+**The correction is almost never the hook.** This is the failure this series is
+most prone to, and it produced a boring reel on 2026-08-04: a piece on the Great
+Wall opened, in effect, on "you cannot see it." A negation is an ending. It tells
+the viewer the thing is false and gives them no reason to want the next forty
+seconds — nobody is curious about an absence.
+
+The interesting part of a debunk is almost always one of these, so look for them
+in that order:
+
+1. **The origin.** Where did people get this? A false thing everyone believes
+   usually has a traceable and often absurd source, and it is the best material
+   in the piece. The Great Wall claim was in a private letter in **1754** —
+   two centuries before anyone could go and check, and it was popularised by a
+   1932 cartoon. That is a story. "It is not visible" is a footnote to it.
+2. **The tension in the record.** Where credible people disagree, say so and
+   lead with it: two astronauts said they could see it; China's first astronaut,
+   fourteen orbits in, said he could not.
+3. **What is true instead.** Often stranger than the myth — cities, mines and
+   dams are easier to see from orbit than the Wall is.
+
+Only then, the correction. The reader should arrive at "so it is not true" having
+already been paid for the trip.
+
 **The first line is the reel's hook, and it must carry a stake.** The reel is
 built from this spine directly — there is no scripting step downstream to sharpen
 it, so a flat first line IS a flat reel. Landing the belief is necessary and not
