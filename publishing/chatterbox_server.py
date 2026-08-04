@@ -19,13 +19,21 @@ Synth:  POST /synth {"text": "...", "voice": "anil"} -> audio/wav
 import io
 import json
 import os
+import sys
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import torch  # noqa: F401  (imported so a bad install fails loudly at startup)
 import torchaudio as ta
 from chatterbox.tts_turbo import ChatterboxTurboTTS
 
-from publishing import voices
+# The launcher (~/.jarvis/reel-voice.sh) starts this by FILE PATH, which puts
+# publishing/ on sys.path rather than the repo root — so a plain
+# `from publishing import ...` fails however sensible it looks. Fix it here
+# rather than in the launcher: this file must work whichever way it is invoked.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from publishing import voices  # noqa: E402
 
 # CBX_REF still wins when set — that is how this server was driven before the
 # registry existed, and a running setup should not change under anyone's feet.
@@ -66,7 +74,7 @@ class Handler(BaseHTTPRequestHandler):
                 "status": "ok",
                 "default": "CBX_REF" if REF else voices.default_name(),
                 "voices": ["CBX_REF"] if REF else voices.available(),
-            }).encode()'
+            }).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
