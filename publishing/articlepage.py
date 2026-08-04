@@ -41,6 +41,12 @@ def _inline(s):
     return s
 
 
+# What the reader sees at the head of a callout. Fixed per kind so it reads as a
+# label the site always uses, not as something this particular piece decided to
+# say about itself.
+_CALLOUT_TITLE = {"VIEW": "A view from the record — "}
+
+
 def _blocks_to_html(blocks):
     out = []
     for b in blocks:
@@ -49,6 +55,12 @@ def _blocks_to_html(blocks):
             out.append(f"<h{lvl}>{_inline(b.text)}</h{lvl}>")
         elif b.type == "blockquote":
             out.append(f"<blockquote>{_inline(b.text)}</blockquote>")
+        elif b.type == "callout":
+            # The shape-B view label. Deliberately not a blockquote: it is a
+            # statement about the piece, and a reader skimming must register it
+            # as furniture rather than as a nicely-set line from the story.
+            out.append(f'<aside class="callout"><b>{_CALLOUT_TITLE.get(b.kind, b.kind)}</b>'
+                       f"{_inline(b.text)}</aside>")
         elif b.type == "list":
             items = "".join(f"<li>{_inline(i)}</li>" for i in b.items)
             out.append(f"<ul>{items}</ul>")
@@ -103,6 +115,18 @@ _PAGE = """<!DOCTYPE html>
   blockquote {{
     border-left: 3px solid var(--accent); padding: .2rem 0 .2rem 1rem;
     margin: 0 0 1rem; font-style: italic; opacity: .9;
+  }}
+  /* The view label on a contested-frame piece. Solid border on all four sides,
+     no italics: it must not read as a pull-quote from the story. */
+  aside.callout {{
+    border: 2px solid var(--accent); border-radius: 4px;
+    padding: .7rem .9rem; margin: 0 0 1.4rem;
+    font-size: .95rem; line-height: 1.5;
+  }}
+  aside.callout b {{
+    font-family: 'DejaVu Sans Mono', ui-monospace, monospace;
+    font-size: .8rem; letter-spacing: .04em; text-transform: uppercase;
+    color: var(--accent);
   }}
   hr {{ border: none; border-top: 2px dashed var(--line); margin: 1.6rem auto; width: 6rem; }}
   a {{ color: var(--accent); }}

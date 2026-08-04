@@ -72,6 +72,7 @@ selling. Never sneer at people who hold the belief; most of them were taught it.
 HEADLINE: <the piece's title — states the gap, does not clickbait it>
 DEK: <one sentence, what the reader will learn>
 LABEL: <"" for shape A; for shape B, the view label, e.g. "This piece argues a view from the documented record.">
+CONFIDENCE: <Confirmed | Developing | Contested — one sentence naming the WEAKEST load-bearing claim in the piece and why it is where it is. This is the reader's honesty line and it appears on the page. A shape B piece is Contested unless the documented case alone carries it.>
 
 ## ARTICLE
 <the receipt page. 350-600 words. The three movements above. Attribute in prose.>
@@ -87,3 +88,9 @@ LABEL: <"" for shape A; for shape B, the view label, e.g. "This piece argues a v
  hook and must land the belief. Last line closes on the gap, not on a call to
  action.>
 ```
+
+**The spine is spoken exactly as you write it.** Nothing rewrites it after this
+— no script step, no compression pass. What you put there is what the voice
+says, so every number, name and qualifier in it must be one the verifier passed,
+and each line must be sayable in one breath. It is never shown to a reader: it
+is the reel's narration, not part of the article.

@@ -14,13 +14,14 @@ _DEFAULT_CONF = ("Developing", _CONF_EMOJI["developing"])
 class Block:
     """A neutral content block. `text` keeps raw inline markdown; renderers
     convert inline (**bold**, *italic*, [t](u)) themselves."""
-    __slots__ = ("type", "level", "text", "items")
+    __slots__ = ("type", "level", "text", "items", "kind")
 
-    def __init__(self, type, level=0, text="", items=None):
-        self.type = type           # heading | paragraph | blockquote | list | rule
+    def __init__(self, type, level=0, text="", items=None, kind=""):
+        self.type = type           # heading | paragraph | blockquote | callout | list | rule
         self.level = level
         self.text = text
         self.items = items or []   # list blocks only: [raw inline md, ...]
+        self.kind = kind           # callout blocks only: VIEW, NOTE, …
 
     def __repr__(self):
         return f"Block({self.type!r}, level={self.level}, text={self.text[:30]!r})"
@@ -73,6 +74,17 @@ def parse_blocks(md):
             continue
         if stripped.startswith(">"):
             text = " ".join(re.sub(r"^\s*>\s?", "", l) for l in lines).strip()
+            # `> [!VIEW] …` is a callout, not a quote. The belief desk's shape B
+            # pieces argue a frame over a documented case, and the reader has to
+            # be able to SEE that seam — a pull-quote's italics say "nice line",
+            # which is the opposite of what this block means. Renderers that
+            # don't know the type fall through to a paragraph, so the sentence is
+            # never lost, only unstyled.
+            m = re.match(r"^\[!(\w+)\]\s*(.*)$", text, re.DOTALL)
+            if m:
+                blocks.append(Block("callout", text=m.group(2).strip(),
+                                    kind=m.group(1).upper()))
+                continue
             blocks.append(Block("blockquote", text=text))
             continue
         blocks.append(Block("paragraph", text=" ".join(l.strip() for l in lines).strip()))

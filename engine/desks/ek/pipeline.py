@@ -29,8 +29,8 @@ import re
 import sys
 
 from engine.agents.skill_runner import run_skill, run_structured_skill, StructuredOutputError
-from engine.desks.ek import linkcheck
-from shared.db import save_run, update_run, _conn, _is_postgres
+from engine.desks.ek import draft as draft_mod, gate, linkcheck
+from shared.db import save_run, update_run, save_belief_parts, _conn, _is_postgres
 
 log = logging.getLogger("belief-desk")
 
@@ -93,7 +93,10 @@ def run_belief(belief, *, dry_run=False):
     gate_out = run_structured_skill(
         "ek:premise-check", f"CANDIDATE RECEIVED BELIEF:\n\n{belief}",
         marker=_M_VERDICT, max_tokens=1024, topic=belief[:60])
-    verdict = _marker(gate_out, _M_VERDICT)
+    # The verdict is computed from the gate's four judgments, not read off its
+    # VERDICT line — the two have disagreed, and the disagreement binned a
+    # candidate the gate itself had reasoned into the GK lane. See gate.py.
+    verdict = gate.verdict(gate_out, topic=belief[:60])
     out["verdict"] = verdict
     out["premise_check"] = gate_out
     log.info("premise-check: %s", verdict)
@@ -174,10 +177,31 @@ def run_belief(belief, *, dry_run=False):
             f"{write_input}\n\nDRAFT:\n\n{draft}", max_tokens=4096, topic=belief[:60])
         rverdict = _field(review, "VERDICT").upper()
 
-    # ── 6. do the citations actually resolve? ────────────────────────────────
+    # ── 6. split the draft: what a reader sees vs what the reel says ─────────
+    # The writer emits one block containing both. The spine must NOT reach the
+    # page (runs #136-#140 rendered the narration under the sources), and the
+    # reel must get the spine EXACTLY as verified rather than a re-scripting of
+    # the article. See engine/desks/ek/draft.py.
+    parts = draft_mod.split(draft)
+    spine = parts["spine"]
+    if not parts["article"] or not spine:
+        # Neither half is optional: no article is nothing to publish, no spine
+        # is a piece that can never become a reel without a post-gate rewrite.
+        missing = "ARTICLE" if not parts["article"] else "SPOKEN SPINE"
+        log.warning("writer output has no %s section — parking run #%s", missing, run_id)
+        update_run(run_id, draft_text=draft, review_text=review,
+                   status="needs_attention")
+        out.update(status="needs_attention", draft=draft, review=review,
+                   stopped_at="draft-split", reason=f"writer emitted no {missing} section")
+        return out
+    page_md = draft_mod.to_markdown(parts, shape=shape)
+
+    # ── 7. do the citations actually resolve? ────────────────────────────────
     # Deterministic, and deliberately after the reviewer: a model cannot check
     # this by reading, and run #136 shipped three 404s past a clean review.
-    link_results, dead = linkcheck.check_text(draft)
+    # Checked against the READER'S page, not the raw output — a URL that only
+    # ever appears in the spine is not a citation anyone can follow.
+    link_results, dead = linkcheck.check_text(page_md)
     out["links"] = link_results
     out["dead_links"] = dead
     link_block = "\n\n## CITATION CHECK (automated)\n" + linkcheck.report(link_results)
@@ -190,7 +214,8 @@ def run_belief(belief, *, dry_run=False):
                     f"{len(dead)} dead" if dead else "no URLs cited at all")
 
     out["review_verdict"] = rverdict
-    out["draft"] = draft
+    out["draft"] = page_md
+    out["spine"] = spine
     out["review"] = review
 
     # BLOCK means the draft rests on something the record file does not contain —
@@ -199,7 +224,9 @@ def run_belief(belief, *, dry_run=False):
     # desk promises they can.
     status = ("needs_attention" if (rverdict.startswith("BLOCK") or dead or no_links)
               else "pending_human")
-    update_run(run_id, draft_text=draft, review_text=review, status=status)
+    save_belief_parts(run_id, spine=spine, label=draft_mod.view_label(
+        dict(parts, shape=shape)))
+    update_run(run_id, draft_text=page_md, review_text=review, status=status)
     out["status"] = status
     out["stopped_at"] = "human gate"
     return out

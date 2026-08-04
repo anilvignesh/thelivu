@@ -195,7 +195,26 @@ CREATE TABLE IF NOT EXISTS belief_pieces (
     case_anchor   TEXT,
     counter_case  TEXT,
     so_what       TEXT,
+    spine         TEXT,
+    label         TEXT,
     created_at    TIMESTAMP DEFAULT NOW()
+);
+
+-- The belief desks' intake. Owner-supplied beliefs land here as 'queued' and the
+-- scout's proposals as 'proposed', so the owner's own submission never waits
+-- behind an approval step it doesn't need. See docs/everyone-knows-desk.md §6.
+CREATE TABLE IF NOT EXISTS belief_queue (
+    id          SERIAL PRIMARY KEY,
+    belief      TEXT NOT NULL,
+    source      TEXT,                      -- owner | scout
+    theme       TEXT,
+    lane        TEXT,                      -- the scout's guess: ek | gk
+    note        TEXT,                      -- currency / record / so-what, as found
+    status      TEXT NOT NULL DEFAULT 'queued',  -- proposed|queued|running|done|dropped
+    run_id      INTEGER,
+    result      TEXT,
+    created_at  TIMESTAMP DEFAULT NOW(),
+    updated_at  TIMESTAMP DEFAULT NOW()
 );
 """
 
@@ -389,7 +408,23 @@ CREATE TABLE IF NOT EXISTS belief_pieces (
     case_anchor   TEXT,
     counter_case  TEXT,
     so_what       TEXT,
+    spine         TEXT,
+    label         TEXT,
     created_at    TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS belief_queue (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    belief      TEXT NOT NULL,
+    source      TEXT,
+    theme       TEXT,
+    lane        TEXT,
+    note        TEXT,
+    status      TEXT NOT NULL DEFAULT 'queued',
+    run_id      INTEGER,
+    result      TEXT,
+    created_at  TEXT DEFAULT (datetime('now')),
+    updated_at  TEXT DEFAULT (datetime('now'))
 );
 """
 
@@ -504,6 +539,15 @@ def init_db():
                     conn.commit()
                 except Exception:
                     conn.rollback()  # column already exists
+            # The spine is the reel's narration and the label is the shape-B view
+            # marker. Both used to live inside draft_text, which put the spine on
+            # the reader's page — see engine/desks/ek/draft.py.
+            for col, defn in [("spine", "TEXT"), ("label", "TEXT")]:
+                try:
+                    cur.execute(f"ALTER TABLE belief_pieces ADD COLUMN {col} {defn}")
+                    conn.commit()
+                except Exception:
+                    conn.rollback()  # column already exists
             # Indexes over migrated columns must come AFTER the ALTERs. The copy in
             # _SCHEMA only fires for a fresh database, where CREATE TABLE already
             # carries the column; on an existing one it runs before `desk` exists,
@@ -532,6 +576,11 @@ def init_db():
             for col, defn in [("notes", "TEXT")]:
                 try:
                     cur.execute(f"ALTER TABLE reels ADD COLUMN {col} {defn}")
+                except Exception:
+                    pass
+            for col, defn in [("spine", "TEXT"), ("label", "TEXT")]:
+                try:
+                    cur.execute(f"ALTER TABLE belief_pieces ADD COLUMN {col} {defn}")
                 except Exception:
                     pass
         conn.commit()
@@ -618,6 +667,158 @@ def get_run(run_id):
         ph = "%s" if _is_postgres() else "?"
         cur.execute("SELECT * FROM pipeline_runs WHERE id = " + ph, (run_id,))
         return _fetchone(cur)
+    finally:
+        conn.close()
+
+
+def get_belief(run_id):
+    """The belief_pieces row for a run, or None when the run is not a belief
+    piece. Kept here rather than in the desk package because the reel builder
+    and the command centre both need it and neither should import the desk."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute("SELECT * FROM belief_pieces WHERE run_id = " + ph +
+                    " ORDER BY id DESC LIMIT 1", (run_id,))
+        return _fetchone(cur)
+    except Exception:
+        # A database that predates the belief desks has no such table. That is a
+        # news-only install, not an error — the caller wants "not a belief piece".
+        return None
+    finally:
+        conn.close()
+
+
+def save_belief_parts(run_id, **fields):
+    """Update belief_pieces columns for a run. Used by the writer step (spine,
+    label) and the backfill; column names are internal, never request text."""
+    fields = {k: v for k, v in fields.items() if k in
+              ("belief", "shape", "currency", "case_anchor", "counter_case",
+               "so_what", "spine", "label")}
+    if not fields:
+        return
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        sets = ", ".join(f"{k} = {ph}" for k in fields)
+        cur.execute(f"UPDATE belief_pieces SET {sets} WHERE run_id = {ph}",
+                    tuple(fields.values()) + (run_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def add_belief_candidate(belief, *, source="owner", theme="", lane="", note="",
+                         status=None):
+    """Queue a belief for the desks. Owner submissions are 'queued' (they are the
+    approval); scout proposals are 'proposed' and wait for one.
+
+    Returns the new row id, or None when this belief has already been taken —
+    deduped against both the queue and the runs that exist, because the cheapest
+    place to notice a repeat is before the gate call."""
+    if not (belief or "").strip():
+        return None
+    belief = belief.strip()
+    if status is None:
+        status = "queued" if source == "owner" else "proposed"
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        key = belief.lower()[:200]
+        cur.execute(f"SELECT id FROM belief_queue WHERE LOWER(belief) LIKE {ph} "
+                    f"AND status NOT IN ('dropped')", (key + "%",))
+        if _fetchone(cur):
+            return None
+        cur.execute(f"SELECT id FROM pipeline_runs WHERE desk IN ('ek','gk') "
+                    f"AND LOWER(throughline) LIKE {ph}", (key + "%",))
+        if _fetchone(cur):
+            return None
+        cur.execute(
+            f"INSERT INTO belief_queue (belief, source, theme, lane, note, status) "
+            f"VALUES ({ph},{ph},{ph},{ph},{ph},{ph})"
+            + (" RETURNING id" if _is_postgres() else ""),
+            (belief, source, theme, lane, note, status))
+        new_id = _fetchone(cur)["id"] if _is_postgres() else cur.lastrowid
+        conn.commit()
+        return new_id
+    finally:
+        conn.close()
+
+
+def list_belief_queue(status=None, limit=50):
+    """Queue rows, newest first. `status` is matched exactly when given."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        if status:
+            cur.execute(f"SELECT * FROM belief_queue WHERE status = {ph} "
+                        f"ORDER BY id DESC LIMIT {ph}", (status, limit))
+        else:
+            cur.execute(f"SELECT * FROM belief_queue ORDER BY id DESC LIMIT {ph}",
+                        (limit,))
+        return _fetchall(cur)
+    finally:
+        conn.close()
+
+
+def pop_next_belief():
+    """Claim the oldest approved belief, marking it 'running'. Same
+    SKIP LOCKED shape as pop_next_topic so two ticks can't take the same row."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        if _is_postgres():
+            cur.execute("SELECT * FROM belief_queue WHERE status = 'queued' "
+                        "ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED")
+        else:
+            cur.execute("SELECT * FROM belief_queue WHERE status = 'queued' "
+                        "ORDER BY id LIMIT 1")
+        row = _fetchone(cur)
+        if not row:
+            return None
+        cur.execute(f"UPDATE belief_queue SET status = 'running' WHERE id = {ph}",
+                    (row["id"],))
+        conn.commit()
+        return row
+    finally:
+        conn.close()
+
+
+def set_belief_status(qid, status, *, run_id=None, result=None):
+    """Move a queue row on. `result` is a short human-readable outcome — the
+    gate's verdict or the reason it stopped — so the command centre can say what
+    happened without re-reading the run."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        now = "NOW()" if _is_postgres() else "datetime('now')"
+        cur.execute(f"UPDATE belief_queue SET status = {ph}, run_id = COALESCE({ph}, run_id), "
+                    f"result = COALESCE({ph}, result), updated_at = {now} WHERE id = {ph}",
+                    (status, run_id, result, qid))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def taken_beliefs(limit=200):
+    """Every belief this desk has already worked, for the scout to dedupe
+    against — the queue and the runs together."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT belief FROM belief_queue WHERE status != 'dropped' "
+                    "ORDER BY id DESC LIMIT %d" % int(limit))
+        out = [r["belief"] for r in _fetchall(cur)]
+        cur.execute("SELECT throughline FROM pipeline_runs WHERE desk IN ('ek','gk') "
+                    "ORDER BY id DESC LIMIT %d" % int(limit))
+        out += [r["throughline"] for r in _fetchall(cur) if r.get("throughline")]
+        return out
     finally:
         conn.close()
 

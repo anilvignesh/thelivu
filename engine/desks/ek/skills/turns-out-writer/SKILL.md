@@ -68,6 +68,7 @@ does not, cite the work fully without a URL — never invent an address.
 ```
 HEADLINE: <the surprise, stated plainly — not a teaser, not a question>
 DEK: <one sentence>
+CONFIDENCE: <Confirmed | Developing | Contested — one sentence naming the WEAKEST load-bearing claim in the piece and why it is where it is. This is the reader's honesty line and it appears on the page.>
 
 ## ARTICLE
 <the receipt page. 180-350 words. Belief, record, answer, and the origin of the
@@ -81,3 +82,9 @@ DEK: <one sentence>
 <4-6 short lines, one idea each, in speaking order. First line lands the belief
  the audience holds. Last line is the correction, not a moral.>
 ```
+
+**The spine is spoken exactly as you write it.** Nothing rewrites it after this
+— no script step, no compression pass. What you put there is what the voice
+says, so every number, name and qualifier in it must be one the verifier passed,
+and each line must be sayable in one breath. It is never shown to a reader: it
+is the reel's narration, not part of the article.
