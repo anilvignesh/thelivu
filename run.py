@@ -327,6 +327,42 @@ if service == "thelivu-agent":
         except Exception as e:
             log.error("Tech steward (weekly) failed: %s", e)
 
+        # Belief desks — scout, manual signal (command center "Run now").
+        try:
+            if kv_get("force_belief_scout"):
+                kv_set("force_belief_scout", "")
+                log.info("Belief scout signalled")
+                from engine.desks.ek.scout import run_belief_scout
+                run_belief_scout()
+        except Exception as e:
+            log.error("Belief scout (manual) failed: %s", e, exc_info=True)
+
+        # Belief desks — weekly scout, so the queue is never empty when Anil is.
+        try:
+            last_bs = kv_get("last_belief_scout_at")
+            if not last_bs:
+                kv_set("last_belief_scout_at", now_utc.isoformat())
+            elif (now_utc - datetime.fromisoformat(last_bs)).days >= 7:
+                # Stamp BEFORE running — same retry-storm rule as the sweeps above.
+                kv_set("last_belief_scout_at", now_utc.isoformat())
+                from engine.desks.ek.scout import run_belief_scout
+                run_belief_scout()
+        except Exception as e:
+            log.error("Belief scout (weekly) failed: %s", e, exc_info=True)
+
+        # Belief desks — take one approved belief to the human gate, on cadence
+        # or when signalled. The cycle does its own budget and queue checks and
+        # returns the reason it did nothing, so a quiet desk is explicable.
+        try:
+            from engine.desks.ek.scout import cycle_due, run_belief_cycle
+            forced = kv_get("force_belief_run")
+            if forced:
+                kv_set("force_belief_run", "")
+            if forced or cycle_due(now_utc):
+                log.info("Belief cycle: %s", run_belief_cycle())
+        except Exception as e:
+            log.error("Belief cycle failed: %s", e, exc_info=True)
+
         # Owner topics — check every 2 minutes, run immediately if queued
         try:
             pending = pop_next_topic()

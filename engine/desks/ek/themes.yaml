@@ -1,0 +1,80 @@
+# Thelivu — Belief desks: standing curiosities
+#
+# The scout's agenda. Same shape as engine/watchlist.yaml, different job: the
+# watchlist names things worth DIGGING into (events, records, actors), this names
+# territories where widely-held beliefs tend to be wrong in interesting ways.
+#
+# A theme earns its place by two tests, and only these two:
+#   1. Do people actually believe things here — is the belief DOING WORK (used to
+#      explain, justify, blame, dismiss, or claim authority)?
+#   2. Is there a documented record a reader could check?
+#
+# It is NOT a list of things we would enjoy debunking, and it is not a list of
+# opponents. The failure mode this desk is most exposed to is myth-swapping —
+# replacing a popular story with a congenial under-sourced one — so a theme that
+# only pays off if the audience already agrees with us does not belong here.
+#
+# routes_to: ek  (a correction with consequence)   gk  (a curiosity; Turns Out)
+#            any (the gate decides, which is the normal case)
+
+themes:
+
+  - id: phrases-and-origins
+    question: "Which everyday phrases mean something quite different from what they describe, and what did they originally name?"
+    why: "A phrase carries its origin's politics silently. 'Banana republic' is the worked example — coined about a state run for a fruit company, now used to mean a country's own incompetence."
+    records: [first printed usage, the coining work itself, lexicographers' dated citations]
+    routes_to: any
+    status: active
+
+  - id: cold-war-interventions
+    question: "Where does the declassified record contradict the tidy story of how a government fell?"
+    why: "The desk's shape-B territory. It is also the most dangerous: only ever ONE documented case, never a thesis about a century."
+    records: [declassified cables, Church Committee, national archives, official histories]
+    caution: "Never runs as 'the West toppled the left'. Guatemala 1954 with PBSUCCESS named, or nothing."
+    routes_to: ek
+    status: active
+
+  - id: india-independence-history
+    question: "Which fixtures of the freedom-struggle story does the archival record complicate?"
+    why: "Taught in one shape to everyone in the country, and the primary record is largely public."
+    records: [Constituent Assembly debates, contemporaneous newspapers, official correspondence, commission reports]
+    caution: "Contested political ground. The bar is a document, not a counter-narrative."
+    routes_to: any
+    status: active
+
+  - id: kerala-received-history
+    question: "What does Kerala take as settled about its own past — land reform, literacy, the church-caste record, migration — that the documents complicate?"
+    why: "Closest to the audience, and the local record (gazettes, commission reports, parish and estate records) is genuinely reachable."
+    records: [Kerala gazettes, land-board records, census series, commission reports]
+    routes_to: any
+    status: active
+
+  - id: economics-everyone-repeats
+    question: "Which economic claims circulate as common sense — about growth, subsidies, remittances, taxes — that the data does not carry?"
+    why: "These beliefs do the most work: they are used to justify policy and to dismiss people."
+    records: [RBI and MoSPI series, budget documents, World Bank / IMF data, peer-reviewed work]
+    caution: "A number being complicated is not a story. The belief must be doing work."
+    routes_to: ek
+    status: active
+
+  - id: science-in-the-textbook
+    question: "Which school-textbook facts survived long after the science moved — and where did the mistake come from?"
+    why: "The Turns Out lane. Cheap to verify, genuinely surprising, and the origin of the error is usually the best part."
+    records: [original papers, science-history scholarship, museum and society archives]
+    routes_to: gk
+    status: active
+
+  - id: health-and-the-body
+    question: "Which health beliefs everyone repeats are wrong, and what does the clinical record actually say?"
+    why: "Consequential in a way trivia is not — these beliefs change what people do."
+    records: [systematic reviews, ICMR / WHO guidance, the trial that started it]
+    caution: "Never a treatment recommendation. The piece corrects a belief; it does not advise."
+    routes_to: any
+    status: active
+
+  - id: language-and-names
+    question: "Which names, words and scripts have an origin story the popular version gets wrong?"
+    why: "Malayalam and Indian-language material is under-served here, and the etymological record is dateable."
+    records: [dated dictionaries, inscriptions, colonial-era surveys, philological scholarship]
+    routes_to: gk
+    status: active

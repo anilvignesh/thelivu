@@ -184,6 +184,7 @@ const VIEWS = [
   ['carousels', '🖼', 'Carousels',     vCarousels],
   ['reels',     '🎬', 'Reels',         vReels],
   ['digs',      '🗺', 'Digs',          vDigs],
+  ['beliefs',   '🧠', 'Beliefs',       vBeliefs],
   ['cos',       '🧭', 'Chief of staff', vCos],
   ['sources',   '📡', 'Sources',       vSources],
   ['ingest',    '📥', 'Ingest',        vIngest],
@@ -1179,6 +1180,115 @@ async function vIngest(main) {
     main.appendChild(el(`<div class="item small"><div class="row between">
       <span>#${i.id} ${esc((i.topic || '').slice(0, 90))}</span>${pill(i.status)}</div>
       <div class="meta">${fdate(i.submitted_at)}</div></div>`));
+}
+
+/* ══ BELIEFS ════════════════════════════════════════════════════════════
+   Intake for the two belief desks (Everyone Knows · Turns Out). Everything here
+   writes a queue row and, at most, sets a kv flag: the desk itself runs on the
+   Railway engine where the keys and the cost table are, so a click here never
+   spends anything directly — the engine picks it up on its next tick. */
+async function vBeliefs(main) {
+  const d = await api('/beliefs');
+  main.innerHTML = '';
+  main.appendChild(el(`<div><h1>Beliefs</h1>
+    <div class="sub">Everyone Knows · Turns Out. A belief goes in, the gate rules, the record is built and verified, and a draft lands at your gate — same gate, nothing auto-publishes.</div></div>`));
+
+  /* Submit box first: an owner-supplied belief jumps the queue, so the thing he
+     came here to do is the thing at the top. */
+  const form = el(`<div class="card">
+    <label class="f">A belief, stated the way people actually hold it</label>
+    <input placeholder="&quot;Banana republic&quot; means a chaotic, badly-run poor country">
+    <label class="f">Note (optional) — where you heard it, or the record you have in mind</label>
+    <input placeholder="Anything that would help the record-builder start in the right place">
+    <div class="actions" data-x="a"></div></div>`);
+  const submit = async runNow => {
+    const [belief, note] = [...form.querySelectorAll('input')].map(i => i.value.trim());
+    if (!belief) return toast('Type the belief first.', 'err');
+    const r = await api('/beliefs', { method: 'POST', body: { belief, note, run_now: runNow } });
+    toast(r.note, 'ok', 8000); route();
+  };
+  addBtn(form.querySelector('[data-x=a]'), 'Queue it', 'primary', () => submit(false));
+  addBtn(form.querySelector('[data-x=a]'), 'Queue + run now', '', () => submit(true));
+  main.appendChild(form);
+
+  /* Cadence + scout controls. */
+  const ap = d.auto_pursue;
+  const ctl = el(`<div class="card">
+    <div class="row between">
+      <span><b>Cadence</b> — one belief every
+        <input data-x="cad" type="number" min="0.5" max="30" step="0.5" value="${d.cadence_days}" style="width:70px"> day(s),
+        budget permitting</span>
+      <span class="muted small">last piece ${fdate(d.last_run_at)} · last scout ${fdate(d.last_scout_at)}</span>
+    </div>
+    <label class="row small" style="margin-top:8px;gap:6px">
+      <input data-x="auto" type="checkbox" ${ap ? 'checked' : ''}>
+      <span>Auto-pursue: when nothing is approved, let the desk promote its own scout's top proposal.
+        <span class="muted">Off means you choose what gets researched; drafts still stop at your gate either way.</span></span>
+    </label>
+    <div class="actions" data-x="a"></div></div>`);
+  addBtn(ctl.querySelector('[data-x=a]'), 'Save', 'small', async () => {
+    const r = await api('/beliefs/settings', { method: 'POST', body: {
+      cadence_days: ctl.querySelector('[data-x=cad]').value,
+      auto_pursue: ctl.querySelector('[data-x=auto]').checked } });
+    toast(r.note, 'ok'); route();
+  });
+  addBtn(ctl.querySelector('[data-x=a]'), 'Run the scout now', 'small ghost', async () => {
+    const r = await api('/beliefs/scout', { method: 'POST', body: {} });
+    toast(r.note, 'ok', 8000);
+  });
+  main.appendChild(ctl);
+
+  const act = async (id, action, msg) => {
+    const r = await api(`/beliefs/${id}/action`, { method: 'POST', body: { action } });
+    toast(r.note || msg, 'ok', 7000); route();
+  };
+
+  const card = (b, buttons) => {
+    const c = el(`<div class="item">
+      <div class="row between"><b style="min-width:0">${esc(b.belief)}</b>
+        <span style="flex:none">${b.lane ? `<span class="pill">${esc(b.lane)}</span>` : ''}${pill(b.status)}</span></div>
+      ${b.note ? `<div class="meta" style="white-space:pre-wrap">${esc(b.note)}</div>` : ''}
+      <div class="meta">${esc(b.source || '')}${b.theme ? ' · ' + esc(b.theme) : ''} · ${fdate(b.created_at)}${
+        b.run_id ? ` · <a href="#/stories">run #${b.run_id}</a>` : ''}${
+        b.result ? ' · ' + esc(b.result) : ''}</div>
+      <div class="actions" data-x="a"></div></div>`);
+    for (const [label, cls, action] of buttons)
+      addBtn(c.querySelector('[data-x=a]'), label, cls, () => act(b.id, action));
+    return c;
+  };
+
+  main.appendChild(el(`<div class="eyebrow">Waiting for your nod (${d.proposed.length}) — the scout's proposals</div>`));
+  if (!d.proposed.length)
+    main.appendChild(el(`<div class="muted small">Nothing proposed. The scout runs weekly, or on demand above.</div>`));
+  for (const b of d.proposed)
+    main.appendChild(card(b, [['✓ Approve', 'small primary', 'approve'],
+                              ['▶ Run now', 'small', 'run'],
+                              ['✗ Drop', 'small ghost', 'drop']]));
+
+  main.appendChild(el(`<div class="eyebrow">Approved, waiting for the cadence (${d.queued.length})</div>`));
+  if (!d.queued.length) main.appendChild(el(`<div class="muted small">Queue empty.</div>`));
+  for (const b of d.queued)
+    main.appendChild(card(b, [['▶ Run now', 'small primary', 'run'],
+                              ['✗ Drop', 'small ghost', 'drop']]));
+
+  const done = d.recent.filter(b => ['done', 'dropped', 'running'].includes(b.status));
+  if (done.length) {
+    const det = el(`<details style="margin-top:16px"><summary>What became of the rest (${done.length})</summary><div></div></details>`);
+    for (const b of done)
+      det.querySelector('div').appendChild(
+        card(b, b.status === 'dropped' ? [['↩ Requeue', 'small ghost', 'requeue']] : []));
+    main.appendChild(det);
+  }
+
+  if (d.themes.length) {
+    const det = el(`<details style="margin-top:16px"><summary>Standing themes (${d.themes.length}) — the scout's agenda</summary><div></div></details>`);
+    for (const t of d.themes)
+      det.querySelector('div').appendChild(el(`<div class="item small">
+        <b>${esc(t.id)}</b>${t.routes_to && t.routes_to !== 'any' ? ` <span class="pill">${esc(t.routes_to)}</span>` : ''}
+        <div class="meta">${esc(t.question || '')}</div>
+        ${t.caution ? `<div class="meta" style="color:var(--brick)">caution: ${esc(t.caution)}</div>` : ''}</div>`));
+    main.appendChild(det);
+  }
 }
 
 /* ══ SYSTEM ═════════════════════════════════════════════════════════════ */

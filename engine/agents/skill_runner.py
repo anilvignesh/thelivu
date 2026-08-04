@@ -248,6 +248,9 @@ _GEMINI_SKILLS = {
     # Belief desks: the record file is built from the open web and primary
     # documents, which is exactly what the grounded searcher is for.
     "ek:record-builder",
+    # Discovery, same as the news scouts: it has to find how a belief is stated
+    # TODAY, which is a search question and not a memory one.
+    "ek:belief-scout",
 }
 
 # Search-grounded skills that warrant the stronger (Pro) Gemini for sharper

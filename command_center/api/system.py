@@ -25,6 +25,9 @@ SCHEDULES = [
     ("Auto-recheck (held)",    "last_auto_recheck_at", "~daily",     None, None),
     ("Meta-synthesis",         "last_meta_at",         "monthly",    "force_meta_run", "1"),
     ("Tech steward",           "last_tech_steward_at", "weekly",     "force_tech_steward", "1"),
+    ("Belief scout",           "last_belief_scout_at", "weekly",     "force_belief_scout", "1"),
+    # Cadence is a setting, not a constant — the Beliefs view owns it.
+    ("Belief desk piece",      "last_belief_run_at",   "cadence",    "force_belief_run", "1"),
 ]
 
 # Only signals in this catalogue (or the per-item ones the routes build
