@@ -40,7 +40,14 @@ def beliefs_state(request, data):
         recent=lambda: list_belief_queue(limit=40),
         settings=lambda: {k: kv_get(k) for k in
                           ("last_belief_scout_at", "last_belief_run_at",
-                           "belief_auto_pursue", "belief_cadence_days")},
+                           "belief_auto_pursue", "belief_cadence_days",
+                           # What the last cadence check decided, and what the
+                           # last scout run found. Both are the answer to "why
+                           # is this desk quiet?", which the timestamps alone
+                           # cannot give — a desk that stood down for budget and
+                           # a desk with an empty queue look identical from a
+                           # `last_run_at` that never moved.
+                           "last_belief_cycle_result", "last_belief_scout_result")},
     )
     s = r["settings"]
     return J({
@@ -55,6 +62,8 @@ def beliefs_state(request, data):
                        ("1", "true", "on", "yes"),
         "last_scout_at": s.get("last_belief_scout_at"),
         "last_run_at": s.get("last_belief_run_at"),
+        "last_cycle_result": s.get("last_belief_cycle_result"),
+        "last_scout_result": s.get("last_belief_scout_result"),
     })
 
 
