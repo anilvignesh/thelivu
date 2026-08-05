@@ -738,7 +738,21 @@ def _undersourced_load_bearing(verification):
     sources — i.e. the model called something confirmed on a single source, which
     the two-source rule forbids.
 
-    Table columns: | Claim | Load-bearing | Verdict | Independent sources | ... |
+    Table columns: | Claim | Load-bearing | Verdict | Independent sources | Best tier | ... |
+
+    ONE EXEMPTION (charter §4.1, added 2026-08-05): a claim whose best tier is
+    PRIMARY and whose row carries a retrievable URL. Two independent sources
+    reduce error for claims about the world; they cannot corroborate what a
+    document SAYS better than the document itself, and demanding them punishes
+    exactly the sourcing this desk is built on — CAG reports, gazettes, court
+    orders, commission reports. It blocked run #153 for reading two signed CAG
+    PDFs instead of quoting two newspapers, and no newspaper had ever reported
+    the earlier year's figure, so the second source did not exist and never would.
+
+    The URL is the whole guard: 'Primary' alone is a self-declared tier a model
+    could assert about a document it never opened. A link means the reader can
+    open it and check. No link, no exemption.
+
     This only ever makes the gate STRICTER, and only on rows it can parse cleanly;
     an unparseable/absent table yields [] so it can never falsely block a story."""
     out = []
@@ -759,6 +773,11 @@ def _undersourced_load_bearing(verification):
         if "yes" not in lb:
             continue
         if verdict != "verified":          # exact: 'unverified'/'failed' already HOLD/KILL
+            continue
+        # The primary-document exemption. Tier says what it is; the URL is what
+        # makes it checkable. Both, or neither counts.
+        tier = cells[4].lower() if len(cells) > 4 else ""
+        if "primary" in tier and re.search(r"https?://\S+", s):
             continue
         nums = re.findall(r"\d+", sources)
         if nums and int(nums[0]) < 2:

@@ -32,6 +32,12 @@ Re-check each claim against the original sources yourself. Do not accept the inv
 For each factual claim, apply these tests:
 
 1. **Corroboration count.** Require **two independent, credible sources** for a Fact verdict. One source ⇒ at most "Unverified — single source."
+
+   **Exception — a primary document read directly (charter §4.1a).** A claim about *what a primary record says* is Verified on that record alone. Two sources reduce error about the world; they cannot corroborate a document's contents better than the document. When we read the record ourselves we are the reporter, not an aggregator.
+
+   To use it, the row **must** carry a working URL in the Note plus the paragraph or page, and Best tier must be `Primary`. Put the link in the row — the automated backstop reads it there, and without it the claim is treated as single-sourced and the story is held. A link the reader can open is the entire guarantee; "Primary" asserted with no link is worth nothing.
+
+   The exemption covers the document's **contents only**. Anything the document does not itself state — an inference from it, a characterisation of motive, a comparison you constructed — is an ordinary claim and still needs two sources.
 2. **Independence.** Two outlets that share an owner, a wire-service origin, or an obvious shared lean do **not** independently corroborate each other. Re-running the same press release is one source, not five.
 3. **Source tier** (higher beats lower):
    1. Primary records (court, government/regulator data, filings, transcripts, datasets, peer-reviewed).
@@ -94,6 +100,7 @@ recent source.
 | A | yes | Verified | 2 | Primary | confirmed vs filing |
 | B | yes | Unverified | 1 | 3 | only the tip source; single-source guard |
 | C | no | Failed | 0 | — | cited source doesn't say this |
+| D | yes | Verified | 1 | Primary | https://cag.gov.in/…report.pdf — para 4.5, p.64 |
 
 ## Trust gate: KILL | HOLD | FRAMING-FIX | READY-FOR-HUMAN
 ## Blocking claims: [which load-bearing claims caused a KILL/HOLD]

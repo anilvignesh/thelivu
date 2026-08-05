@@ -52,6 +52,16 @@ No claim passes to a reader unless it clears this gate.
 
 **4.1 Corroboration.** Every factual claim needs **two independent, credible sources**. A single source means *hold* or publish explicitly labelled "unconfirmed, single-source." Two outlets that share an owner or a clear lean do **not** count as independent corroboration of each other.
 
+**4.1a The primary-document exemption.** A claim about what a **primary record says** — quoted accurately from a document any reader can retrieve — needs no second source. It is not exempt from scrutiny; it clears 4.1 by a different route.
+
+Corroboration exists to reduce error in claims *about the world*, where two independent observers make a mistake less likely. That logic does not transfer to a document. A second outlet cannot corroborate what a tabled audit report says better than the report itself, and requiring one would mean we could publish a figure two newspapers repeated but not the signed government PDF they were reading. **When we read the record ourselves, we are the reporter** — not an aggregator of other people's reporting, which is the whole reason this desk exists.
+
+Two conditions, both required, no exceptions:
+1. **The quotation is exact**, and the piece says which document, which paragraph or page, and which date.
+2. **The document is retrievable by the reader** — a working link, not a description of a source. "Primary" asserted about a document nobody can open is worth nothing; the link is the entire guarantee, because it is what lets a sceptical reader check us rather than trust us.
+
+This changes nothing else. Allegations, inferences, and claims about the world still need two sources. A document's *contents* are exempt; a claim that goes beyond what the document states is not.
+
 **4.2 Source tiers** (higher tiers outrank lower):
 1. **Primary records** — court filings, ECI/RBI/government data, company disclosures, peer-reviewed papers, official transcripts.
 2. **Established news** with editorial standards and a corrections record.
