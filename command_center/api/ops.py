@@ -233,9 +233,41 @@ def source_add(request, data):
 
 @endpoint
 def ingest_state(request, data):
-    rows = db.q("SELECT id, topic, status, submitted_at FROM pending_topics "
-                "WHERE source='ingest' ORDER BY id DESC LIMIT 25")
+    rows = db.q("SELECT id, topic, status, outcome, reason, submitted_at "
+                "FROM pending_topics WHERE source='ingest' ORDER BY id DESC LIMIT 25")
     return J({"ingests": rows})
+
+
+# A topic used to vanish the moment intake said no: status went to 'done' and the
+# reasoning went to a Telegram card whose report link is on telegra.ph, which the
+# owner's ISP blocks. This is where a submitted topic's fate is now readable.
+@endpoint
+def topic_outcomes(request, data):
+    rows = db.q("SELECT id, topic, source, status, outcome, reason, run_id, "
+                "submitted_at, decided_at FROM pending_topics "
+                "ORDER BY id DESC LIMIT 100")
+    for r in rows:
+        # Rows decided before outcomes were recorded are honestly unknown; the
+        # reasons are gone and guessing at them would be worse than saying so.
+        if not r.get("outcome"):
+            r["outcome"] = "unknown"
+            r["reason"] = r["reason"] or "decided before outcomes were recorded"
+    return J({"topics": rows})
+
+
+@endpoint
+def topic_report(request, data):
+    """The model's full intake output for one topic — the thing that used to
+    live only behind a Telegraph link."""
+    try:
+        tid = int(data.get("id") or 0)
+    except (TypeError, ValueError):
+        return err("bad topic id")
+    rows = db.q("SELECT id, topic, outcome, reason, report FROM pending_topics "
+                "WHERE id = %s", (tid,))
+    if not rows:
+        return err(f"topic #{tid} not found")
+    return J({"topic": rows[0]})
 
 
 @endpoint
@@ -315,5 +347,7 @@ routes = [
     Route("/ingest", ingest_state, methods=["GET"]),
     Route("/ingest", ingest_add, methods=["POST"]),
     Route("/topics", topic_add, methods=["POST"]),
+    Route("/topics", topic_outcomes, methods=["GET"]),
+    Route("/topics/report", topic_report, methods=["GET"]),
     Route("/costs", costs, methods=["GET"]),
 ]

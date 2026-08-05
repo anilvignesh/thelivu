@@ -1016,6 +1016,30 @@ def _newsworthiness_verdict(selected):
     return (not drop, reason)
 
 
+def _intake_reason(text):
+    """The short why behind an intake decision, for pending_topics.reason.
+
+    topic-intake's front-gate triage is two lines — "In scope: …" and "Worth it
+    …: …" — and each carries its own reason after an em dash. Those two ARE the
+    decision; the rest of the reply is the brief. Falls back to the first
+    non-empty, non-heading line so a drifted reply still records something
+    rather than storing an empty string and re-creating the original bug.
+    """
+    bits = []
+    for pat in (r"^\s*[-*]?\s*In scope:\s*(.+)$",
+                r"^\s*[-*]?\s*Worth it[^:]*:\s*(.+)$"):
+        m = re.search(pat, text or "", re.IGNORECASE | re.MULTILINE)
+        if m:
+            bits.append(m.group(1).strip())
+    if bits:
+        return " | ".join(bits)
+    for line in (text or "").splitlines():
+        line = line.strip().lstrip("#").strip()
+        if line and not line.startswith("```"):
+            return line[:300]
+    return "no reason given"
+
+
 def _extract_brief(text):
     """Pull the STORY_BRIEF block out of topic-intake output. Returns the block
     as a string (with delimiters) or empty string if not present."""
@@ -1059,7 +1083,9 @@ def _run_topic_intake(pending):
             marker=_M_DECISION,
         )
     except StructuredOutputError as e:
-        finish_topic(topic_id)
+        finish_topic(topic_id, "intake_failed",
+                     reason="topic-intake returned no usable structured output",
+                     report=e.raw or "")
         _halt_run(None, "topic-intake", e.raw)
         return
     except Exception as e:
@@ -1068,13 +1094,15 @@ def _run_topic_intake(pending):
         _route_spine_failure(
             None, topic_text[:120], e, fail_key=f"topicfail_{topic_id}",
             requeue_fn=lambda: requeue_topic(topic_id),
-            drop_fn=lambda: finish_topic(topic_id),
+            drop_fn=lambda: finish_topic(topic_id, "abandoned",
+                                         reason=f"repeated failures: {e}"),
         )
         return
 
     decision = re.search(_M_DECISION, intake_output, re.IGNORECASE).group(1).upper()
     if decision in ("PARK", "DECLINE"):
-        finish_topic(topic_id)
+        finish_topic(topic_id, "declined" if decision == "DECLINE" else "parked",
+                     reason=_intake_reason(intake_output), report=intake_output)
         _notify_card(
             "🚫" if decision == "DECLINE" else "🅿️",
             f"Topic {decision.title()}d by intake",
@@ -1087,7 +1115,10 @@ def _run_topic_intake(pending):
     # PROCEED — require a clean STORY_BRIEF; pass ONLY that downstream (no raw reply).
     brief = _extract_brief(intake_output)
     if not brief:
-        finish_topic(topic_id)
+        finish_topic(topic_id, "no_brief",
+                     reason="intake said PROCEED but returned no STORY_BRIEF — "
+                            "not investigating, it would run unframed",
+                     report=intake_output)
         _notify_card(
             "⚠️", "Intake said PROCEED but gave no brief",
             body="Not investigating (it would run unframed).",
@@ -1105,7 +1136,7 @@ def _run_topic_intake(pending):
         {"throughline": angle or topic_text, "source": "owner-topic", "claims": []}
     )
     if not pursue:
-        finish_topic(topic_id)
+        finish_topic(topic_id, "gate_dropped", reason=why, report=intake_output)
         _notify_card(
             "🗑", "Topic dropped — not our kind of story",
             body=f"<b>Topic:</b> {_esc(topic_text[:200])}\n<b>Reason:</b> {_md_to_tg_html(why, limit=300)}",
@@ -1121,14 +1152,17 @@ def _run_topic_intake(pending):
         trust_gate="investigating",
         status="investigating",
     )
-    finish_topic(topic_id)
+    finish_topic(topic_id, "investigating", reason=(angle or topic_text)[:300],
+                 report=intake_output, run_id=live_run_id)
 
     def _on_pause(e):
         _route_spine_failure(
             live_run_id, (angle or topic_text)[:120], e,
             fail_key=f"topicfail_{topic_id}",
             requeue_fn=lambda: requeue_topic(topic_id),
-            drop_fn=lambda: finish_topic(topic_id),
+            drop_fn=lambda: finish_topic(topic_id, "abandoned",
+                                         reason=f"repeated failures: {e}",
+                                         run_id=live_run_id),
         )
 
     result = _run_spine(

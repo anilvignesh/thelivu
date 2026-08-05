@@ -539,6 +539,19 @@ def init_db():
                     conn.commit()
                 except Exception:
                     conn.rollback()  # column already exists
+            # A topic's fate. `status` only ever said 'done' — published and
+            # binned-in-five-seconds looked identical, and the reason lived only
+            # in a Telegram card whose "Full report" link points at telegra.ph,
+            # which is blocked on the owner's ISP. So the reason is stored HERE
+            # and Telegraph is a mirror, not the system of record.
+            for col, defn in [("outcome", "TEXT"), ("reason", "TEXT"),
+                              ("report", "TEXT"), ("run_id", "INTEGER"),
+                              ("decided_at", "TIMESTAMP")]:
+                try:
+                    cur.execute(f"ALTER TABLE pending_topics ADD COLUMN {col} {defn}")
+                    conn.commit()
+                except Exception:
+                    conn.rollback()  # column already exists
             for col, defn in [("notes", "TEXT")]:
                 try:
                     cur.execute(f"ALTER TABLE reels ADD COLUMN {col} {defn}")
@@ -588,6 +601,15 @@ def init_db():
             for col, defn in [("spine", "TEXT"), ("label", "TEXT")]:
                 try:
                     cur.execute(f"ALTER TABLE belief_pieces ADD COLUMN {col} {defn}")
+                except Exception:
+                    pass
+            # See the Postgres branch: a topic's fate, stored rather than left
+            # to a Telegram card on a domain the owner's ISP blocks.
+            for col, defn in [("outcome", "TEXT"), ("reason", "TEXT"),
+                              ("report", "TEXT"), ("run_id", "INTEGER"),
+                              ("decided_at", "TEXT")]:
+                try:
+                    cur.execute(f"ALTER TABLE pending_topics ADD COLUMN {col} {defn}")
                 except Exception:
                     pass
         conn.commit()
@@ -937,15 +959,67 @@ def pop_next_topic():
         conn.close()
 
 
-def finish_topic(topic_id):
+# The fates a submitted topic can meet. `investigating` is the only one that
+# means the topic became a story; every other value is a form of "no", and the
+# whole point of this table is that they stop looking alike.
+TOPIC_OUTCOMES = {
+    "investigating",   # PROCEED + past the gate → a run exists (see run_id)
+    "declined",        # topic-intake said DECLINE
+    "parked",          # topic-intake said PARK
+    "no_brief",        # said PROCEED but returned no STORY_BRIEF
+    "gate_dropped",    # the absolute-floor newsworthiness gate dropped it
+    "intake_failed",   # intake returned nothing usable (StructuredOutputError)
+    "abandoned",       # repeated provider/spine failures; capped and dropped
+}
+
+
+def finish_topic(topic_id, outcome, reason="", report="", run_id=None):
+    """Close a topic AND record what happened to it.
+
+    `outcome` is required on purpose. Every terminal path used to call
+    finish_topic(topic_id) and put its reasoning in a Telegram card, so
+    pending_topics ended up 46 rows all reading 'done' — a published topic and
+    one binned in five seconds were indistinguishable, and the reasoning was
+    unrecoverable once the card scrolled away (worse: its Telegraph link is on
+    a domain the owner's ISP blocks). Giving this parameter a default would let
+    that failure back in the moment someone adds a seventh exit.
+
+    `reason` is the short human-readable why; `report` is the model's full
+    output, stored so the Command Center can render it without Telegraph.
+    """
+    if outcome not in TOPIC_OUTCOMES:
+        raise ValueError(
+            f"unknown topic outcome {outcome!r}; expected one of {sorted(TOPIC_OUTCOMES)}"
+        )
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        now = "NOW()" if _is_postgres() else "datetime('now')"
+        cur.execute(
+            f"UPDATE pending_topics SET status = 'done', outcome = {ph}, reason = {ph}, "
+            f"report = {ph}, run_id = {ph}, decided_at = {now} WHERE id = {ph}",
+            (outcome, (reason or "")[:2000], report or "", run_id, topic_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_topic_outcomes(limit=100):
+    """Recent submitted topics with their fate, for the Command Center. Rows
+    from before outcomes were recorded carry outcome NULL — shown as unknown
+    rather than guessed at."""
     conn = _conn()
     try:
         cur = conn.cursor()
         ph = "%s" if _is_postgres() else "?"
         cur.execute(
-            f"UPDATE pending_topics SET status = 'done' WHERE id = {ph}", (topic_id,)
+            "SELECT id, topic, source, status, outcome, reason, report, run_id, "
+            f"submitted_at, decided_at FROM pending_topics ORDER BY id DESC LIMIT {ph}",
+            (limit,),
         )
-        conn.commit()
+        return _fetchall(cur)
     finally:
         conn.close()
 
