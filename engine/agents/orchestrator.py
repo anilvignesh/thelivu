@@ -765,19 +765,29 @@ def _undersourced_load_bearing(verification):
     return out
 
 
-def _halt_run(run_id, stage, raw):
+def _halt_run(run_id, stage, raw, subject=None):
     """Fail-loud: a stage returned no usable structured output even after a retry.
-    Park the run as needs_attention (NOT a silent HOLD) and tell the owner."""
+    Park the run as needs_attention (NOT a silent HOLD) and tell the owner.
+
+    `subject` names WHAT was lost when there is no run to point at yet. A topic
+    that dies inside topic-intake has no run_id, and this used to title the card
+    "Run #None halted at topic-intake" — which names neither the topic nor
+    anything the owner could recognise. The 2026-08-04 CAG submission was lost
+    exactly this way: a real, newsworthy story reduced to an unidentifiable
+    engine error the owner could not connect to anything he had sent.
+    """
     if run_id is not None:
         update_run(run_id, status="needs_attention", trust_gate="NEEDS-ATTENTION",
                    verification_report=(raw or "")[:4000])
+    who = f"Run #{run_id}" if run_id is not None else (
+        f"“{(subject or '')[:80]}”" if subject else "An untracked item")
     _notify_card(
-        "⚠️", f"Run #{run_id} halted at “{stage}”",
+        "⚠️", f"{who} halted at “{stage}”",
         body=("It returned no valid structured output after a retry, so the pipeline "
               "stopped rather than publish or silently hold garbage. Nothing was posted."),
-        report_title=f"Halt — {stage} — run #{run_id}", report_md=raw,
+        report_title=f"Halt — {stage} — {who}", report_md=raw, run_id=run_id,
     )
-    log.error("Run #%s halted at %s (no structured output).", run_id, stage)
+    log.error("%s halted at %s (no structured output).", who, stage)
 
 
 def _provider_from_err(err):
@@ -1108,7 +1118,7 @@ def _run_topic_intake(pending):
         finish_topic(topic_id, "intake_failed",
                      reason="topic-intake returned no usable structured output",
                      report=e.raw or "")
-        _halt_run(None, "topic-intake", e.raw)
+        _halt_run(None, "topic-intake", e.raw, subject=topic_label)
         return
     except Exception as e:
         # Provider outage → requeue and wait; a content/code failure that keeps
