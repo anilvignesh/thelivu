@@ -491,10 +491,32 @@ def _reason_from_report(report):
     return ""
 
 
+_EVENT_LEVEL = {"⚠️": "warn", "🚫": "warn", "🗑": "warn", "❌": "error",
+                "🛑": "error", "⛔": "error", "🅿️": "warn"}
+
+
+def _event_kind(title):
+    """A stable-ish slug for filtering the dashboard feed."""
+    t = re.sub(r"[^a-z0-9]+", "-", (title or "").lower()).strip("-")
+    return (t[:60] or "note")
+
+
 def _notify_card(emoji, title, body="", report_title=None, report_md=None,
-                 reply_markup=None):
-    """Build and send a clean HTML card to the owner. Long report_md goes to
-    Telegraph as a 'Full report' link instead of flooding the chat."""
+                 reply_markup=None, run_id=None):
+    """Build and send a clean HTML card to the owner, AND record it.
+
+    Every informational card the engine emits comes through here, so this is the
+    one place that has to persist for the dashboard to be complete. Recording
+    happens FIRST: a Telegram outage or a blocked telegra.ph link must not be
+    able to destroy the only copy of a dropped lead or a halted run.
+    """
+    try:
+        from shared.db import record_event
+        record_event(kind=_event_kind(title), title=title, body=body,
+                     report=report_md or "", run_id=run_id,
+                     level=_EVENT_LEVEL.get(emoji, "info"))
+    except Exception:
+        log.exception("Failed to record engine event: %s", title)
     parts = [f"{emoji} <b>{_esc(title)}</b>"]
     if body:
         parts += ["", body]

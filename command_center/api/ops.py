@@ -255,6 +255,41 @@ def topic_outcomes(request, data):
     return J({"topics": rows})
 
 
+# The engine used to speak only to Telegram. Owner's rule (2026-08-05): nothing
+# may be visible only there. Every _notify_card lands here too.
+@endpoint
+def engine_events(request, data):
+    kind = (data.get("kind") or "").strip() or None
+    level = (data.get("level") or "").strip() or None
+    try:
+        limit = min(int(data.get("limit") or 200), 500)
+    except (TypeError, ValueError):
+        limit = 200
+    from shared.db import get_engine_events
+    rows = get_engine_events(limit=limit, kind=kind, level=level)
+    for r in rows:
+        # The body is enough for the feed; the full report is a second click, so
+        # a long steward sweep doesn't bloat every page load.
+        r["has_report"] = bool(r.pop("report", None))
+        r["created_at"] = str(r.get("created_at") or "")
+    return J({"events": rows})
+
+
+@endpoint
+def engine_event_report(request, data):
+    """The full report body for one event — the thing that used to exist only
+    behind a telegra.ph link the owner cannot open."""
+    try:
+        eid = int(data.get("id") or 0)
+    except (TypeError, ValueError):
+        return err("bad event id")
+    rows = db.q("SELECT id, kind, title, body, report, created_at "
+                "FROM engine_events WHERE id = %s", (eid,))
+    if not rows:
+        return err(f"event #{eid} not found")
+    return J({"event": rows[0]})
+
+
 @endpoint
 def topic_report(request, data):
     """The model's full intake output for one topic — the thing that used to
@@ -354,5 +389,7 @@ routes = [
     Route("/topics", topic_add, methods=["POST"]),
     Route("/topics", topic_outcomes, methods=["GET"]),
     Route("/topics/report", topic_report, methods=["GET"]),
+    Route("/events", engine_events, methods=["GET"]),
+    Route("/events/report", engine_event_report, methods=["GET"]),
     Route("/costs", costs, methods=["GET"]),
 ]

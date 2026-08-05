@@ -58,6 +58,17 @@ CREATE TABLE IF NOT EXISTS pending_topics (
     status      TEXT DEFAULT 'queued'
 );
 
+CREATE TABLE IF NOT EXISTS engine_events (
+    id          SERIAL PRIMARY KEY,
+    kind        TEXT,
+    level       TEXT DEFAULT 'info',
+    title       TEXT NOT NULL,
+    body        TEXT,
+    report      TEXT,
+    run_id      INTEGER,
+    created_at  TIMESTAMP DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS seen_items (
     video_id    TEXT PRIMARY KEY,
     source      TEXT,
@@ -271,6 +282,17 @@ CREATE TABLE IF NOT EXISTS pending_topics (
     source      TEXT DEFAULT 'owner',
     submitted_at TEXT DEFAULT (datetime('now')),
     status      TEXT DEFAULT 'queued'
+);
+
+CREATE TABLE IF NOT EXISTS engine_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind        TEXT,
+    level       TEXT DEFAULT 'info',
+    title       TEXT NOT NULL,
+    body        TEXT,
+    report      TEXT,
+    run_id      INTEGER,
+    created_at  TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS seen_items (
@@ -1018,6 +1040,57 @@ def finish_topic(topic_id, outcome, reason="", report="", run_id=None):
             (outcome, (reason or "")[:2000], report or "", run_id, topic_id),
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def record_event(kind, title, body="", report="", run_id=None, level="info"):
+    """Persist one engine notification so the dashboard has it too.
+
+    The engine used to speak only to Telegram: 19 `_notify_card` call sites —
+    dropped leads, halted runs, steward recommendations, gate decisions — had no
+    row anywhere, so a card that scrolled away (or a Telegraph link on a domain
+    the owner's ISP blocks) took the information with it. Owner's rule, 2026-08-05:
+    nothing may be visible only in Telegram.
+
+    Written BEFORE the Telegram post on purpose — if Telegram is down or the token
+    is wrong, the record still exists. That was the other half of the bug: an
+    outage didn't just delay the notice, it erased it.
+    """
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(
+            f"INSERT INTO engine_events (kind, level, title, body, report, run_id) "
+            f"VALUES ({ph},{ph},{ph},{ph},{ph},{ph})",
+            (kind or "note", level or "info", (title or "")[:400],
+             (body or "")[:8000], report or "", run_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_engine_events(limit=200, kind=None, level=None):
+    """Recent engine notifications, newest first — the dashboard's feed."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        where, args = [], []
+        if kind:
+            where.append(f"kind = {ph}"); args.append(kind)
+        if level:
+            where.append(f"level = {ph}"); args.append(level)
+        sql = ("SELECT id, kind, level, title, body, report, run_id, created_at "
+               "FROM engine_events")
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += f" ORDER BY id DESC LIMIT {ph}"
+        args.append(limit)
+        cur.execute(sql, tuple(args))
+        return _fetchall(cur)
     finally:
         conn.close()
 
