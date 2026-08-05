@@ -552,6 +552,16 @@ def init_db():
                     conn.commit()
                 except Exception:
                     conn.rollback()  # column already exists
+            # Cache tokens were being thrown away, so the cost table under-reported
+            # real spend (writes bill at 1.25x and counted as zero) and there was
+            # no way to tell whether the caching we already implement works.
+            for col, defn in [("cache_write_tokens", "INTEGER DEFAULT 0"),
+                              ("cache_read_tokens", "INTEGER DEFAULT 0")]:
+                try:
+                    cur.execute(f"ALTER TABLE token_usage ADD COLUMN {col} {defn}")
+                    conn.commit()
+                except Exception:
+                    conn.rollback()  # column already exists
             for col, defn in [("notes", "TEXT")]:
                 try:
                     cur.execute(f"ALTER TABLE reels ADD COLUMN {col} {defn}")
@@ -610,6 +620,12 @@ def init_db():
                               ("decided_at", "TEXT")]:
                 try:
                     cur.execute(f"ALTER TABLE pending_topics ADD COLUMN {col} {defn}")
+                except Exception:
+                    pass
+            for col, defn in [("cache_write_tokens", "INTEGER DEFAULT 0"),
+                              ("cache_read_tokens", "INTEGER DEFAULT 0")]:
+                try:
+                    cur.execute(f"ALTER TABLE token_usage ADD COLUMN {col} {defn}")
                 except Exception:
                     pass
         conn.commit()
@@ -1264,15 +1280,25 @@ def deactivate_approved_source(source_id):
         conn.close()
 
 
-def record_usage(skill, model, input_tokens, output_tokens, run_id=None):
+def record_usage(skill, model, input_tokens, output_tokens, run_id=None,
+                 cache_write_tokens=0, cache_read_tokens=0):
+    """Record one skill call's token usage.
+
+    `input_tokens` is the UNCACHED REMAINDER, not the prompt size — the real
+    prompt is input + cache_write + cache_read. Recording only the first (which
+    this did until 2026-08-05) silently under-reports spend: cache writes bill at
+    1.25x and were being counted as zero. Pass all three.
+    """
     conn = _conn()
     try:
         cur = conn.cursor()
         ph = "%s" if _is_postgres() else "?"
         cur.execute(
-            f"INSERT INTO token_usage (run_id, skill, model, input_tokens, output_tokens) "
-            f"VALUES ({ph},{ph},{ph},{ph},{ph})",
-            (run_id, skill, model, input_tokens, output_tokens),
+            f"INSERT INTO token_usage (run_id, skill, model, input_tokens, "
+            f"output_tokens, cache_write_tokens, cache_read_tokens) "
+            f"VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+            (run_id, skill, model, input_tokens, output_tokens,
+             cache_write_tokens or 0, cache_read_tokens or 0),
         )
         conn.commit()
     finally:
@@ -1360,6 +1386,12 @@ def get_cost_report_data():
                     SUM(output_tokens) FILTER (WHERE recorded_at::date = CURRENT_DATE)  AS today_out,
                     SUM(input_tokens)  FILTER (WHERE DATE_TRUNC('month', recorded_at) = DATE_TRUNC('month', NOW())) AS month_in,
                     SUM(output_tokens) FILTER (WHERE DATE_TRUNC('month', recorded_at) = DATE_TRUNC('month', NOW())) AS month_out,
+                    SUM(COALESCE(cache_write_tokens,0)) FILTER (WHERE recorded_at::date = CURRENT_DATE) AS today_cw,
+                    SUM(COALESCE(cache_read_tokens,0))  FILTER (WHERE recorded_at::date = CURRENT_DATE) AS today_cr,
+                    SUM(COALESCE(cache_write_tokens,0)) FILTER (WHERE DATE_TRUNC('month', recorded_at) = DATE_TRUNC('month', NOW())) AS month_cw,
+                    SUM(COALESCE(cache_read_tokens,0))  FILTER (WHERE DATE_TRUNC('month', recorded_at) = DATE_TRUNC('month', NOW())) AS month_cr,
+                    SUM(COALESCE(cache_write_tokens,0)) AS total_cw,
+                    SUM(COALESCE(cache_read_tokens,0))  AS total_cr,
                     SUM(input_tokens)  AS total_in,
                     SUM(output_tokens) AS total_out
                 FROM token_usage
@@ -1373,6 +1405,12 @@ def get_cost_report_data():
                     SUM(CASE WHEN date(recorded_at)=date('now') THEN output_tokens ELSE 0 END) AS today_out,
                     SUM(CASE WHEN strftime('%Y-%m',recorded_at)=strftime('%Y-%m','now') THEN input_tokens ELSE 0 END)  AS month_in,
                     SUM(CASE WHEN strftime('%Y-%m',recorded_at)=strftime('%Y-%m','now') THEN output_tokens ELSE 0 END) AS month_out,
+                    SUM(CASE WHEN date(recorded_at)=date('now') THEN COALESCE(cache_write_tokens,0) ELSE 0 END) AS today_cw,
+                    SUM(CASE WHEN date(recorded_at)=date('now') THEN COALESCE(cache_read_tokens,0) ELSE 0 END)  AS today_cr,
+                    SUM(CASE WHEN strftime('%Y-%m',recorded_at)=strftime('%Y-%m','now') THEN COALESCE(cache_write_tokens,0) ELSE 0 END) AS month_cw,
+                    SUM(CASE WHEN strftime('%Y-%m',recorded_at)=strftime('%Y-%m','now') THEN COALESCE(cache_read_tokens,0) ELSE 0 END)  AS month_cr,
+                    SUM(COALESCE(cache_write_tokens,0)) AS total_cw,
+                    SUM(COALESCE(cache_read_tokens,0))  AS total_cr,
                     SUM(input_tokens)  AS total_in,
                     SUM(output_tokens) AS total_out
                 FROM token_usage

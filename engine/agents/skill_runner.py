@@ -498,6 +498,11 @@ def _run_claude(skill_name, input_text, system_prompt, extra_tools, max_tokens,
     messages = [{"role": "user", "content": input_text}]
     client = _get_claude()
     total_in = total_out = 0
+    # The whole point of the cache_control markers below is these two counters.
+    # response.usage.input_tokens is only what was billed at FULL rate; the cached
+    # span is reported separately and used to be discarded, which both hid the
+    # 1.25x write cost and made it impossible to tell whether caching worked.
+    total_cache_write = total_cache_read = 0
     rounds = 0
 
     # Cache the system prompt (contract + date anchor + full SKILL.md, ~1.5-2k
@@ -523,15 +528,21 @@ def _run_claude(skill_name, input_text, system_prompt, extra_tools, max_tokens,
         )
         total_in  += response.usage.input_tokens
         total_out += response.usage.output_tokens
+        # getattr: these are absent on providers/SDK versions that don't report
+        # them, and a missing counter must read as zero, never crash a run.
+        total_cache_write += getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+        total_cache_read  += getattr(response.usage, "cache_read_input_tokens", 0) or 0
 
         if response.stop_reason == "end_turn":
-            _record_claude(skill_name, total_in, total_out, run_id, model)
+            _record_claude(skill_name, total_in, total_out, run_id, model,
+                           total_cache_write, total_cache_read)
             return _extract_claude_text(response)
 
         if response.stop_reason == "tool_use":
             if not call_tools:
                 # Tools were already withdrawn but the model still tried — stop.
-                _record_claude(skill_name, total_in, total_out, run_id)
+                _record_claude(skill_name, total_in, total_out, run_id, model,
+                               total_cache_write, total_cache_read)
                 return _extract_claude_text(response)
             rounds += 1
             if rounds >= _MAX_TOOL_ROUNDS:
@@ -554,17 +565,21 @@ def _run_claude(skill_name, input_text, system_prompt, extra_tools, max_tokens,
             _cache_growing_context(messages)  # cache the prefix for the next round
             continue
 
-        _record_claude(skill_name, total_in, total_out, run_id)
+        _record_claude(skill_name, total_in, total_out, run_id, model,
+                       total_cache_write, total_cache_read)
         return _extract_claude_text(response)
 
 
-def _record_claude(skill_name, total_in, total_out, run_id, model=None):
+def _record_claude(skill_name, total_in, total_out, run_id, model=None,
+                   cache_write=0, cache_read=0):
     try:
         from shared.db import record_usage
         # Record the model actually called, not the default — cost accounting
-        # (and the budget governor that reads it) has to stay truthful.
+        # (and the budget governor that reads it) has to stay truthful. The same
+        # applies to the cached span: leaving it out understated every cached call.
         record_usage(skill=skill_name, model=model or CLAUDE_MODEL,
-                     input_tokens=total_in, output_tokens=total_out, run_id=run_id)
+                     input_tokens=total_in, output_tokens=total_out, run_id=run_id,
+                     cache_write_tokens=cache_write, cache_read_tokens=cache_read)
     except Exception:
         pass
 

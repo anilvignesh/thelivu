@@ -301,6 +301,8 @@ def costs(request, data):
         daily=lambda: get_daily_costs(days=30),
         by_skill=lambda: db.q(
             "SELECT skill, model, SUM(input_tokens) AS i, SUM(output_tokens) AS o, "
+            "SUM(COALESCE(cache_write_tokens,0)) AS cw, "
+            "SUM(COALESCE(cache_read_tokens,0)) AS cr, "
             "COUNT(*) AS calls FROM token_usage GROUP BY skill, model "
             "ORDER BY SUM(input_tokens) + SUM(output_tokens) DESC"),
         pubs=lambda: db.q(
@@ -312,9 +314,12 @@ def costs(request, data):
     summary = {"today": 0.0, "month": 0.0, "total": 0.0}
     by_model = []
     for r in rep["by_model"]:
-        t = cost_usd(r["model"], r["today_in"], r["today_out"])
-        mo = cost_usd(r["model"], r["month_in"], r["month_out"])
-        al = cost_usd(r["model"], r["total_in"], r["total_out"])
+        t = cost_usd(r["model"], r["today_in"], r["today_out"],
+                     r.get("today_cw"), r.get("today_cr"))
+        mo = cost_usd(r["model"], r["month_in"], r["month_out"],
+                      r.get("month_cw"), r.get("month_cr"))
+        al = cost_usd(r["model"], r["total_in"], r["total_out"],
+                      r.get("total_cw"), r.get("total_cr"))
         summary["today"] += t
         summary["month"] += mo
         summary["total"] += al
@@ -326,7 +331,7 @@ def costs(request, data):
              for x in res["daily"]]
     by_skill = res["by_skill"]
     for x in by_skill:
-        x["usd"] = cost_usd(x["model"], x["i"], x["o"])
+        x["usd"] = cost_usd(x["model"], x["i"], x["o"], x.get("cw"), x.get("cr"))
     return J({"summary": {k: round(v, 4) for k, v in summary.items()},
               "inr_rate": INR, "by_model": by_model, "daily": daily,
               "by_skill": by_skill, "publications": res["pubs"],

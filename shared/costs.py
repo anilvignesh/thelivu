@@ -49,14 +49,29 @@ def tier_for(model):
     return "claude"
 
 
-def cost_usd(model, in_tok, out_tok):
-    """USD for one (model, input tokens, output tokens) triple."""
+# Prompt-cache multipliers on the tier's INPUT rate. A write costs more than a
+# fresh read of the same tokens; a read costs a tenth. Both were priced at zero
+# until 2026-08-05 because neither was recorded — see shared/db.record_usage.
+CACHE_WRITE_MULT = 1.25   # 5-minute TTL (the only TTL the engine uses)
+CACHE_READ_MULT = 0.10
+
+
+def cost_usd(model, in_tok, out_tok, cache_write=0, cache_read=0):
+    """USD for one skill call.
+
+    `in_tok` is the UNCACHED REMAINDER the provider billed at full rate, not the
+    prompt size. Callers that only have the old two-token pair still get the old
+    answer; pass the cache columns to get the true one.
+    """
     rate_in, rate_out = RATES[tier_for(model)]
-    return ((in_tok or 0) / 1e6 * rate_in) + ((out_tok or 0) / 1e6 * rate_out)
+    return (((in_tok or 0) / 1e6 * rate_in)
+            + ((out_tok or 0) / 1e6 * rate_out)
+            + ((cache_write or 0) / 1e6 * rate_in * CACHE_WRITE_MULT)
+            + ((cache_read or 0) / 1e6 * rate_in * CACHE_READ_MULT))
 
 
-def cost_inr(model, in_tok, out_tok):
-    return cost_usd(model, in_tok, out_tok) * USD_TO_INR
+def cost_inr(model, in_tok, out_tok, cache_write=0, cache_read=0):
+    return cost_usd(model, in_tok, out_tok, cache_write, cache_read) * USD_TO_INR
 
 
 def spend_by_skill_model(days=30):
@@ -67,19 +82,18 @@ def spend_by_skill_model(days=30):
     conn = _conn()
     try:
         cur = conn.cursor()
+        cols = ("SELECT skill, model, SUM(input_tokens), SUM(output_tokens), COUNT(*), "
+                "SUM(COALESCE(cache_write_tokens,0)), SUM(COALESCE(cache_read_tokens,0)) ")
         if _is_postgres():
-            cur.execute(
-                "SELECT skill, model, SUM(input_tokens), SUM(output_tokens), COUNT(*) "
-                "FROM token_usage WHERE recorded_at >= NOW() - INTERVAL %s "
-                "GROUP BY skill, model", (f"{days} days",))
+            cur.execute(cols + "FROM token_usage WHERE recorded_at >= NOW() - INTERVAL %s "
+                        "GROUP BY skill, model", (f"{days} days",))
         else:
-            cur.execute(
-                "SELECT skill, model, SUM(input_tokens), SUM(output_tokens), COUNT(*) "
-                "FROM token_usage WHERE recorded_at >= datetime('now', ?) "
-                "GROUP BY skill, model", (f"-{days} days",))
+            cur.execute(cols + "FROM token_usage WHERE recorded_at >= datetime('now', ?) "
+                        "GROUP BY skill, model", (f"-{days} days",))
         rows = [{"skill": r[0], "model": r[1], "in_tok": r[2] or 0,
                  "out_tok": r[3] or 0, "calls": r[4],
-                 "usd": cost_usd(r[1], r[2], r[3])} for r in cur.fetchall()]
+                 "cache_write": r[5] or 0, "cache_read": r[6] or 0,
+                 "usd": cost_usd(r[1], r[2], r[3], r[5], r[6])} for r in cur.fetchall()]
         rows.sort(key=lambda r: r["usd"], reverse=True)
         return rows
     finally:
@@ -101,25 +115,29 @@ def daily_spend_usd(day=None):
         if _is_postgres():
             if day is None:
                 cur.execute(
-                    "SELECT model, SUM(input_tokens), SUM(output_tokens) "
+                    "SELECT model, SUM(input_tokens), SUM(output_tokens), "
+                    "SUM(COALESCE(cache_write_tokens,0)), SUM(COALESCE(cache_read_tokens,0)) "
                     "FROM token_usage WHERE recorded_at::date = CURRENT_DATE "
                     "GROUP BY model")
             else:
                 cur.execute(
-                    "SELECT model, SUM(input_tokens), SUM(output_tokens) "
+                    "SELECT model, SUM(input_tokens), SUM(output_tokens), "
+                    "SUM(COALESCE(cache_write_tokens,0)), SUM(COALESCE(cache_read_tokens,0)) "
                     "FROM token_usage WHERE recorded_at::date = %s "
                     "GROUP BY model", (day,))
         else:
             if day is None:
                 cur.execute(
-                    "SELECT model, SUM(input_tokens), SUM(output_tokens) "
+                    "SELECT model, SUM(input_tokens), SUM(output_tokens), "
+                    "SUM(COALESCE(cache_write_tokens,0)), SUM(COALESCE(cache_read_tokens,0)) "
                     "FROM token_usage WHERE date(recorded_at) = date('now') "
                     "GROUP BY model")
             else:
                 cur.execute(
-                    "SELECT model, SUM(input_tokens), SUM(output_tokens) "
+                    "SELECT model, SUM(input_tokens), SUM(output_tokens), "
+                    "SUM(COALESCE(cache_write_tokens,0)), SUM(COALESCE(cache_read_tokens,0)) "
                     "FROM token_usage WHERE date(recorded_at) = ? "
                     "GROUP BY model", (str(day),))
-        return sum(cost_usd(r[0], r[1], r[2]) for r in cur.fetchall())
+        return sum(cost_usd(r[0], r[1], r[2], r[3], r[4]) for r in cur.fetchall())
     finally:
         conn.close()
