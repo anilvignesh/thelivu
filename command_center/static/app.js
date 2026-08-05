@@ -68,6 +68,16 @@ async function api(path, opts = {}) {
     opts.body = JSON.stringify(opts.body);
     opts.headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers);
   }
+  // Empty values are dropped rather than sent as "": an unset filter must mean
+  // "no filter", not "match the empty string".
+  if (opts.query) {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(opts.query))
+      if (v !== '' && v !== null && v !== undefined) q.set(k, v);
+    const s = q.toString();
+    if (s) path += (path.includes('?') ? '&' : '?') + s;
+    delete opts.query;
+  }
   const r = await fetch('/api' + path, opts);
   if (r.status === 401) { showLogin(); throw new Error('unauthorized'); }
   let data = null;
@@ -184,6 +194,10 @@ const VIEWS = [
   /* Second in the list on purpose: "I started a reel build and can't find it
      anywhere" is what this view exists to answer, so it sits where he looks. */
   ['activity',  '⚡', 'Activity',      vActivity],
+  /* Sits next to Activity because it answers the same question one step later:
+     Activity is what is running, Events is what the engine already said about
+     everything that ran — including the things that used to only reach Telegram. */
+  ['events',    '🔔', 'Events',        vEvents],
   ['gate',      '📬', 'Gate',          vGate],
   ['stories',   '📰', 'Stories',       vStories],
   ['carousels', '🖼', 'Carousels',     vCarousels],
@@ -1248,6 +1262,69 @@ async function vIngest(main) {
     main.appendChild(el(`<div class="item small"><div class="row between">
       <span>#${i.id} ${esc((i.topic || '').slice(0, 90))}</span>${pill(i.status)}</div>
       <div class="meta">${fdate(i.submitted_at)}</div></div>`));
+}
+
+/* ══ EVENTS ═════════════════════════════════════════════════════════════
+   Everything the engine says. It used to speak only to Telegram: a dropped lead,
+   a halted run, a gate decision or a steward sweep existed as a chat card and
+   nowhere else, and the "Full report" link it carried points at telegra.ph,
+   which the owner's ISP blocks. Owner's rule (2026-08-05): the dashboard has
+   everything. Reports open inline here rather than off-site for that reason. */
+async function vEvents(main) {
+  const f = state.list.events || (state.list.events = { level: '', kind: '' });
+  const d = await api('/events', { query: { level: f.level, kind: f.kind, limit: 200 } });
+  main.innerHTML = '';
+  main.appendChild(el(`<div><h1>Events</h1>
+    <div class="sub">Every notification the engine emits, recorded before it is sent — so a Telegram outage delays the notice instead of erasing it.</div></div>`));
+
+  const levels = [['', 'All'], ['error', 'Errors'], ['warn', 'Warnings'], ['info', 'Info']];
+  const bar = el(`<div class="row" style="gap:6px;margin:10px 0"></div>`);
+  for (const [v, label] of levels) {
+    const b = el(`<button class="btn ${f.level === v ? 'primary' : ''}">${label}</button>`);
+    b.onclick = () => { f.level = v; route(); };
+    bar.appendChild(b);
+  }
+  if (f.kind) {
+    const c = el(`<button class="btn">kind: ${esc(f.kind)} ✕</button>`);
+    c.onclick = () => { f.kind = ''; route(); };
+    bar.appendChild(c);
+  }
+  main.appendChild(bar);
+
+  if (!d.events.length) {
+    main.appendChild(el(`<div class="muted small">Nothing recorded yet.</div>`));
+    return;
+  }
+  for (const e of d.events) {
+    const tone = e.level === 'error' ? 'danger' : e.level === 'warn' ? 'warn' : '';
+    const row = el(`<div class="item ${tone}">
+      <div class="row between">
+        <strong>${esc(e.title || '')}</strong>
+        <span class="muted small">${fdate(e.created_at)}</span>
+      </div>
+      ${e.body ? `<div class="small" style="margin-top:4px">${esc(String(e.body).slice(0, 400))}</div>` : ''}
+      <div class="meta row" style="gap:8px;margin-top:6px">
+        <a href="#" class="kind">${esc(e.kind || 'note')}</a>
+        ${e.run_id ? `<span>run #${e.run_id}</span>` : ''}
+        ${e.has_report ? `<button class="btn small rep">Full report</button>` : ''}
+      </div>
+      <pre class="report" style="display:none;white-space:pre-wrap;margin-top:8px"></pre>
+    </div>`);
+    row.querySelector('.kind').onclick = ev => {
+      ev.preventDefault(); f.kind = e.kind || ''; route();
+    };
+    const btn = row.querySelector('.rep');
+    if (btn) btn.onclick = async () => {
+      const pre = row.querySelector('.report');
+      if (pre.style.display !== 'none') { pre.style.display = 'none'; return; }
+      // Fetched on demand: a steward sweep is thousands of words and there can
+      // be a hundred of these on one page.
+      const r = await api('/events/report', { query: { id: e.id } });
+      pre.textContent = r.event.report || '(empty)';
+      pre.style.display = '';
+    };
+    main.appendChild(row);
+  }
 }
 
 /* ══ BELIEFS ════════════════════════════════════════════════════════════

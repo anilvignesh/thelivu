@@ -259,10 +259,13 @@ def topic_outcomes(request, data):
 # may be visible only there. Every _notify_card lands here too.
 @endpoint
 def engine_events(request, data):
-    kind = (data.get("kind") or "").strip() or None
-    level = (data.get("level") or "").strip() or None
+    # GET: `endpoint` only parses a JSON body for POST/PATCH/PUT/DELETE, so the
+    # filters arrive as query params and `data` is empty here.
+    qp = request.query_params
+    kind = (qp.get("kind") or "").strip() or None
+    level = (qp.get("level") or "").strip() or None
     try:
-        limit = min(int(data.get("limit") or 200), 500)
+        limit = min(int(qp.get("limit") or 200), 500)
     except (TypeError, ValueError):
         limit = 200
     from shared.db import get_engine_events
@@ -280,7 +283,7 @@ def engine_event_report(request, data):
     """The full report body for one event — the thing that used to exist only
     behind a telegra.ph link the owner cannot open."""
     try:
-        eid = int(data.get("id") or 0)
+        eid = int(request.query_params.get("id") or 0)
     except (TypeError, ValueError):
         return err("bad event id")
     rows = db.q("SELECT id, kind, title, body, report, created_at "
@@ -295,7 +298,7 @@ def topic_report(request, data):
     """The model's full intake output for one topic — the thing that used to
     live only behind a Telegraph link."""
     try:
-        tid = int(data.get("id") or 0)
+        tid = int(request.query_params.get("id") or data.get("id") or 0)
     except (TypeError, ValueError):
         return err("bad topic id")
     rows = db.q("SELECT id, topic, outcome, reason, report FROM pending_topics "
