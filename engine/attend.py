@@ -12,6 +12,13 @@ interactive session writes `.attend/NNN-<skill>.response.md`. The trust gate,
 the anti-monotony check, draft parsing and the human publish gate are all
 untouched — which is the entire point of putting the seam at the model call.
 
+THE DAILY SPEND CAP DOES NOT APPLY HERE, deliberately. Attended work never
+touches the paid APIs, so there is nothing for a cap on API spend to bound —
+you can run a cycle with the cap already blown and change no configuration to
+do it. See shared/budget.attended_mode(). The quota breaker is a different
+thing and DOES still show up in `status`: it reports what a provider said, and
+`clear` exists for when you have topped up.
+
 ⚠️ THIS IS A HUMAN-OPERATED TOOL. It is legitimate because Anil is sitting here
 driving his own Claude Code session on his own project. It must never be run
 unattended — not from cron, not from Railway, not piped through `claude -p`.

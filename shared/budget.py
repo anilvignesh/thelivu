@@ -15,6 +15,30 @@ CAP_KEY = "daily_budget_usd"
 MAX_CAP_USD = 20.0
 
 
+def attended_mode():
+    """True when the operator is driving this process via `./attend`.
+
+    Attended work does not touch the paid APIs at all — `skill_runner` swaps the
+    model call for a blocking file handoff to the human's own session, and
+    `shared/costs.py` already prices anything marked 'attended' at zero. So the
+    cap, which exists to bound API spend, has nothing to bound here: leaving it
+    armed would park work that costs nothing and force the owner to raise or
+    disable the cap by hand just to run a cycle he is paying for out of a
+    subscription.
+
+    This was already true by accident — the only enforcement lives in run.py's
+    daemon loop, which `attend.py` never enters — but an accident is not a
+    guarantee. Stated here so a future budget check added anywhere else inherits
+    it, and so the test suite can hold it.
+
+    Fails safe if the env var were ever set on Railway: the same flag makes every
+    skill call block on a `.attend/` response file that no unattended process
+    will ever write, so a mis-set var hangs the engine rather than uncapping it.
+    """
+    import os
+    return os.environ.get("THELIVU_ATTENDED") == "1"
+
+
 def cap_usd():
     """The active cap in USD, or None when the governor is disabled.
 
@@ -62,7 +86,9 @@ def is_over_budget():
     """(spent, cap) when the cap is reached, else None.
 
     Returns the numbers so the caller can log/alert with them rather than
-    re-querying.
+    re-querying. Always None in attended mode — see attended_mode().
     """
+    if attended_mode():
+        return None
     spent, cap, over = status()
     return (spent, cap) if over else None

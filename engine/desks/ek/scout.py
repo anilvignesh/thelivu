@@ -465,18 +465,23 @@ def run_belief_cycle():
 
     _reclaim_stale_runs()
 
-    try:
-        spent, cap, over = budget.status()
-    except Exception as e:
-        # Erring toward not spending: unlike the governor in run.py — which must
-        # never let a cost-query blip halt publishing — a belief piece is never
-        # urgent, and running blind is the more expensive mistake.
-        log.warning("belief cycle: budget check failed (%s) — standing down", e)
-        return _record("skipped: budget unreadable", quiet=True)
+    # Attended work spends nothing on the APIs, so there is no cap to respect and
+    # no claim for the news desk to have the prior half of. Skipping the whole
+    # check (rather than passing it) also means a cost-query blip cannot park an
+    # attended run the owner is driving by hand.
+    if not budget.attended_mode():
+        try:
+            spent, cap, over = budget.status()
+        except Exception as e:
+            # Erring toward not spending: unlike the governor in run.py — which must
+            # never let a cost-query blip halt publishing — a belief piece is never
+            # urgent, and running blind is the more expensive mistake.
+            log.warning("belief cycle: budget check failed (%s) — standing down", e)
+            return _record("skipped: budget unreadable", quiet=True)
 
-    if cap is not None and spent >= cap * BUDGET_HEADROOM:
-        return _record(f"skipped: ${spent:.2f} of the ${cap:.2f} cap already spent — the "
-                       f"news desk has the prior claim on it", quiet=True)
+        if cap is not None and spent >= cap * BUDGET_HEADROOM:
+            return _record(f"skipped: ${spent:.2f} of the ${cap:.2f} cap already spent — the "
+                           f"news desk has the prior claim on it", quiet=True)
 
     row = pop_next_belief()
     if not row and _promote_a_proposal():
