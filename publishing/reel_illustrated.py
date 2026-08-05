@@ -16,9 +16,10 @@ renders reels, so that is fine — but fail loudly rather than draw tofu.
 """
 
 import logging
+import random
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from publishing.slides import SERIF_BOLD, MONO, MONO_BOLD, PALETTE, _font
 import publishing.reel as reel
@@ -96,6 +97,62 @@ def draw_illustrated_frame(image_path, caption, idx, n_illustrated, out_png, lab
     d.text((pad_x, bar_y + 34), "thelivu.reports · sources in bio",
            font=_font(MONO, 28), fill=(200, 192, 175))
     img.save(out_png)
+
+
+def render_house_ground(out_png, *, variant=0):
+    """The inked field one beat falls back to when FLUX will not illustrate it.
+
+    Why this exists: covert action, coups and violence are a whole class of subject
+    the belief desks work, and they sit against the image model's refusal boundary.
+    Reel #27 (Guatemala 1954) lost its entire illustrated look to one refusal out of
+    eight. The all-or-nothing rule that caused that is still right — a reel with
+    three illustrations and two text slides reads as a bug — so the fix is not to
+    ship the mix. It is to give the one refused beat a picture that BELONGS: same
+    ink ground, same grain, same scrims, masthead, serif caption and progress bar,
+    drawn by the same `draw_illustrated_frame`. What changes is that the art on it
+    is a texture instead of a metaphor, which in a screenprint/riso system is an
+    ordinary editorial move — an inked field between images, not a missing one.
+
+    It is deliberately mute. A device with meaning (a redaction bar was the obvious
+    candidate, and the brand owns one) would be the frame saying something about the
+    story — "this was hidden" — that no verifier passed. A texture claims nothing.
+
+    Rendered locally, so a refusal costs no further FLUX call. Deterministic per
+    `variant`: the same beat gets the same field every rebuild.
+    """
+    rng = random.Random(9173 + variant)
+    img = Image.new("RGB", (W, H))
+    d = ImageDraw.Draw(img)
+
+    # Vertical ink gradient — near-black at the edges, a shade warmer through the
+    # middle, so the field has depth instead of reading as a black slug.
+    top, mid, bot = (14, 12, 9), (34, 29, 21), (12, 10, 8)
+    for y in range(H):
+        t = y / (H - 1)
+        a, b, f = (top, mid, t / 0.55) if t < 0.55 else (mid, bot, (t - 0.55) / 0.45)
+        d.line([(0, y), (W, y)],
+               fill=tuple(int(a[c] + (b[c] - a[c]) * f) for c in range(3)))
+
+    # One soft disc where an illustration's subject would sit, high in the frame and
+    # off-centre. Gives the eye a centre without depicting anything.
+    cx = int(W * (0.42 + 0.16 * rng.random()))
+    cy = int(H * 0.34)
+    r = int(W * 0.34)
+    disc = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(disc).ellipse([cx - r, cy - r, cx + r, cy + r], fill=140)
+    disc = disc.filter(ImageFilter.GaussianBlur(int(W * 0.09)))
+    img = Image.composite(Image.new("RGB", (W, H), (74, 61, 40)), img, disc)
+
+    # Paper grain, the one thing every FLUX frame in this style has. Drawn from the
+    # seeded RNG rather than `Image.effect_noise`, which draws on PIL's own
+    # unseedable generator and made the same beat render a different field every
+    # time. Uniform bytes average ~128, so a low-alpha blend adds tooth without
+    # lifting the ink off the palette.
+    grain = Image.frombytes("L", (W, H), rng.randbytes(W * H)).convert("RGB")
+    img = Image.blend(img, grain, 0.055)
+
+    img.save(out_png)
+    return out_png
 
 
 def draw_signoff_card(out_png):

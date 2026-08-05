@@ -282,16 +282,41 @@ _SHOT_ANGLES = [
 ]
 
 
+# How many beats of one reel may fall back to the house ground (see
+# `reel_illustrated.render_house_ground`) before the illustrated look is abandoned
+# for the whole reel.
+#
+# The old rule was zero: any refusal dropped everything to text slides, and reel #27
+# lost its look to one refusal out of eight. The reasoning behind that rule is sound
+# and survives here — a reel that mixes the illustrated look with the text-slide look
+# reads as a bug. What changed is that the fallback for ONE beat is no longer the
+# other look: it is a frame drawn in this one, so the reel stays visually whole.
+#
+# One, and not a fraction of the beats, because the argument only holds while the
+# card is the exception. Two or three inked fields in a six-beat reel stop reading as
+# a beat that chose texture and start reading as a reel that could not draw itself —
+# and at that point the honest, consistent product is the text-slide reel, which is
+# exactly what the old rule delivers. So the bar is raised rather than removed: every
+# beat but one.
+MAX_HOUSE_CARDS = 1
+
+
 def _illustrate(fields, out_dir, _p, shots=None):
-    """Illustrations per beat, or None if any beat failed.
+    """Illustrations per beat, or None if too many beats went unillustrated.
 
     Returns a list parallel to `beats`, each entry a LIST of paths — the sub-shots for
-    that beat. All-or-nothing on purpose: a reel with three illustrated frames and two
-    text slides reads as a bug, not a style. The caller falls back to the text-slide
-    look for the whole reel.
+    that beat. Two things stand between a refusal and the text-slide fallback:
+
+      * a beat that got SOME of its sub-shots keeps them (the renderer holds the last
+        good one), because the substitute is then the beat's own art;
+      * up to `MAX_HOUSE_CARDS` beats with no art at all get the house ground, a frame
+        drawn in the same look rather than in the other one.
+
+    Past that the caller falls back to text slides for the whole reel, unchanged.
     """
     from publishing.illustrate import generate_beat_images, scene_from_beat
-    from publishing.reel_illustrated import malayalam_fonts_available
+    from publishing.reel_illustrated import (malayalam_fonts_available,
+                                             render_house_ground)
 
     if not malayalam_fonts_available():
         log.warning("Malayalam fonts missing — the sign-off card can't render; "
@@ -322,14 +347,29 @@ def _illustrate(fields, out_dir, _p, shots=None):
 
     flat = generate_beat_images(scenes, out_dir, progress=_step,
                                 place=fields.get("place"))
-    if any(p is None for p in flat):
-        missing = sorted({owner[k] for k, p in enumerate(flat) if p is None})
-        log.warning("illustrations missing for beats %s — text-slide fallback", missing)
-        return None
 
     grouped = [[] for _ in beats]
     for k, p in enumerate(flat):
-        grouped[owner[k]].append(p)
+        if p is not None:
+            grouped[owner[k]].append(p)
+
+    # A beat with no picture at all is the only one that needs rescuing. A beat that
+    # lost one sub-shot of two still has its own art, and `make_renderer` holds it
+    # across the cut.
+    bare = [i for i, g in enumerate(grouped) if not g]
+    partial = [i for i, g in enumerate(grouped)
+               if g and len(g) < max(int(shots[i]), 1)]
+    if partial:
+        log.info("beats %s lost a sub-shot — holding the beat's own picture", partial)
+    if len(bare) > MAX_HOUSE_CARDS:
+        log.warning("no illustration for beats %s (max %d) — text-slide fallback",
+                    bare, MAX_HOUSE_CARDS)
+        return None
+    for i in bare:
+        card = out_dir / f"house_{i}.png"
+        render_house_ground(card, variant=i)
+        grouped[i] = [card]
+        log.warning("beat %d could not be illustrated — house ground, look kept", i)
     return grouped
 
 
@@ -358,9 +398,10 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
     default light. Does NOT post — see module docstring.
 
     `illustrated` (default True) renders the ink-dark illustrated look: one
-    conceptual FLUX illustration per beat plus the silent sign-off card. If any
-    illustration fails it falls back to text-slide frames for the whole reel, so
-    this never turns a working reel into a failed job.
+    conceptual FLUX illustration per beat plus the silent sign-off card. A beat the
+    image model refuses falls back to the house ground — a frame in the same look —
+    and only a reel with more than `MAX_HOUSE_CARDS` such beats drops to text-slide
+    frames throughout, so this never turns a working reel into a failed job.
 
     `voice` names a registered reel voice (publishing/voices.py). Omitted, the
     engine's configured default narrates — the kv key `reel_voice` when set,
@@ -548,9 +589,11 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
     narration = fields.get("narration") or ""
 
     # 4) Illustrations — one conceptual image per beat (FLUX.1-dev on the free
-    #    NVIDIA key). All-or-nothing: a reel that mixes illustrated and text-slide
-    #    frames looks broken, so any missing image drops the WHOLE reel back to the
-    #    text-slide look rather than shipping something half-styled.
+    #    NVIDIA key). A reel that mixes the illustrated and text-slide looks still
+    #    reads as broken, so that mix is never shipped: a refused beat gets a frame
+    #    drawn in the illustrated look instead (the house ground), and only when more
+    #    than MAX_HOUSE_CARDS beats go unillustrated does the WHOLE reel drop back to
+    #    text slides. See `_illustrate`.
     with tempfile.TemporaryDirectory(prefix="mkreel_") as tmp:
         tmpdir = Path(tmp)
         render_frame, kind, n_frames = None, "narrated", len(fields["beats"])
@@ -584,6 +627,11 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
                 from publishing.reel_illustrated import make_renderer
                 render_frame = make_renderer(images)
                 kind = "illustrated"
+                # Cut each beat to the pictures it actually HAS. Planning 2 shots for
+                # a beat that came back with 1 makes the renderer hold the same frame
+                # across a cut, which restarts the zoom on an identical picture — the
+                # visible stutter the sub-shot work exists to avoid.
+                shots_per_beat = [max(len(g), 1) for g in images]
                 # One extra beat with no spoken text = the silent sign-off hold. It is
                 # a single card, never cut, so it contributes one shot.
                 fields = dict(fields, beats=list(fields["beats"]) + [("", "")])
