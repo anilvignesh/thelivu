@@ -88,6 +88,23 @@ def _contract_for(skill_name):
 _PIPELINE_CONTRACT = _contract_for("news-monitor")
 
 
+# Between a marker's label and its value a model may put whitespace, markdown
+# emphasis, or both — `Decision: **PROCEED**` and `**Decision:** PROCEED` are
+# the two shapes seen in the wild, and which one you get is stochastic.
+#
+# This is not cosmetic. The 2026-08-04 CAG topic was lost exactly here: the reply
+# decided PROCEED, said so, and the run died because the word arrived wrapped in
+# asterisks. Twice, on two different days, while a hand-run of the same prompt
+# passed because that time the model happened not to bold it. Use MARK() for
+# every structured marker so no skill can be lost to formatting again.
+_LABEL_GAP = r"[*_`\s]*"
+
+
+def MARK(label, values):
+    """Build a marker regex tolerant of markdown emphasis around label and value."""
+    return rf"{label}:{_LABEL_GAP}({values})"
+
+
 class StructuredOutputError(RuntimeError):
     """A skill failed to return its required structured marker after a retry."""
 

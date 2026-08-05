@@ -72,18 +72,19 @@ from shared.db import (
     get_dig_updates,
     get_due_digs,
 )
-from engine.agents.skill_runner import run_skill, run_structured_skill, StructuredOutputError
+from engine.agents.skill_runner import (run_skill, run_structured_skill,
+                                        StructuredOutputError, MARK)
 
 # Structured-output markers each decision skill MUST emit (anchored to the exact
 # formats in their SKILL.md). run_structured_skill validates + retries on these.
-_M_GATE     = r"Trust gate:\s*\**\s*(KILL|HOLD|FRAMING-FIX|READY-FOR-HUMAN)"
-_M_DECISION = r"Decision:\s*(PROCEED|PARK|DECLINE)"
-_M_SELECTED = r"SELECTED_LEAD:\s*(NONE|\d+)"
-_M_VERDICT  = r"VERDICT:\s*(PURSUE|DROP)"
+_M_GATE     = MARK("Trust gate", "KILL|HOLD|FRAMING-FIX|READY-FOR-HUMAN")
+_M_DECISION = MARK("Decision", "PROCEED|PARK|DECLINE")
+_M_SELECTED = MARK("SELECTED_LEAD", r"NONE|\d+")
+_M_VERDICT  = MARK("VERDICT", "PURSUE|DROP")
 # Anchored to a real heading at line start — a conversational "I'm ready to build
 # the Evidence Dossier…" must NOT pass (that was the run #18 poisoning vector).
 _M_DOSSIER  = r"^#{1,3}\s+(Evidence Dossier|Claims|Handoff note)"
-_M_CAROUSEL = r"^SLIDE\s+1:\s*.+"
+_M_CAROUSEL = r"^[*_`]*SLIDE\s+1:\s*.+"
 
 logging.basicConfig(
     level=logging.INFO,

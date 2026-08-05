@@ -28,7 +28,8 @@ import logging
 import re
 import sys
 
-from engine.agents.skill_runner import run_skill, run_structured_skill, StructuredOutputError
+from engine.agents.skill_runner import (run_skill, run_structured_skill,
+                                        StructuredOutputError, MARK)
 # Imported under a distinct name on purpose: `gate` is already the local for the
 # TRUST gate's verdict inside run_belief, and the collision made Python treat the
 # module reference as a local read-before-assignment — the whole desk raised
@@ -47,8 +48,8 @@ _ROUTE = {
 }
 SERIES_NAME = {"ek": "Everyone Knows", "gk": "Turns Out"}
 
-_M_GATE = r"GATE:\s*(READY-FOR-HUMAN|FRAMING-FIX|HOLD|KILL)"
-_M_VERDICT = r"VERDICT:\s*(PURSUE-A|PURSUE-B|ROUTE-GK|DROP)"
+_M_GATE = MARK("GATE", "READY-FOR-HUMAN|FRAMING-FIX|HOLD|KILL")
+_M_VERDICT = MARK("VERDICT", "PURSUE-A|PURSUE-B|ROUTE-GK|DROP")
 
 
 def _field(text, label):
