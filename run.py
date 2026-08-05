@@ -24,12 +24,30 @@ if service == "thelivu-agent":
     else:
         log.info("SLIDE_SERVER_BASE_URL not set — slide images will fall back to Telegram's CDN URL.")
 
-    from shared.db import clear_stale_agents, clear_stale_topics, get_held_runs
+    from shared.db import (clear_stale_agents, clear_stale_topics,
+                           clear_stale_runs, get_held_runs)
     init_db()
     clear_stale_agents()
     n = clear_stale_topics()
     if n:
         log.warning("Startup: reset %d stuck pending_topic(s) to queued", n)
+    # A deploy restarts this process mid-spine; whatever run was in flight is
+    # orphaned. Park it visibly instead of leaving it in 'writing' forever.
+    orphans = clear_stale_runs()
+    if orphans:
+        log.warning("Startup: parked %d run(s) orphaned by a restart: %s",
+                    len(orphans), orphans)
+        try:
+            from engine.agents.orchestrator import _notify_card
+            _notify_card(
+                "⚠️", f"{len(orphans)} run(s) orphaned by an engine restart",
+                body=("A deploy or crash interrupted them mid-spine. They are parked as "
+                      "needs_attention rather than re-run, because there is no resume and "
+                      "recovery costs the whole spine again — that is your call. "
+                      f"Runs: {', '.join('#' + str(i) for i in orphans)}"),
+            )
+        except Exception:
+            log.exception("Could not notify about orphaned runs")
     log.info("Thelivu agent starting | Approval: %s | Interval: %dh", APPROVAL_MODE, CHECK_INTERVAL_HOURS)
 
     _cost_report_sent_date = None

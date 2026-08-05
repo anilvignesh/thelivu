@@ -1655,6 +1655,49 @@ def clear_agents_for_run(run_id):
         conn.close()
 
 
+# The statuses the spine passes THROUGH. Anything sitting in one of these after
+# the engine restarted belongs to a process that no longer exists.
+TRANSIENT_RUN_STATUSES = ("investigating", "writing", "verifying",
+                          "scoping", "pending_review")
+
+
+def clear_stale_runs(minutes=45):
+    """Park pipeline_runs orphaned by an engine restart. Returns the ids parked.
+
+    Railway restarts on every deploy, which kills whatever run was mid-spine.
+    The belief desk already handles this (`scout._reclaim_stale_runs`, whose own
+    comment notes the restart "is the normal case, not the exotic one") — the
+    news desk never got the same treatment, so an interrupted run sat in
+    'writing' forever, invisible to the gate and to every retry path.
+
+    Parked as `needs_attention` rather than re-queued on purpose: there is no
+    resume, so recovery means paying for the whole spine again. That is the
+    owner's call, not an automatic one — and a story silently re-running its
+    research on every deploy is exactly how a spend cap gets eaten.
+    """
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        marks = ",".join([ph] * len(TRANSIENT_RUN_STATUSES))
+        cutoff = (f"NOW() - INTERVAL '{int(minutes)} minutes'" if _is_postgres()
+                  else f"datetime('now', '-{int(minutes)} minutes')")
+        cur.execute(
+            f"SELECT id FROM pipeline_runs WHERE status IN ({marks}) "
+            f"AND COALESCE(updated_at, created_at) < {cutoff}",
+            TRANSIENT_RUN_STATUSES)
+        ids = [r[0] for r in cur.fetchall()]
+        if ids:
+            id_marks = ",".join([ph] * len(ids))
+            cur.execute(
+                f"UPDATE pipeline_runs SET status = 'needs_attention', "
+                f"trust_gate = 'NEEDS-ATTENTION' WHERE id IN ({id_marks})", tuple(ids))
+            conn.commit()
+        return ids
+    finally:
+        conn.close()
+
+
 def clear_stale_topics():
     """Reset pending_topics rows stuck in 'running' for more than 1 hour back to 'queued'.
 
