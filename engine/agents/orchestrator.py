@@ -801,21 +801,51 @@ def _provider_from_err(err):
     return "Unknown provider"
 
 
+def _pause_cause(err):
+    """(short cause, what the owner should do) for a mid-spine provider failure.
+
+    The message used to say "is out of credit or unreachable" for EVERY pause.
+    That is the most alarming thing it could say and it was usually wrong: a
+    529 overload — Anthropic's servers being busy for a few seconds, needing
+    nothing from anyone — read as a billing emergency. It sent a reader to check
+    the account balance instead of just waiting.
+    """
+    m = str(err).lower()
+    if "overloaded" in m or "529" in m:
+        return ("temporarily overloaded",
+                "Nothing to do — the provider is busy and the work retries on its own.")
+    if any(k in m for k in ("credit", "balance", "billing")):
+        return ("out of credit",
+                "Top up at console.anthropic.com → Billing; the work resumes after that.")
+    if "401" in m or "api_key" in m or "x-api-key" in m:
+        return ("rejecting our API key",
+                "Check the key in the service's variables — the work waits until it is valid.")
+    if any(k in m for k in ("quota", "resource_exhausted", "rate limit", "429")):
+        return ("rate-limited or out of quota",
+                "It resumes when the window resets; no action needed unless it repeats.")
+    if any(k in m for k in ("timeout", "timed out", "deadline")):
+        return ("not responding in time",
+                "Usually transient — the work retries on its own.")
+    return ("unreachable", "The work retries on its own; check the provider if it repeats.")
+
+
 def _pause_run(run_id, label, err):
     """A provider went down mid-spine. Drop the half-finished run and let the
-    caller re-queue the work, so it resumes when credit returns — never lost,
-    never run on a substitute engine."""
+    caller re-queue the work, so it resumes — never lost, never run on a
+    substitute engine."""
     provider = _provider_from_err(err)
+    cause, advice = _pause_cause(err)
     if run_id is not None:
         update_run(run_id, status="dropped", trust_gate="PAUSED")
     _notify_card(
-        "⏸", f"Paused — {provider} unavailable",
-        body=(f"<b>{_esc(label)}</b>\n\n<b>{provider}</b> is out of credit or unreachable. "
-              f"The run paused and the work went back in the queue. It resumes "
-              f"automatically when {provider} is back — nothing was lost.\n\n"
+        "⏸", f"Paused — {provider} {cause}",
+        body=(f"<b>{_esc(label)}</b>\n\n<b>{provider}</b> is {cause}. "
+              f"The run paused and the work went back in the queue — nothing was lost.\n\n"
+              f"{_esc(advice)}\n\n"
               f"<i>{_esc(str(err)[:200])}</i>"),
+        run_id=run_id,
     )
-    log.warning("Paused run #%s — %s (%s): %s", run_id, provider, label, err)
+    log.warning("Paused run #%s — %s %s (%s): %s", run_id, provider, cause, label, err)
 
 
 def _published_context(days=45, header="RECENTLY PUBLISHED (do not repeat these):"):
