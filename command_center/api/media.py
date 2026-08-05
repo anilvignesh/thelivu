@@ -41,7 +41,8 @@ def list_carousels(request, data):
     lq.search("r.throughline", "cr.caption")
     r = db.parallel(
         cars=lambda: db.q("SELECT cr.id, cr.run_id, cr.status, cr.caption, cr.ig_permalink, "
-                          "cr.dark, cr.article_url, r.throughline AS story FROM "
+                          "cr.dark, cr.article_url, cr.view_label, r.desk, "
+                          "r.throughline AS story FROM "
                           + _CAROUSEL_FROM + lq.where_sql() + lq.page_sql(),
                           lq.page_params()),
         total=lambda: db.q(lq.count_sql(_CAROUSEL_FROM), tuple(lq.params))[0]["n"],
@@ -84,9 +85,22 @@ def make_carousel(request, data):
     url = f"{base}/a/{run['slug']}" if base and run.get("slug") else ""
     queue_carousel_run(rid, article_url=url)
     b = breaker_state()
+    # The belief desks compose on the free NVIDIA model, exactly as the news desk
+    # does — so the paid breaker being open does not stop either of them. The
+    # warning stays because a missing NVIDIA key lands you in the same place, and
+    # ./attend carousel is the answer to both.
     note = ("Queued — but composing needs a model and the breaker is open "
             f"({b['reason']}). Build it attended: ./attend carousel <id>."
             if b["open"] else "Queued — it composes on the next tick (~2 min).")
+    from engine.desks.ek import carousel as ek_carousel
+    if ek_carousel.is_belief(run.get("desk")):
+        from shared.db import get_belief
+        belief = get_belief(rid) or {}
+        note += (f" {ek_carousel.SERIES_NAME.get((run['desk'] or '').lower(), '')} piece"
+                 + (" — every slide will carry the "
+                    f"“{ek_carousel.REEL_VIEW_LABEL}” marker."
+                    if ek_carousel.slide_label(belief, run.get("draft_text") or "")
+                    else "."))
     return J({"ok": True, "note": note})
 
 

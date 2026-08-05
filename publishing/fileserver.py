@@ -119,8 +119,12 @@ def _make_handler(slides_dir):
                             slide_stamp = d["stamp"] if pos == 1 else f"{pos}/{d['total']}"
                             # out path keeps the requested extension → PIL saves PNG
                             # or JPEG accordingly (Image.save infers from extension).
+                            # view_label is the belief desks' shape-B marker and
+                            # rides on EVERY slide — dropping it here would strip
+                            # it from the image Instagram actually fetches.
                             render_dossier_slide(d["headline"], stamp=slide_stamp,
-                                                 dark=d["dark"], out=str(path))
+                                                 dark=d["dark"], out=str(path),
+                                                 label=d.get("view_label") or "")
                             log.info("On-demand rendered %s", name)
                     except Exception as e:
                         log.error("On-demand slide render failed for %r: %s", name, e)

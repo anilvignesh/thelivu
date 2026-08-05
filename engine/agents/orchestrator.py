@@ -2404,16 +2404,24 @@ def _parse_carousel_fields(text):
 
 def process_queued_carousels():
     """Pick up carousels queued by an article approval (carousel_runs status
-    'queued'), compose the slide breakdown via Claude (carousel-composer),
-    render each slide, send the set to the owner's draft chat as one Telegram
-    album plus an Approve/Kill message. Cheap no-op when nothing's queued.
-    Mirrors process_recheck_requests."""
+    'queued'), compose the slide breakdown, render each slide, send the set to the
+    owner's draft chat as one Telegram album plus an Approve/Kill message. Cheap
+    no-op when nothing's queued. Mirrors process_recheck_requests.
+
+    Both desks come through here. A belief piece differs in three ways and no
+    more — a composer that opens on the belief instead of a lede, a fixed series
+    stamp, and the shape-B view marker on every slide — all decided in
+    engine/desks/ek/carousel.py, so this stays ONE path. The reason it can is
+    that `draft.to_markdown` writes a belief piece's page in the same house
+    markdown a news piece uses; the composer, the renderer, the fileserver and
+    the post path never learn there are two desks."""
     from shared.config import REPO_ROOT, SLIDE_SERVER_BASE_URL
     from shared.db import (
         get_queued_carousel_runs, update_carousel_run, add_carousel_slide,
-        clear_carousel_slides, get_run,
+        clear_carousel_slides, get_run, get_belief,
     )
     from publishing.slides import render_dossier_slide
+    from engine.desks.ek import carousel as ek_carousel
 
     for carousel in get_queued_carousel_runs():
         carousel_id = carousel["id"]
@@ -2423,13 +2431,37 @@ def process_queued_carousels():
             update_carousel_run(carousel_id, status="failed")
             continue
 
+        desk = (run.get("desk") or "news").lower()
+        belief = None
+        if ek_carousel.is_belief(desk):
+            # `or {}` on purpose: the desk stamp is what decides which composer
+            # runs, not whether the side table has a row. A belief run whose
+            # belief_pieces row is missing must still get the belief composer —
+            # falling back to the news one would silently open the set on a lede.
+            belief = get_belief(run["id"]) or {}
+            if not belief:
+                log.warning("Carousel #%s: run #%s is a %s piece with no belief_pieces "
+                            "row — composing from the page alone", carousel_id, run["id"], desk)
+        # "" for a news piece and for shape A; the fixed four-word marker for a
+        # contested frame, on every slide. See ek_carousel.slide_label.
+        view_label = ek_carousel.slide_label(belief, run["draft_text"])
+
         update_carousel_run(carousel_id, status="composing")
         try:
+            skill = ek_carousel.composer_skill(desk)
+            composer_input = (ek_carousel.composer_input(run, belief) if belief is not None
+                              else run["draft_text"])
             composed = run_structured_skill(
-                "carousel-composer", run["draft_text"], marker=_M_CAROUSEL, run_id=carousel["run_id"])
+                skill, composer_input, marker=_M_CAROUSEL, run_id=carousel["run_id"])
             dark, stamp, slide_texts, story_tags = _parse_carousel_fields(composed)
             if not slide_texts:
-                raise ValueError("carousel-composer returned no SLIDE lines")
+                raise ValueError(f"{skill} returned no SLIDE lines")
+            # On the belief desks slide 1's stamp names the series and is not the
+            # composer's to write — furniture that changes per piece teaches a
+            # reader nothing, and VERIFIED is the wrong word on a desk whose
+            # headline claim is the thing being corrected.
+            if belief is not None:
+                stamp = ek_carousel.slide_stamp(desk, stamp)
 
             out_dir = REPO_ROOT / "articles" / "slides"
             out_dir.mkdir(parents=True, exist_ok=True)
@@ -2442,7 +2474,8 @@ def process_queued_carousels():
                 # persistent internal error 2207085 on PNG carousels; JPEG is the
                 # format IG officially wants and re-encodes to anyway.
                 out_path = str(out_dir / f"carousel_{carousel_id}_{i}.jpg")
-                render_dossier_slide(headline, stamp=slide_stamp, dark=dark, out=out_path)
+                render_dossier_slide(headline, stamp=slide_stamp, dark=dark,
+                                     out=out_path, label=view_label)
                 image_url = (
                     f"{SLIDE_SERVER_BASE_URL.rstrip('/')}/carousel_{carousel_id}_{i}.jpg"
                     if SLIDE_SERVER_BASE_URL else ""
@@ -2451,17 +2484,22 @@ def process_queued_carousels():
                 image_urls.append((out_path, image_url))
 
             article_url = carousel.get("article_url") or ""
-            caption_bits = [run.get("throughline") or ""]
-            if article_url:
-                caption_bits.append(f"Full story & sources: {article_url}")
             hashtags = _build_hashtags(story_tags)
-            if hashtags:
-                caption_bits.append(hashtags)
-            caption = "\n\n".join(b for b in caption_bits if b)[:2200]
+            if belief is not None:
+                caption = ek_carousel.caption(run, belief, article_url, hashtags)
+            else:
+                caption_bits = [run.get("throughline") or ""]
+                if article_url:
+                    caption_bits.append(f"Full story & sources: {article_url}")
+                if hashtags:
+                    caption_bits.append(hashtags)
+                caption = "\n\n".join(b for b in caption_bits if b)[:2200]
             # Persist the style so slides can be re-rendered from the DB on demand
             # (the fileserver regenerates a missing PNG — survives redeploys/cleanup).
+            # view_label is part of that style for the same reason: a re-render
+            # that lost it would strip the marker off the image Meta fetches.
             update_carousel_run(carousel_id, caption=caption, status="pending_review",
-                                dark=dark, stamp=stamp)
+                                dark=dark, stamp=stamp, view_label=view_label)
 
             keyboard = {"inline_keyboard": [[
                 {"text": "✓ Post carousel to Instagram", "callback_data": f"carouselapprove_{carousel_id}"},

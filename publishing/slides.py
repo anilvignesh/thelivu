@@ -102,6 +102,28 @@ def _draw_dashed_line(draw, x0, x1, y, fill, dash=14, gap=10, width=2):
         x += dash + gap
 
 
+def _draw_view_pill(draw, text, x, y, accent, size=26):
+    """The belief desks' shape-B marker: an outlined pill reading
+    A VIEW FROM THE RECORD. Returns the y below it.
+
+    Deliberately NOT the rubber stamp above. The stamp is rotated, letter-spaced
+    and says VERIFIED — it asserts something about the story's standing, and a
+    marker that says "this part is argued" must not borrow that authority. It is
+    the same rounded-outline device the reel uses for the same words
+    (`publishing/reel.py::_draw_view_label`), reimplemented here rather than
+    imported because the two canvases are different sizes and a reel-sized pill
+    on a 1080x1350 slide would be wrong; what has to match is the LOOK, and the
+    wording, which is fixed in engine/desks/ek/draft.py.
+    """
+    font = _font(MONO_BOLD, size)
+    pad_x, pad_y, radius = 18, 11, 8
+    text_w = _text_w(draw, text, font)
+    draw.rounded_rectangle([x, y, x + text_w + 2 * pad_x, y + size + 2 * pad_y],
+                           radius=radius, outline=accent + (255,), width=3)
+    draw.text((x + pad_x, y + pad_y - 2), text, font=font, fill=accent + (255,))
+    return y + size + 2 * pad_y
+
+
 def _draw_stamp(canvas, draw, text, x, y, accent, mono_bold_size=24):
     """Rotated bordered stamp, top-left. Returns nothing; draws in place."""
     label = text.upper()
@@ -122,8 +144,14 @@ def _draw_stamp(canvas, draw, text, x, y, accent, mono_bold_size=24):
 
 def render_dossier_slide(headline, sub="", stamp="VERIFIED",
                           footer="Thelivu · link in bio", dark=False,
-                          out="slide.png"):
-    """Render one Dossier-style slide PNG (1080x1350) to `out`. Returns `out`."""
+                          out="slide.png", label=""):
+    """Render one Dossier-style slide PNG (1080x1350) to `out`. Returns `out`.
+
+    `label` is the belief desks' shape-B view marker. It is drawn on EVERY slide
+    it is passed to, and the caller passes it to every slide of a contested-frame
+    carousel — see engine/desks/ek/carousel.py for why a label on slide 1 alone
+    would miss exactly the reader it exists for.
+    """
     colors = PALETTE["dark"] if dark else PALETTE["light"]
     bg, fg, accent = colors["bg"], colors["fg"], colors["accent"]
 
@@ -135,6 +163,8 @@ def render_dossier_slide(headline, sub="", stamp="VERIFIED",
     if stamp:
         _draw_stamp(img, draw, stamp, PAD_X, cursor_y, accent)
         cursor_y += 90
+    if label:
+        cursor_y = _draw_view_pill(draw, label, PAD_X, cursor_y, accent) + 20
 
     # Reserve space at the bottom for sub + footer before laying out the headline,
     # so the headline never collides with them.
@@ -184,14 +214,14 @@ def render_dossier_slide(headline, sub="", stamp="VERIFIED",
 
 
 def from_draft(draft_path, stamp="VERIFIED", footer="Thelivu · link in bio",
-                dark=False, out="slide.png", headline=None, sub=None):
+                dark=False, out="slide.png", headline=None, sub=None, label=""):
     """Derive headline/sub from an article draft's title/hook and render."""
     md = Path(draft_path).read_text(encoding="utf-8")
     article = parse_article(md)
     return render_dossier_slide(
         headline=headline or article.title,
         sub=sub if sub is not None else article.hook,
-        stamp=stamp, footer=footer, dark=dark, out=out,
+        stamp=stamp, footer=footer, dark=dark, out=out, label=label,
     )
 
 
@@ -205,16 +235,19 @@ def main():
                      help='top-left stamp text, e.g. "VERIFIED", "FACT vs ALLEGATION" (empty string hides it)')
     ap.add_argument("--footer", default="Thelivu · link in bio")
     ap.add_argument("--dark", action="store_true", help="use the dark-kraft variant")
+    ap.add_argument("--label", default="",
+                     help='shape-B view marker, e.g. "A VIEW FROM THE RECORD" (belief desks)')
     ap.add_argument("--out", default="slide.png")
     args = ap.parse_args()
 
     if args.draft:
         out = from_draft(args.draft, stamp=args.stamp, footer=args.footer,
                           dark=args.dark, out=args.out,
-                          headline=args.headline, sub=args.sub)
+                          headline=args.headline, sub=args.sub, label=args.label)
     elif args.headline:
         out = render_dossier_slide(args.headline, sub=args.sub or "", stamp=args.stamp,
-                                    footer=args.footer, dark=args.dark, out=args.out)
+                                    footer=args.footer, dark=args.dark, out=args.out,
+                                    label=args.label)
     else:
         sys.exit("Provide --draft or --headline.")
 

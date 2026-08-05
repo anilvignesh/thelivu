@@ -818,9 +818,12 @@ async function vCarousels(main) {
 function renderCarousels(list, d) {
   const actionable = ['pending_review', 'queued', 'composing', 'approved_manual', 'failed'];
   for (const c of d.carousels) {
+    /* The view marker is shown on the card because it is a claim the SLIDES make
+       about the piece — if it is on the images, the owner has to be able to see
+       that it is, without opening one. */
     const card = el(`<div class="item">
       <div class="row between"><div>
-        <span class="id">🖼 #${c.id}</span> · run #${c.run_id} — ${esc((c.story || '').slice(0, 80))}
+        <span class="id">🖼 #${c.id}</span> · run #${c.run_id} — ${esc((c.story || '').slice(0, 80))}${deskBadge(c.desk)}${c.view_label ? ` <span class="badge">${esc(c.view_label)}</span>` : ''}
       </div>${pill(c.status)}</div>
       <div class="slides" data-x="slides"></div>
       <div data-x="warn"></div>

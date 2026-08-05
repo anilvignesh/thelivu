@@ -526,8 +526,14 @@ def init_db():
                     conn.commit()
                 except Exception:
                     conn.rollback()  # column already exists
+            # `view_label` is the belief desks' shape-B marker. It lives on the
+            # carousel_run, not only in the rendered file, because the fileserver
+            # RE-RENDERS a slide from the DB on demand (and on ?fresh=1 after an
+            # owner edits a headline) — a label that existed only in the first
+            # render would quietly vanish from the image Meta actually fetches.
             for col, defn in [("files_cleaned_at", "TIMESTAMP"),
-                              ("dark", "BOOLEAN DEFAULT FALSE"), ("stamp", "TEXT")]:
+                              ("dark", "BOOLEAN DEFAULT FALSE"), ("stamp", "TEXT"),
+                              ("view_label", "TEXT")]:
                 try:
                     cur.execute(f"ALTER TABLE carousel_runs ADD COLUMN {col} {defn}")
                     conn.commit()
@@ -568,7 +574,8 @@ def init_db():
                 except Exception:
                     pass
             for col, defn in [("files_cleaned_at", "TEXT"),
-                              ("dark", "INTEGER DEFAULT 0"), ("stamp", "TEXT")]:
+                              ("dark", "INTEGER DEFAULT 0"), ("stamp", "TEXT"),
+                              ("view_label", "TEXT")]:
                 try:
                     cur.execute(f"ALTER TABLE carousel_runs ADD COLUMN {col} {defn}")
                 except Exception:
@@ -1775,8 +1782,12 @@ def update_reel(reel_id, **kwargs):
 def get_slide_render_data(carousel_id, position):
     """Everything needed to re-render one carousel slide from the DB, so rendered
     PNGs never have to survive a redeploy. Returns {headline, position, total,
-    dark, stamp} or None. Style defaults gracefully for carousels composed before
-    dark/stamp were persisted."""
+    dark, stamp, view_label} or None. Style defaults gracefully for carousels
+    composed before dark/stamp/view_label were persisted.
+
+    `view_label` matters more than the other two: it is the belief desks'
+    shape-B marker, and a re-render that dropped it would strip the one thing on
+    the slide that says the frame is argued."""
     conn = _conn()
     try:
         cur = conn.cursor()
@@ -1789,10 +1800,12 @@ def get_slide_render_data(carousel_id, position):
         headline = row["headline"]
         cur.execute(f"SELECT COUNT(*) AS n FROM carousel_slides WHERE carousel_id={ph}", (carousel_id,))
         total = (_fetchone(cur) or {}).get("n", 1)
-        cur.execute(f"SELECT dark, stamp FROM carousel_runs WHERE id={ph}", (carousel_id,))
+        cur.execute(f"SELECT dark, stamp, view_label FROM carousel_runs WHERE id={ph}",
+                    (carousel_id,))
         cr = _fetchone(cur) or {}
         return {"headline": headline, "position": position, "total": total,
-                "dark": bool(cr.get("dark")), "stamp": (cr.get("stamp") or "VERIFIED")}
+                "dark": bool(cr.get("dark")), "stamp": (cr.get("stamp") or "VERIFIED"),
+                "view_label": cr.get("view_label") or ""}
     finally:
         conn.close()
 

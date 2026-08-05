@@ -268,7 +268,13 @@ _BELIEF_CLAUDE_SKILLS = {"ek:record-verifier", "ek:explainer-writer",
 # so a cheaper model here never touches journalism, research, or the trust gate.
 # Owner's rule (2026-07-26): research → Gemini, writing/editorial/gates → Claude (the
 # best, no compromise); ONLY carousel + video ride on NVIDIA Gemma.
-_NVIDIA_SKILLS = {"carousel-composer", "video-script"}
+# The belief desks' slide composer sits here for exactly the same reason as the
+# news one: it sequences a page that is already verified, reviewed and approved,
+# and it may not add a word the page does not contain. It is a formatting step on
+# a finished piece, not a judgment about one. (The belief desks' reel needs no
+# equivalent — its narration is copied from the verified spine, so there is no
+# script skill at all; see publishing/belief_reel.py.)
+_NVIDIA_SKILLS = {"carousel-composer", "video-script", "ek:carousel-composer"}
 
 # TRIAGE — still Claude, but Haiku 4.5 ($1/$5 vs $3/$15). These skills sift and
 # select against a strict output contract: they don't write prose, don't reason
