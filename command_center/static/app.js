@@ -901,8 +901,19 @@ function renderCarousels(list, d) {
 async function makeReelFlow(rid, opts = {}) {
   const remake = !!opts.remake;
   /* The voice picker appears only when there is more than one voice to pick —
-     a control with a single option is furniture. state.voices is filled by the
-     Reels view; absent (arrived from elsewhere), the engine default narrates. */
+     a control with a single option is furniture. The roster is fetched here
+     rather than inherited from the Reels view: "Make reel" is reached from a
+     published story's drawer at least as often as from Reels, and a picker that
+     renders on only one of those paths reads as a missing feature, not a
+     default. A failed fetch is deliberately left uncached so the next open
+     retries instead of hiding the control for the rest of the session. */
+  if (!state.voices) {
+    try {
+      const s = await api('/system');
+      state.voices = s.reel_voices || [];
+      state.voiceDefault = s.reel_voice || '';
+    } catch (e) { /* no picker this time; the engine default narrates */ }
+  }
   const voices = state.voices || [];
   const voicePick = voices.length > 1
     ? `<label class="f">Voice</label><select data-x="voice">${voices.map(v =>
@@ -1516,13 +1527,30 @@ async function vSystem(main) {
     rbox.appendChild(el(`<details><summary class="muted small">Full brief</summary><pre class="small" style="white-space:pre-wrap">${esc(sw.brief)}</pre></details>`));
   main.appendChild(st);
 
+  /* Two separate things in one card: whether the server is running, and who it
+     speaks as. The roster is only worth showing when there is a choice in it. */
+  const rv = d.reel_voices || [];
   const vc = el(`<div class="card"><b>Voice server (:3901):</b> ${d.voice_up ? '<span style="color:var(--good)">up</span>' : '<span style="color:var(--brick)">down</span>'}
     <span class="muted small">— Chatterbox holds ~2 GB RAM; stop it when idle.</span>
-    <div class="actions" data-x="a"></div></div>`);
+    <div class="actions" data-x="a"></div>
+    ${rv.length > 1 ? `<div class="muted small" style="margin-top:10px">Default reel voice — every reel unless the Make reel modal overrides it.</div>
+    <div class="actions" data-x="v"><select data-x="voice">${rv.map(v =>
+      `<option value="${esc(v)}"${v === d.reel_voice ? ' selected' : ''}>${esc(v)}</option>`).join('')}</select></div>` : ''}
+    </div>`);
   addBtn(vc.querySelector('[data-x=a]'), d.voice_up ? '⏹ Stop' : '▶ Start', '', async () => {
     const r = await api('/system/voice', { method: 'POST', body: { action: d.voice_up ? 'stop' : 'start' } });
     toast(r.up ? 'Voice server up.' : 'Voice server stopped.', 'ok'); route();
   });
+  if (rv.length > 1)
+    addBtn(vc.querySelector('[data-x=v]'), 'Set default', 'small', async () => {
+      const name = vc.querySelector('[data-x=voice]').value;
+      const r = await api('/system/voice-default', { method: 'POST', body: { voice: name } });
+      toast(r.note, 'ok');
+      /* The make-reel modal caches the roster for the session — drop it, or the
+         next Build reel opens preselected on the voice we just replaced. */
+      state.voices = null; state.voiceDefault = '';
+      route();
+    });
   main.appendChild(vc);
 
   main.appendChild(el(`<div class="eyebrow">Scheduled jobs — triggers are signals the 2-min tick reads</div>`));
