@@ -93,6 +93,47 @@ production** — nothing has been deployed.
 
 ---
 
+## The cached span was billed at zero (2026-08-05)
+
+Chasing where `news-investigator`'s ~136k input tokens per call were going turned
+up something bigger than a routing question. **`response.usage.input_tokens` is
+the uncached remainder, not the prompt size** — the real prompt is
+`input + cache_creation + cache_read`. `skill_runner` recorded only the first and
+discarded the other two, which meant the `cache_control` markers it already sets
+were invisible in the accounting, and a cache **write** — which bills at 1.25x
+the input rate — contributed nothing to any total. `daily_spend_usd`, the number
+the budget governor reads to enforce the daily cap, was reading that same low
+figure.
+
+`token_usage` gains `cache_write_tokens` / `cache_read_tokens`; `cost_usd` takes
+them as optional trailing args at 1.25x write / 0.10x read of the tier's input
+rate, so all nine existing three-arg call sites keep their old meaning. The
+governor, the steward's view, the cost report and the command centre's panel all
+count them now — those four must not disagree about what a day cost.
+
+**Historical rows cannot be backfilled.** The provider reported those counters
+and we discarded them, so all-time spend before 2026-08-05 (~$70 / ₹5,900 over
+1,866 calls) is a **floor**, not the true figure.
+
+What the same dig established, and what is still open:
+
+- **The 2026-07-26 Haiku routing worked.** `news-monitor` 192 Sonnet calls end
+  2026-07-21 and 26 Haiku calls begin 2026-07-28; `topic-intake` 53 → 9;
+  `newsworthiness-gate` 157 → 33. The large Sonnet numbers in the all-time table
+  are pre-fix history, not a live leak — there is nothing left to move there.
+- **`news-investigator` is the real remaining lever** — 39 calls at ~136k input
+  tokens each, the single largest line, and correctly untouched by the Haiku
+  routing because it is journalism, not triage.
+- The engine runs **5.7:1 input to output** (16.7M / 2.9M), so prompt size and
+  cache hit rate dominate, not output length.
+- **Sonnet 5's intro pricing ($2/$10 vs $3/$15) expires 2026-08-31**, and the
+  standing cost-control decision is to revisit Sonnet 4.6 on **2026-09-01** —
+  after the window shuts. Note also that Sonnet 5's tokenizer produces ~30% more
+  tokens for the same text, so per-token parity is not cost parity. If the
+  benchmark is wanted at intro pricing it has to happen before 08-31.
+
+---
+
 ## Closing the belief desks' open four (2026-08-05)
 
 Three commits, on `main`, **not pushed** — pushing auto-deploys, and the deploy
