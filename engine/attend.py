@@ -2,6 +2,7 @@
 
     ./attend status              what's parked, and what the breaker says
     ./attend cycle               run the full RSS cycle attended
+    ./attend belief              take one approved belief to the gate
     ./attend topic "<text>"      run one topic through the spine attended
     ./attend clear               close the breaker early (after a top-up)
 
@@ -120,6 +121,42 @@ def cmd_cycle(_args):
     _preamble("full RSS cycle")
     from engine.agents.orchestrator import run_daily_cycle
     run_daily_cycle()
+    _postamble()
+
+
+def cmd_belief(_args):
+    """Take one approved belief to the human gate, attended.
+
+    The belief desk stands down whenever the news desk has spent 55% of the
+    daily cap — correct when the money is shared, and the reason the cadence can
+    sit idle for days on a busy news week. Attended work spends nothing, so that
+    check does not apply here (see shared/budget.attended_mode) and the desk can
+    run on a day the automated cadence would skip.
+
+    The cadence stamp is restored afterwards. run_belief_cycle() stamps it on
+    every run, which is right for the scheduled path and wrong here: this is an
+    EXTRA piece the owner asked for by hand, and letting it move the stamp would
+    silently delay the next automated run by the full cadence — you would pay for
+    an attended piece with a scheduled one you never saw skipped.
+    """
+    from engine.desks.ek.scout import run_belief_cycle, LAST_RUN_KEY
+    from shared.db import list_belief_queue, kv_get, kv_set
+
+    approved = list_belief_queue(status="approved", limit=1)
+    if not approved:
+        sys.exit("nothing approved in the belief queue — approve one in the command "
+                 "centre (Beliefs), or add one with a note, then re-run this.")
+    print(f"  next up: {(approved[0].get('belief') or '')[:100]}")
+    _preamble("belief desk — one approved belief")
+    before = kv_get(LAST_RUN_KEY)
+    try:
+        result = run_belief_cycle()
+    finally:
+        # try/finally: a crash mid-run must not leave the cadence pushed out either.
+        if before is not None and kv_get(LAST_RUN_KEY) != before:
+            kv_set(LAST_RUN_KEY, before)
+            print("  (cadence stamp restored — the scheduled run is not delayed)")
+    print(f"\n  result: {result}")
     _postamble()
 
 
@@ -248,6 +285,8 @@ def main():
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("status", help="what's parked and what the breaker says").set_defaults(fn=cmd_status)
     sub.add_parser("cycle", help="run the full RSS cycle attended").set_defaults(fn=cmd_cycle)
+    sub.add_parser("belief", help="take one approved belief to the gate attended"
+                   ).set_defaults(fn=cmd_belief)
     t = sub.add_parser("topic", help="run one topic through the spine attended")
     t.add_argument("text", nargs="+")
     t.set_defaults(fn=cmd_topic)
