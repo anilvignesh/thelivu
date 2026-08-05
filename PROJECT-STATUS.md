@@ -83,10 +83,59 @@ Editorial ruling on `gandhi-surname`: either lane is acceptable (`expect` is a
 list now), `DROP` is not. Binning a true, believed, checkable claim is the one
 thing the consequence floor must never do.
 
-**Still open:** no carousel from a belief piece; a single FLUX refusal drops a
-whole reel to text slides (reel #27, covert-action imagery — a class of subject
-this desk will keep hitting); the cadence has never fired unattended on Railway;
-the scout has not run against the live web.
+**Two of the four are closed (2026-08-05).** A belief piece can now become a
+carousel, and one refused illustration no longer costs a reel its look — see
+"Closing the belief desks' open four" below.
+
+**Still open:** the cadence has never fired unattended on Railway; the scout has
+not run against the live web. Both are code-hardened and tested but **unproven in
+production** — nothing has been deployed.
+
+---
+
+## Closing the belief desks' open four (2026-08-05)
+
+Three commits, on `main`, **not pushed** — pushing auto-deploys, and the deploy
+is the owner's call.
+
+**A belief piece can become a carousel** (`c33a69a`). One path, both desks. A
+belief piece differs in three ways and no more — a composer that opens on the
+belief instead of a lede, a fixed series stamp, and the shape-B view marker on
+every slide — all decided in `engine/desks/ek/carousel.py`. The composer,
+renderer, fileserver and post path never learn there are two desks, because
+`draft.to_markdown` already writes a belief page in the same house markdown a
+news piece uses. That was the whole payoff of splitting the spine off the page.
+
+`view_label` is persisted on `carousel_runs` rather than baked into the first
+render only: the fileserver **re-renders slides from the DB** on demand (and on
+`?fresh=1` after a headline edit), so a label living only in the render would
+quietly vanish from the image Meta actually fetches. The suite tests the
+re-render path for exactly this. `ek:carousel-composer` rides the free NVIDIA
+tier for the same reason the news one does — it sequences an already-verified
+page and may not add a word it does not contain.
+
+**One refused illustration no longer costs the whole look** (`2545cc9`). A
+single FLUX refusal used to drop the entire reel to text slides. One beat now
+falls back to a **house ground** — an ink-dark inked field, in palette (mean
+luminance ~30; stddev ~10, so it has tooth rather than reading as a failed
+render), deterministic per beat so a rebuild is stable, drawn through
+`draw_illustrated_frame` like any other illustration. **More than one refusal
+still falls back to text slides whole:** past the exception an inked field stops
+reading as a beat that chose texture, and the honest product is the consistent
+text reel. The story text is never touched. 23/23 in
+`publishing/tests/run_illustration_cases.py`.
+
+**The cadence and scout are hardened but not proven** (`00d4253`).
+`validate_candidate` now enforces the two conditions the skill calls mandatory
+and rejects what the model actually emits when it drifts: a truncated response,
+a template echo, too short, a paragraph instead of a candidate, no record, no
+currency. A cut-off block is rejected while its complete sibling passes, so one
+bad half does not discard a good one. **The live-web scout run and the
+unattended Railway cadence observation did not happen** — both remain open.
+
+Suites: `publishing.tests.run_illustration_cases` (23/23),
+`engine.desks.ek.tests.run_carousel_cases`, `.run_cadence_cases`, and the
+pre-existing `.run_caption_cases` (15/15, unregressed).
 
 ---
 
