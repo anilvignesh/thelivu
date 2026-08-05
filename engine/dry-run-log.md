@@ -20,3 +20,4 @@ two "did it catch" columns and the "did YOU catch what it missed" column.
 - Decision: [ automate / run another validation week / tune and retest ]
 - Rules encoded this week:
   -
+| 2026-08-05 | run #154 | READY-FOR-HUMAN | See 2026-08-05-report.md | See 2026-08-05-report.md | | | |
