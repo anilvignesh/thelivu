@@ -93,6 +93,64 @@ production** — nothing has been deployed.
 
 ---
 
+## Nothing lives only in Telegram, and the CAG story was never rejected (2026-08-05)
+
+**Owner's rule:** the dashboard has everything; no story may be visible only in
+Telegram. Nineteen `_notify_card` sites — dropped leads, halted runs, gate
+decisions, source-scout results, steward sweeps, meta-synthesis — wrote to no
+table at all. The capture now sits **in `_notify_card` itself**, not at the call
+sites, so every future card is recorded by construction.
+
+**The write happens before the Telegram post.** That was the half of the bug that
+was easy to miss: an outage or a bad token did not delay a notice, it destroyed
+the only copy. A test makes `_tg_post` raise and asserts the event survives.
+Full report bodies live in `engine_events.report` and open **inline** in the CC's
+new Events panel — Telegraph is on a domain the owner's ISP blocks, so an
+off-site link is not a delivery mechanism here.
+
+**The 2026-08-04 CAG topic was never an editorial decline.** `topic-intake`
+returned no valid marker, retried 20s later, failed again, and raised. The
+`token_usage` signature shows it exactly: two `topic-intake` calls and no
+`newsworthiness-gate` call after them. Re-running the same topic returns
+**PROCEED** — "in scope: yes", "worth it: yes, impact high" — and the brief names
+₹54,282.32 crore in pending utilisation certificates across 15 ministries.
+
+It was invisible for a second reason: `_halt_run` titles its card
+`Run #{run_id} halted`, and a topic dying inside intake has no run, so the owner
+got **"Run #None halted at topic-intake"** — a card naming neither the topic nor
+anything he could recognise as his own submission. `_halt_run` now takes
+`subject`. The topic was re-queued and is **run #150**, `outcome='investigating'`.
+
+**Proven in production, not just in tests:** `pending_topics` #48 carries
+`outcome`, `reason`, `run_id` and `decided_at`; #47 sits beside it with all four
+null — the honest "unknown" for pre-fix rows.
+
+**Sonnet 5 vs 4.6 — the tokenizer eats the intro discount.** Measured with
+`count_tokens` on the same file: **2,428 tokens on Sonnet 4.6 vs 3,265 on
+Sonnet 5, a 1.345x inflation.** Net cost for identical work:
+
+| | relative | |
+|---|---|---|
+| Sonnet 4.6 ($3/$15) | 1.000 | baseline |
+| Sonnet 5 intro ($2/$10, to 2026-08-31) | 0.896 | 10.4% cheaper |
+| Sonnet 5 standard ($3/$15, from 09-01) | 1.345 | **34.5% dearer** |
+
+The steward's "33% cheaper on input" compares per-token rates and ignores the
+tokenizer. The real intro saving is ~10%, and on 2026-09-01 the same work costs
+~34% **more**. **There is no cheap window worth racing to**, so the standing
+"revisit 2026-09-01" date is fine after all. Switch only if quality justifies a
+permanent ~34% rise.
+
+**Open, with a caveat worth watching:** across 13 recorded calls the new counters
+show ~26k cache **writes and zero reads**. That is expected when each skill is
+called once per cycle (every call is a first call, and a write bills at 1.25x),
+and the payoff only lands when the same skill repeats inside the 5-minute window
+— the article-writer / editorial-reviewer revision loop. If reads stay at zero
+over a larger sample, the caching is costing 1.25x for nothing and the
+breakpoints need rethinking rather than keeping.
+
+---
+
 ## The cached span was billed at zero (2026-08-05)
 
 Chasing where `news-investigator`'s ~136k input tokens per call were going turned
