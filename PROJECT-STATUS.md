@@ -23,6 +23,75 @@ chat. To bootstrap it:
 
 ---
 
+## The desks alternate now — the belief desk had never once run (2026-08-08)
+
+The cadence was not broken and the code was not wrong. **The belief desk was
+being asked a question whose answer was always no.** `BUDGET_HEADROOM = 0.55`
+stood the desk down once 55% of the daily cap was spent, and `run.py` ran the
+belief block *after* the RSS cycle so that check would read a spend figure
+including the day's news work. Each half is defensible. Together they are
+unsatisfiable: the news cycle fires at ~00:02 UTC and clears 55¢ of the $1.00 cap
+in its first pass, so the desk was asked only once the answer was already no —
+and a day's spend never goes back down.
+
+Production kv said so plainly, and nobody had read it:
+
+```
+last_belief_cycle_result = "skipped: $0.57 of the $1.00 cap already spent
+                            — the news desk has the prior claim on it"
+last_belief_run_at       = 2026-08-01T05:22:56Z
+```
+
+Daily spend recomputed from `token_usage`: **$1.07, $1.28, $0.56, $1.02, $1.14,
+$1.32, $0.86, $0.57** across 08-01 to 08-08. The desk needed a day under $0.55
+and there wasn't one — including 08-03, which missed by a cent. Belief #3
+(Koh-i-Noor) had sat `approved` with `run_id: null` since the 08-05 event card
+*"Belief cadence armed for its first unattended run."* It was armed. It never had
+a day to fire in. **An unsatisfiable priority test is not a priority rule, it is
+an off switch.**
+
+**The desks alternate** (`docs/alternating-desks.md`, owner's call). On its turn
+the belief desk goes **first** — the block moved above the RSS cycle — so it
+meets a fresh $0.00 cap and spends its ~$0.15 before the news desk starts. News
+publishes every day and runs second with ~$0.85 of the cap. On a news day
+`cycle_due` is false and the moved block is a no-op, so news behaviour is
+unchanged. Cadence default 3 → **2**.
+
+That is turn-taking, not calendar parity: a turn missed to a restart or a
+genuinely spent day leaves the desk due, so it takes the next available day
+rather than waiting out another full cycle.
+
+**`BUDGET_HEADROOM` stays at 0.55 and keeps a narrower job** — a `force_belief_run`
+tapped at 3pm on a spent day, and a turn day whose engine only came up at 20:00.
+A stand-down does not stamp `LAST_RUN_KEY`, so the turn carries to tomorrow; the
+suite asserts exactly that, because stamping there would consume a turn without
+producing a piece and reintroduce the same silence more slowly.
+
+**The turn had to stop being counted in seconds.** `cycle_due` compared elapsed
+time against `days * 86400`, which on a 2-day cadence loses every other turn to a
+rounding margin: a run stamped Mon 00:03:10 is 47h58m50s old at the Wed 00:02
+tick — not due — so the RSS cycle starts, spends past the headroom, and the desk
+stands down **on its own turn day**, wearing a budget excuse indistinguishable
+from the bug being fixed. Whole-day cadences now compare **UTC dates**, putting
+the turn boundary on the same midnight the news cycle keys off. Sub-day cadences
+(`MIN_CADENCE_DAYS = 0.5`) have no whole-date expression and keep the elapsed
+path. Verified against the old arithmetic: `False` then, `True` now.
+
+The command centre shows whose turn it is (`turn_today` / `next_turn` from
+`next_turn_utc`), because "the desk is quiet" has two meanings and `last_run_at`
+alone cannot tell them apart. Suite: `engine.desks.ek.tests.run_cadence_cases`,
+now with the turn-boundary and stand-down cases; caption (15/15) and carousel
+cases unregressed.
+
+**Still open here:** the desk has still never completed an unattended run — this
+change gives it the first day it can. Separately, `ek:belief-scout` has run
+exactly once (3 calls, 2026-08-05) and added **zero** rows; all four
+`belief_queue` entries are `source='owner'`. Whatever it emitted did not survive
+`validate_candidate`, and **no event card was written for the run** — a silent
+scout breaks the nothing-lives-only-in-Telegram rule.
+
+---
+
 ## The belief desks are finished (2026-08-04)
 
 All six phases of `docs/everyone-knows-desk.md` §9 are done. **Everyone Knows**
@@ -90,6 +159,10 @@ carousel, and one refused illustration no longer costs a reel its look — see
 **Still open:** the cadence has never fired unattended on Railway; the scout has
 not run against the live web. Both are code-hardened and tested but **unproven in
 production** — nothing has been deployed.
+
+*(2026-08-08: both diagnosed. The cadence fired every tick and stood down on
+budget every time — see "The desks alternate now" above. The scout did run, once,
+and produced nothing.)*
 
 ---
 

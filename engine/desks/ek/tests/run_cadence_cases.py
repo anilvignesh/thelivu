@@ -32,7 +32,7 @@ from datetime import datetime, timedelta, timezone   # noqa: E402
 
 from engine.desks.ek import scout                     # noqa: E402
 from shared import budget                             # noqa: E402
-from shared.db import (add_belief_candidate, init_db, kv_set,      # noqa: E402
+from shared.db import (add_belief_candidate, init_db, kv_get, kv_set,   # noqa: E402
                        list_belief_queue, set_belief_status)
 
 NOW = datetime(2026, 8, 4, 12, 0, tzinfo=timezone.utc)
@@ -122,9 +122,9 @@ def t_parse_utc():
 def t_cadence_days():
     print("\ncadence_days — a kv value nobody validated:")
     _reset()
-    check("unset → default", scout.cadence_days(), 3)
-    for raw, want in (("5", 5.0), ("0.5", 0.5), ("", 3), ("abc", 3), ("0", 3),
-                      ("-2", 3), ("nan", 3),
+    check("unset → default (2 — the desks alternate)", scout.cadence_days(), 2)
+    for raw, want in (("5", 5.0), ("0.5", 0.5), ("", 2), ("abc", 2), ("0", 2),
+                      ("-2", 2), ("nan", 2),
                       # inf parses as a float and means "never due again"; 400
                       # days is the same bug with a straight face. Both clamp to
                       # the ceiling the command centre already enforces.
@@ -138,15 +138,64 @@ def t_cycle_due():
     _reset()
     check("never run → due", scout.cycle_due(NOW), True)
     kv_set(scout.LAST_RUN_KEY, (NOW - timedelta(days=1)).isoformat())
-    check("1 day ago, cadence 3 → not due", scout.cycle_due(NOW), False)
-    kv_set(scout.LAST_RUN_KEY, (NOW - timedelta(days=4)).isoformat())
-    check("4 days ago, cadence 3 → due", scout.cycle_due(NOW), True)
+    check("1 day ago, cadence 2 → not due", scout.cycle_due(NOW), False)
+    kv_set(scout.LAST_RUN_KEY, (NOW - timedelta(days=2)).isoformat())
+    check("2 days ago, cadence 2 → due", scout.cycle_due(NOW), True)
     kv_set(scout.LAST_RUN_KEY, (NOW - timedelta(days=4)).replace(tzinfo=None).isoformat())
     check("4 days ago, NAIVE stamp → due (was a TypeError)", scout.cycle_due(NOW), True)
     kv_set(scout.LAST_RUN_KEY, "not a date")
     check("unparseable stamp → due", scout.cycle_due(NOW), True)
     kv_set(scout.LAST_RUN_KEY, (NOW + timedelta(days=9)).isoformat())
     check("stamp in the future → due, not never", scout.cycle_due(NOW), True)
+
+
+def t_turn_boundary():
+    print("\nthe turn lands on a date, not on elapsed seconds:")
+    _reset()
+    # The case the date arithmetic exists for. On elapsed seconds this is
+    # 47h58m50s against a 48h cadence — not due — so the RSS cycle would start,
+    # spend past the headroom, and the desk would stand down on its own turn
+    # day. Every other turn, lost to ninety seconds.
+    kv_set(scout.LAST_RUN_KEY, "2026-08-03T00:03:10+00:00")
+    wed_early = datetime(2026, 8, 5, 0, 2, 0, tzinfo=timezone.utc)
+    check("stamped Mon 00:03:10, asked Wed 00:02 → due", scout.cycle_due(wed_early), True)
+
+    # ...and the boundary holds in the other direction: a turn is one per day, so
+    # a stamp from earlier the same day is not a fresh turn however long ago.
+    kv_set(scout.LAST_RUN_KEY, "2026-08-05T00:03:10+00:00")
+    wed_late = datetime(2026, 8, 5, 23, 59, 0, tzinfo=timezone.utc)
+    check("same UTC day, 23h later → not due", scout.cycle_due(wed_late), False)
+    thu = datetime(2026, 8, 6, 0, 2, 0, tzinfo=timezone.utc)
+    check("the next day is not the turn either (cadence 2)", scout.cycle_due(thu), False)
+    fri = datetime(2026, 8, 7, 0, 2, 0, tzinfo=timezone.utc)
+    check("the day after that is", scout.cycle_due(fri), True)
+
+    # Sub-day cadences have no whole-date expression and keep elapsed seconds.
+    kv_set(scout.CADENCE_KEY, "0.5")
+    kv_set(scout.LAST_RUN_KEY, (NOW - timedelta(hours=11)).isoformat())
+    check("cadence 0.5, 11h ago → not due", scout.cycle_due(NOW), False)
+    kv_set(scout.LAST_RUN_KEY, (NOW - timedelta(hours=13)).isoformat())
+    check("cadence 0.5, 13h ago → due", scout.cycle_due(NOW), True)
+
+
+def t_next_turn():
+    print("\nnext_turn_utc — so the dashboard can say why the desk is quiet:")
+    _reset()
+    check("never run → no next turn, it is now", scout.next_turn_utc(NOW), None)
+    kv_set(scout.LAST_RUN_KEY, "2026-08-05T00:03:10+00:00")
+    check("ran Wed, cadence 2 → next turn Friday",
+          scout.next_turn_utc(datetime(2026, 8, 5, 12, 0, tzinfo=timezone.utc)),
+          datetime(2026, 8, 7, 0, 0, tzinfo=timezone.utc).date())
+    check("asked on the turn day itself → None",
+          scout.next_turn_utc(datetime(2026, 8, 7, 0, 2, tzinfo=timezone.utc)), None)
+    check("asked after the turn was missed → still None, it is overdue",
+          scout.next_turn_utc(datetime(2026, 8, 9, 0, 2, tzinfo=timezone.utc)), None)
+    # It must agree with cycle_due rather than disagreeing prettily: a fractional
+    # cadence is met only when a whole-day difference reaches it.
+    kv_set(scout.CADENCE_KEY, "2.5")
+    check("cadence 2.5 rounds the turn up to 3 days",
+          scout.next_turn_utc(datetime(2026, 8, 5, 12, 0, tzinfo=timezone.utc)),
+          datetime(2026, 8, 8, 0, 0, tzinfo=timezone.utc).date())
 
 
 def t_quiet_window():
@@ -258,7 +307,7 @@ def t_restart_reclaims():
 
 
 def t_budget_headroom():
-    print("\nthe news desk's prior claim on the day's budget:")
+    print("\nthe headroom, now that it guards the late day rather than every day:")
     _install_stubs(result={"run_id": 1, "verdict": "PURSUE-A", "gate": "READY-FOR-HUMAN",
                            "status": "pending_human", "series": "Everyone Knows"})
     _reset(cap="0.75", spent=0.50)   # 0.50 > 0.75 * 0.55
@@ -266,6 +315,30 @@ def t_budget_headroom():
     r = scout.run_belief_cycle()
     check_that("stands down over the headroom", r.startswith("skipped: $0.50"), r)
     check("nothing was claimed from the queue", len(list_belief_queue(status="queued")), 1)
+    # The turn must survive its own stand-down. Stamping here would consume the
+    # turn without producing a piece, and the desk would go quiet for another
+    # full cadence having done nothing — which is the fortnight this change is
+    # fixing, just arriving more slowly.
+    check("a stand-down does not spend the turn", kv_get(scout.LAST_RUN_KEY), None)
+    # The 15-minute back-off is not the cadence — clear it, or this asserts the
+    # quiet window rather than the turn.
+    scout._quiet_until = None
+    check("so it is still due", scout.cycle_due(NOW), True)
+
+    # On its turn the desk goes first, against a fresh cap. This is the ordering
+    # half of the change (run.py) expressed as the condition it creates here.
+    _reset(cap="1.00", spent=0.0)
+    add_belief_candidate("Everyone knows the Wall is visible from orbit.", source="owner")
+    check_that("a fresh $0.00 cap runs the piece",
+               scout.run_belief_cycle().startswith("run #1"), "")
+    check_that("and a completed run does stamp the turn",
+               kv_get(scout.LAST_RUN_KEY) is not None, "")
+    # Against the real clock, not NOW: run_belief_cycle stamps datetime.now(), so
+    # a fixture date would read as a stamp from the future and short-circuit to
+    # "due" — passing the check for the wrong reason.
+    tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
+    check("so the desk is not due again tomorrow", scout.cycle_due(tomorrow), False)
+    check("but it is the day after", scout.cycle_due(tomorrow + timedelta(days=1)), True)
 
     _reset(cap="0.75", spent=0.10)
     add_belief_candidate("Everyone knows the Wall is visible from orbit.", source="owner")
@@ -360,7 +433,8 @@ def t_validate():
 
 def main():
     init_db()
-    for t in (t_parse_utc, t_cadence_days, t_cycle_due, t_quiet_window,
+    for t in (t_parse_utc, t_cadence_days, t_cycle_due, t_turn_boundary,
+              t_next_turn, t_quiet_window,
               t_empty_queue_reasons, t_auto_pursue, t_failure_is_bounded,
               t_restart_reclaims, t_budget_headroom, t_parse, t_validate):
         t()

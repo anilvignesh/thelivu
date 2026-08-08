@@ -1373,8 +1373,18 @@ async function vBeliefs(main) {
     <div class="row between">
       <span><b>Cadence</b> — one belief every
         <input data-x="cad" type="number" min="0.5" max="30" step="0.5" value="${d.cadence_days}" style="width:70px"> day(s),
-        budget permitting</span>
+        alternating with the news desk</span>
       <span class="muted small">last piece ${fdate(d.last_run_at)} · last scout ${fdate(d.last_scout_at)}</span>
+    </div>
+    <!-- Whose turn it is. A quiet desk means one of two things and the
+         timestamps cannot tell them apart: not its turn, or its turn and
+         something stopped it. last_cycle_result answers the second. -->
+    <div class="small" style="margin-top:6px">
+      ${d.turn_today
+        ? `<b>The belief desk has the turn today</b> — it runs before the news cycle, against a fresh cap.`
+        : `Next turn <b>${d.next_turn || '—'}</b>. Today is the news desk's.`}
+      ${d.last_cycle_result
+        ? `<span class="muted"> · last check: ${esc(d.last_cycle_result)}</span>` : ''}
     </div>
     <label class="row small" style="margin-top:8px;gap:6px">
       <input data-x="auto" type="checkbox" ${ap ? 'checked' : ''}>

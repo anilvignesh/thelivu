@@ -47,12 +47,21 @@ log = logging.getLogger("belief-desk")
 THEMES_YAML = Path(__file__).parent / "themes.yaml"
 
 # How much of the daily cap the belief desks may find already spent before they
-# stand down for the day. The news desk is the priority claim on that budget —
-# it has a clock and this desk does not, so a busy news day defers a belief
-# piece rather than competing with it. The ordering half of that claim lives in
-# run.py: the belief block sits AFTER the RSS cycle in the tick, so the news
-# desk gets first refusal on a fresh day's budget rather than losing it to a
-# belief run at 00:02 UTC.
+# stand down. This USED to be the whole scheduling policy — the news desk had the
+# standing prior claim and the belief block ran after the RSS cycle, so the desk
+# only ran on a day the news desk left 45% of the cap unspent. Measured over the
+# fortnight to 2026-08-08, there was no such day: spend cleared 55¢ every single
+# day the engine ran, and the belief desk never fired once. An unsatisfiable test
+# is not a priority rule, it is an off switch.
+#
+# The desks alternate now (docs/alternating-desks.md). On its turn the belief
+# desk goes FIRST — run.py calls the cycle before the RSS block — so this check
+# passes on a fresh $0.00 cap rather than on the news desk's leavings.
+#
+# The threshold stays because it still has two jobs, both of them late-in-the-day
+# cases: a `force_belief_run` tapped by hand at 3pm on a spent day, and a turn
+# day whose engine only came up at 20:00 after a restart. Standing down does not
+# stamp LAST_RUN_KEY, so in the second case the turn carries to tomorrow.
 BUDGET_HEADROOM = 0.55
 
 CADENCE_KEY = "belief_cadence_days"
@@ -61,7 +70,11 @@ AUTO_PURSUE_KEY = "belief_auto_pursue"
 LAST_RESULT_KEY = "last_belief_cycle_result"
 LAST_SCOUT_KEY = "last_belief_scout_at"
 LAST_SCOUT_RESULT_KEY = "last_belief_scout_result"
-DEFAULT_CADENCE_DAYS = 3
+# Two, because the desks alternate: news day, belief day, news day. Turn-taking
+# rather than calendar parity — a turn missed to a restart or a genuinely spent
+# day leaves the desk due, so it takes the next available day instead of waiting
+# out another full cycle for its parity to come round.
+DEFAULT_CADENCE_DAYS = 2
 
 # Same bounds the command centre enforces (command_center/api/beliefs.py). They
 # are repeated here because kv is writable from psql and from the bot, and a
@@ -324,6 +337,23 @@ def cycle_due(now_utc):
 
     Also honours the in-process quiet window, so an empty queue is asked about
     four times an hour rather than thirty.
+
+    **Whole-day cadences count UTC dates, not elapsed seconds.** Comparing
+    elapsed time against `days * 86400` loses a turn to a rounding margin, and
+    on the 2-day alternating cadence it would lose every other one:
+
+        belief run stamps   Mon 00:03:10
+        Wed 00:02 tick      47h58m elapsed < 48h  ->  not due
+                            the RSS cycle starts and spends past the headroom
+        Wed 00:04 tick      due at last, and the budget is gone
+
+    The desk would stand down on its own turn day, and the symptom — a quiet
+    desk with a budget excuse in kv — is indistinguishable from the bug this
+    whole change exists to fix. Dates put the turn boundary on the same midnight
+    the news cycle keys off.
+
+    Sub-day cadences (MIN_CADENCE_DAYS is 0.5) have no whole-date expression and
+    keep the elapsed-seconds path.
     """
     from datetime import timedelta
     from shared.db import kv_get
@@ -339,7 +369,35 @@ def cycle_due(now_utc):
     if last - now_utc > timedelta(hours=1):
         log.warning("%s is in the future (%s) — treating the cadence as due", LAST_RUN_KEY, last)
         return True
-    return (now_utc - last).total_seconds() >= cadence_days() * 86400
+    days = cadence_days()
+    if days < 1:
+        return (now_utc - last).total_seconds() >= days * 86400
+    return (now_utc.date() - last.date()).days >= days
+
+
+def next_turn_utc(now_utc):
+    """The UTC date the desk next has a turn, or None if it has one already.
+
+    Display only — the command centre says when the desk runs next so a quiet
+    day is answerable without reading `last_belief_cycle_result`. It deliberately
+    ignores the quiet window, which is a 15-minute back-off between queue checks
+    and not a statement about the cadence.
+    """
+    from datetime import timedelta
+    from shared.db import kv_get
+
+    last = parse_utc(kv_get(LAST_RUN_KEY))
+    if last is None or last - now_utc > timedelta(hours=1):
+        return None
+    days = cadence_days()
+    if days < 1:
+        nxt = last + timedelta(days=days)
+        return None if nxt <= now_utc else nxt.date()
+    # ceil, to agree with cycle_due: a whole-number day difference meets a
+    # fractional cadence like 2.5 only once it reaches 3.
+    import math
+    nxt = last.date() + timedelta(days=math.ceil(days))
+    return None if nxt <= now_utc.date() else nxt
 
 
 def _attempts(row):

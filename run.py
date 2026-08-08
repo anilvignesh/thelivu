@@ -368,6 +368,29 @@ if service == "thelivu-agent":
         except Exception as e:
             log.error("Belief scout (weekly) failed: %s", e, exc_info=True)
 
+        # Belief desks — take one approved belief to the human gate on its turn,
+        # or when signalled. The cycle does its own budget and queue checks and
+        # returns the reason it did nothing, so a quiet desk is explicable.
+        #
+        # BEFORE the RSS block, and that is the whole of the 2026-08-08 change
+        # (docs/alternating-desks.md). This block used to sit after it, so the
+        # belief desk saw the cap only once the news desk had spent from it —
+        # and since the news cycle clears 55% of the cap in its first pass, the
+        # desk stood down every day for a fortnight and never once ran. The
+        # desks alternate now: on its turn the belief desk goes first against a
+        # fresh $0.00 cap, spends ~$0.15, and the RSS cycle below runs with the
+        # remaining ~$0.85. On a news day `cycle_due` is false and this is a
+        # no-op, so the news desk's behaviour is unchanged.
+        try:
+            from engine.desks.ek.scout import cycle_due, run_belief_cycle
+            forced = kv_get("force_belief_run")
+            if forced:
+                kv_set("force_belief_run", "")
+            if forced or cycle_due(now_utc):
+                log.info("Belief cycle: %s", run_belief_cycle())
+        except Exception as e:
+            log.error("Belief cycle failed: %s", e, exc_info=True)
+
         # Owner topics — check every 2 minutes, run immediately if queued
         try:
             pending = pop_next_topic()
@@ -398,27 +421,6 @@ if service == "thelivu-agent":
                                   RSS_RETRY_MINUTES, e, exc_info=True)
         except Exception as e:
             log.error("Topic check failed: %s", e, exc_info=True)
-
-        # Belief desks — take one approved belief to the human gate, on cadence
-        # or when signalled. The cycle does its own budget and queue checks and
-        # returns the reason it did nothing, so a quiet desk is explicable.
-        #
-        # AFTER the RSS block on purpose. The desk stands down once 55% of the
-        # daily cap is spent, but that rule only defers to a news day that has
-        # already happened: at 00:02 UTC the day's spend is $0, so a belief run
-        # scheduled first would have taken its share of a fresh cap before the
-        # news desk — which has a clock — got to ask. Running it after the news
-        # cycle in the same tick means the headroom check reads a spend figure
-        # that includes today's news work.
-        try:
-            from engine.desks.ek.scout import cycle_due, run_belief_cycle
-            forced = kv_get("force_belief_run")
-            if forced:
-                kv_set("force_belief_run", "")
-            if forced or cycle_due(now_utc):
-                log.info("Belief cycle: %s", run_belief_cycle())
-        except Exception as e:
-            log.error("Belief cycle failed: %s", e, exc_info=True)
 
         # Idle alert — if no RSS cycle has completed in >8h, ping once per 12h
         try:

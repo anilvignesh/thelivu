@@ -31,9 +31,12 @@ def _themes():
 
 @endpoint
 def beliefs_state(request, data):
-    from command_center import db as ccdb
-    from engine.desks.ek.scout import cadence_days
+    from datetime import datetime, timezone
 
+    from command_center import db as ccdb
+    from engine.desks.ek.scout import cadence_days, next_turn_utc
+
+    now_utc = datetime.now(timezone.utc)
     r = ccdb.parallel(
         proposed=lambda: list_belief_queue(status="proposed", limit=60),
         queued=lambda: list_belief_queue(status="queued", limit=60),
@@ -50,6 +53,11 @@ def beliefs_state(request, data):
                            "last_belief_cycle_result", "last_belief_scout_result")},
     )
     s = r["settings"]
+    # Whose turn it is. The desks alternate (docs/alternating-desks.md), so "the
+    # desk is quiet" has two very different meanings — it is not its turn, or it
+    # is and something stopped it — and `last_run_at` alone cannot tell them
+    # apart. `next_turn` is None exactly when the turn is today.
+    nxt = next_turn_utc(now_utc)
     return J({
         "proposed": r["proposed"],
         "queued": r["queued"],
@@ -58,6 +66,8 @@ def beliefs_state(request, data):
         "recent": r["recent"],
         "themes": _themes(),
         "cadence_days": cadence_days(),
+        "turn_today": nxt is None,
+        "next_turn": nxt.isoformat() if nxt else None,
         "auto_pursue": str(s.get("belief_auto_pursue") or "").strip() in
                        ("1", "true", "on", "yes"),
         "last_scout_at": s.get("last_belief_scout_at"),
