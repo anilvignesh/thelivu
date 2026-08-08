@@ -80,6 +80,7 @@ def overview(request, data):
         daily=lambda: get_daily_costs(days=1),
         breaker=breaker_state,
         cap=budget.cap_usd,
+        reserve=budget.reserve_usd,
     )
     now = datetime.datetime.now(datetime.timezone.utc)
     for a in r["agents"]:
@@ -112,8 +113,14 @@ def overview(request, data):
     gate = [x for x in lists if x["status"] == "pending_human"][:30]
     held = [x for x in lists if x["status"] in ("held", "hold", "needs_attention")][:20]
     recent = lists[:10]
-    today = datetime.date.today().isoformat()
-    today_usd = sum(cost_usd(x["model"], x["in_tok"], x["out_tok"])
+    # UTC, not local. The governor's day is a UTC day (it self-expires at
+    # midnight UTC), so a banner keyed to Asia/Kolkata would disagree with it for
+    # the five and a half hours either side of the boundary — and now that the
+    # banner reports whether the engine is parked, disagreeing is a bug rather
+    # than a rounding difference.
+    today = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
+    today_usd = sum(cost_usd(x["model"], x["in_tok"], x["out_tok"],
+                             x.get("cw_tok") or 0, x.get("cr_tok") or 0)
                     for x in r["daily"] if str(x["day"])[:10] == today)
     return J({
         "counts": counts,
@@ -133,8 +140,10 @@ def overview(request, data):
         "today_cost": {"usd": round(today_usd, 4), "inr": round(today_usd * INR, 2)},
         # Cap came from the fan-out and today's spend is already computed —
         # the banner costs no extra round trip.
-        "budget": {"cap_usd": r["cap"], "spent_today_usd": round(today_usd, 4),
-                   "over": r["cap"] is not None and today_usd >= r["cap"]},
+        # One implementation of "over", in util.budget_state — the engine parks
+        # once what's left is under the reserve, and a banner that compared spend
+        # to the cap alone would call a parked day healthy.
+        "budget": budget_state(today_usd, cap=r["cap"], reserve=r["reserve"]),
     })
 
 
@@ -377,13 +386,20 @@ def set_reel_voice(request, data):
 
 @endpoint
 def set_budget(request, data):
-    """Set the daily spend cap. 0 disables the governor entirely."""
+    """Set the daily spend cap, and optionally the reserve.
+
+    `usd` is the cap; 0 disables the governor entirely. `reserve_usd` is the
+    headroom kept free so a cycle is refused before it starts — 0 restores the
+    old behaviour of noticing only once a cycle has already overrun the cap.
+    """
     try:
         usd = float(data.get("usd"))
     except (TypeError, ValueError):
         return err("usd must be a number")
     try:
         budget.set_cap_usd(usd)
+        if data.get("reserve_usd") not in (None, ""):
+            budget.set_reserve_usd(float(data["reserve_usd"]))
     except ValueError as e:
         return err(str(e))
     return J({"ok": True, "budget": budget_state()})

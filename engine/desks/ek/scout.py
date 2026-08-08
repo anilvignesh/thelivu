@@ -263,6 +263,23 @@ def run_belief_scout(*, dry_run=False):
         kv_set(LAST_SCOUT_KEY, datetime.now(timezone.utc).isoformat())
         kv_set(LAST_SCOUT_RESULT_KEY, result[:300])
 
+    def _say(text):
+        """Report the outcome — every outcome.
+
+        This used to fire only `if added`, so a run that proposed nothing,
+        parsed nothing, or rejected everything said nothing at all: no card, no
+        row, one INFO line on Railway. That is indistinguishable from a scout
+        that never ran, and on 2026-08-08 the two were in fact confused for each
+        other for four days. A desk that is quiet has to say it is quiet.
+        """
+        if dry_run:
+            return
+        try:
+            from engine.agents.orchestrator import _notify
+            _notify(text)
+        except Exception as e:
+            log.warning("belief-scout notify failed: %s", e)
+
     if not cands:
         # Distinguish "the model said nothing" from "the model said plenty, in a
         # shape we no longer parse" — the second is a prompt/format regression
@@ -270,8 +287,14 @@ def run_belief_scout(*, dry_run=False):
         if raw.strip():
             log.warning("belief-scout: 0 candidates parsed from %d chars of output — "
                         "format drift? first 200: %s", len(raw), raw.strip()[:200])
+            _say(f"🧠 Belief scout: nothing usable. The model returned {len(raw)} "
+                 f"characters and none of it parsed as a candidate — that reads like "
+                 f"format drift rather than a quiet week, so the skill's output "
+                 f"contract is worth a look.")
         else:
             log.info("belief-scout: empty response")
+            _say("🧠 Belief scout: the model returned nothing at all. No candidates "
+                 "this week.")
         _stamp(f"0 candidates parsed from {len(raw)} chars")
         return 0
 
@@ -307,13 +330,19 @@ def run_belief_scout(*, dry_run=False):
     log.info("belief-scout: %d/%d candidates queued as proposals "
              "(%d duplicate, %d rejected)", added, len(cands), dupes, len(rejected))
 
+    tally = (f"{len(cands)} proposed · {added} queued · {dupes} already known · "
+             f"{len(rejected)} rejected")
     if added:
-        try:
-            from engine.agents.orchestrator import _notify
-            _notify(f"🧠 Belief scout: {added} new candidate(s) waiting for your nod "
-                    f"in the command centre.")
-        except Exception as e:
-            log.warning("belief-scout notify failed: %s", e)
+        _say(f"🧠 Belief scout: {added} new candidate(s) waiting for your nod in the "
+             f"command centre.\n{tally}")
+    else:
+        # The silent case. Nothing was added, but the scout did run and did cost
+        # money, and the reason it added nothing is the interesting part.
+        _say(f"🧠 Belief scout ran and queued nothing.\n{tally}\n"
+             + ("Everything it proposed was already in the queue."
+                if dupes and not rejected else
+                "Nothing it proposed cleared validation — worth a look at the "
+                "skill if this repeats."))
     return added
 
 

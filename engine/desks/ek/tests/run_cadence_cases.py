@@ -356,6 +356,55 @@ def t_budget_headroom():
           scout.run_belief_cycle(), "skipped: budget unreadable")
 
 
+def _run_scout_with(raw):
+    """Drive run_belief_scout against a canned model response."""
+    del _notifications[:]
+    runner = types.ModuleType("engine.agents.skill_runner")
+    runner.run_skill = lambda *a, **k: raw
+    sys.modules["engine.agents.skill_runner"] = runner
+    _install_stubs()
+    try:
+        return scout.run_belief_scout()
+    finally:
+        sys.modules.pop("engine.agents.skill_runner", None)
+
+
+def t_scout_always_speaks():
+    print("\nthe scout reports every outcome, not only a productive one:")
+    # The bug this is for: the notify fired `if added`, so a run that proposed
+    # nothing, parsed nothing or had everything rejected said nothing at all —
+    # no card, no row, one INFO line on Railway. Indistinguishable from a scout
+    # that never ran, and on 2026-08-08 the two WERE confused for each other.
+    _reset()
+    n = _run_scout_with("")
+    check("empty response adds nothing", n, 0)
+    check("...but it says so", len(_notifications), 1)
+    check_that("...and names it as an empty response",
+               "nothing at all" in _notifications[0], _notifications[0])
+
+    _reset()
+    n = _run_scout_with("Here are some thoughts about beliefs, in prose, with no "
+                        "CANDIDATE lines anywhere in the output whatsoever.")
+    check("unparseable output adds nothing", n, 0)
+    check_that("...and is reported as drift, not as a quiet week",
+               "format drift" in _notifications[0], _notifications[0])
+
+    _reset()
+    n = _run_scout_with(GOOD)
+    check("both good candidates are queued", n, 2)
+    check_that("...and reported with a tally",
+               "2 proposed" in _notifications[0] and "2 queued" in _notifications[0],
+               _notifications[0])
+
+    # The same candidates again: nothing added, and the reason is the interesting
+    # part. This is the case that used to be completely silent.
+    n = _run_scout_with(GOOD)
+    check("a duplicate adds nothing", n, 0)
+    check("...and the run still speaks", len(_notifications), 1)
+    check_that("...naming duplication as the reason",
+               "already" in _notifications[0].lower(), _notifications[0])
+
+
 # ── 3. the scout's output ─────────────────────────────────────────────────────
 
 GOOD = """CANDIDATE: "Banana republic" means a chaotic, badly-run poor country.
@@ -436,7 +485,8 @@ def main():
     for t in (t_parse_utc, t_cadence_days, t_cycle_due, t_turn_boundary,
               t_next_turn, t_quiet_window,
               t_empty_queue_reasons, t_auto_pursue, t_failure_is_bounded,
-              t_restart_reclaims, t_budget_headroom, t_parse, t_validate):
+              t_restart_reclaims, t_budget_headroom, t_scout_always_speaks,
+              t_parse, t_validate):
         t()
 
     print("\n" + "=" * 72)

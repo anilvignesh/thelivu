@@ -85,6 +85,24 @@ if service == "thelivu-agent":
         except Exception as e:
             log.warning("Notification send failed: %s", e)
 
+    def _sweep_failed(what, exc):
+        """A sweep that raised must leave a row, not just a Railway log line.
+
+        Every sweep in this loop is wrapped in `try/except: log.error(...)`, which
+        is correct — one broken sweep must not take the tick down. But the owner
+        never reads Railway logs, so a sweep that raises every week is invisible
+        from the dashboard and looks exactly like a sweep that had nothing to do.
+        `_notify` records before it posts, so this is the cheap way to make a
+        failure land somewhere the command centre can show it.
+        """
+        try:
+            from engine.agents.orchestrator import _notify
+            _notify(f"⚠️ {what} failed: {exc}\n"
+                    f"The tick carried on; the sweep will be retried on its normal "
+                    f"cadence. Railway logs have the traceback.")
+        except Exception as e:
+            log.warning("Could not report the %s failure: %s", what, e)
+
     while True:
         now_utc = datetime.now(timezone.utc)
         today = now_utc.date()
@@ -167,19 +185,27 @@ if service == "thelivu-agent":
 
         if over:
             spent, cap = over
+            reserve = budget.reserve_usd(cap)
             if _budget_logged_at is None or (now_utc - _budget_logged_at).total_seconds() >= 1800:
                 _budget_logged_at = now_utc
-                log.warning("Model stages paused — daily budget $%.2f reached "
-                            "($%.4f spent). Resumes at midnight UTC.", cap, spent)
+                log.warning("Model stages paused — $%.4f spent of the $%.2f cap, "
+                            "leaving less than the $%.2f reserve a cycle needs. "
+                            "Resumes at midnight UTC.", spent, cap, reserve)
             # One Telegram alert per day, the first time the cap trips.
             try:
                 if kv_get("last_budget_alert_at") != today.isoformat():
                     kv_set("last_budget_alert_at", today.isoformat())
+                    # Name the reserve. Parking at $0.66 of a $1.00 cap looks like
+                    # a bug if the message only mentions the cap, and the owner
+                    # would reasonably go looking for one.
                     _tg_notify(
-                        f"💰 Daily budget cap ${cap:.2f} reached (~${spent:.2f} spent).\n"
-                        f"Model stages are parked; publishing and approvals still work.\n"
-                        f"Engine resumes at midnight UTC. Change the cap with "
-                        f"/setbudget <usd> or in the command center."
+                        f"💰 Daily budget: ~${spent:.2f} spent of the ${cap:.2f} cap.\n"
+                        f"Model stages are parked — what's left is under the "
+                        f"${reserve:.2f} a cycle typically needs, and starting one "
+                        f"anyway is how the cap gets overrun.\n"
+                        f"Publishing and approvals still work. Engine resumes at "
+                        f"midnight UTC. Change the cap with /setbudget <usd> or in "
+                        f"the command center."
                     )
             except Exception as e:
                 log.warning("Budget alert failed: %s", e)
@@ -337,7 +363,13 @@ if service == "thelivu-agent":
         try:
             last_steward = kv_get("last_tech_steward_at")
             if not last_steward:
+                # Run on first sight rather than stamping — see the belief scout
+                # below for what the stamp-and-skip branch cost there. Already
+                # stamped in production (2026-08-04, with a real brief), so this
+                # cannot fire a sweep on the deploy that introduces it.
+                log.info("Tech steward has never run — running it now")
                 kv_set("last_tech_steward_at", now_utc.isoformat())
+                run_tech_steward()
             elif (now_utc - datetime.fromisoformat(last_steward)).days >= 7:
                 # Stamp BEFORE running — same retry-storm rule as the sweeps above.
                 kv_set("last_tech_steward_at", now_utc.isoformat())
@@ -354,12 +386,24 @@ if service == "thelivu-agent":
                 run_belief_scout()
         except Exception as e:
             log.error("Belief scout (manual) failed: %s", e, exc_info=True)
+            _sweep_failed("Belief scout", e)
 
         # Belief desks — weekly scout, so the queue is never empty when Anil is.
         try:
             last_bs = kv_get("last_belief_scout_at")
             if not last_bs:
+                # First sight: RUN it. This branch used to stamp and return, which
+                # deferred the very first scout run by a full week AND wrote a
+                # timestamp indistinguishable from a successful one — the command
+                # centre read "last scout 04 Aug" when the honest answer was
+                # "never". Four days of an empty queue were blamed on the scout's
+                # output before anyone looked at the stamp. A weekly sweep that has
+                # never run IS due, and kv persists across deploys, so this fires
+                # exactly once in the life of the key.
+                log.info("Belief scout has never run — running it now")
                 kv_set("last_belief_scout_at", now_utc.isoformat())
+                from engine.desks.ek.scout import run_belief_scout
+                run_belief_scout()
             elif (now_utc - datetime.fromisoformat(last_bs)).days >= 7:
                 # Stamp BEFORE running — same retry-storm rule as the sweeps above.
                 kv_set("last_belief_scout_at", now_utc.isoformat())
@@ -367,6 +411,7 @@ if service == "thelivu-agent":
                 run_belief_scout()
         except Exception as e:
             log.error("Belief scout (weekly) failed: %s", e, exc_info=True)
+            _sweep_failed("Belief scout", e)
 
         # Belief desks — take one approved belief to the human gate on its turn,
         # or when signalled. The cycle does its own budget and queue checks and

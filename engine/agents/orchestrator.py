@@ -429,7 +429,30 @@ def _tg_send_long(chat_id, text):
 
 
 def _notify(text):
-    """Send a short status notification to Anil's draft chat (plain text)."""
+    """Send a short status notification to Anil's draft chat, AND record it.
+
+    The 2026-08-05 change put the capture inside `_notify_card` so every card
+    would be recorded by construction — and it was, for all nineteen card sites.
+    **This function was the back door it missed.** Thirteen engine call sites
+    still speak through here: the belief scout's proposals, the belief desk's
+    "run #N is ready", "no leads in the queue", "news-monitor returned no usable
+    selection", "picked an out-of-range lead", source-scout results,
+    meta-synthesis, a failed carousel. Every one of those is the kind of thing
+    the owner's rule was written about, and none of them had a row anywhere.
+
+    Recorded FIRST, for the same reason `_notify_card` does it in that order: an
+    outage or a bad token must not be able to destroy the only copy. A plain
+    notification has no title, so the first line becomes one.
+    """
+    first, _, rest = (text or "").strip().partition("\n")
+    try:
+        from shared.db import record_event
+        record_event(kind=_event_kind(first), title=first[:200], body=rest.strip())
+    except Exception:
+        # Never let the record stop the notice. The reverse direction — a
+        # Telegram failure destroying the record — is the bug being fixed here,
+        # and it cannot happen because the write already went in above.
+        log.exception("Failed to record engine notification: %s", first[:80])
     _tg_send_long(TELEGRAM_DRAFT_CHAT_ID, text)
 
 

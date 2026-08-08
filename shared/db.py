@@ -1315,14 +1315,27 @@ def get_queue_state(desk="news"):
 
 
 def get_daily_costs(days=7):
-    """Return per-day, per-model token usage for the last N days (for trend chart)."""
+    """Return per-day, per-model token usage for the last N days (for trend chart).
+
+    Includes the cache counters. The 2026-08-05 change added
+    `cache_write_tokens`/`cache_read_tokens` to `token_usage` and taught
+    `cost_usd` to price them (writes at 1.25x, reads at 0.10x), then converted
+    the governor, the steward's view and the cost report — **and missed this
+    query.** The command centre's overview banner summed the two plain columns
+    and reported $0.2967 for a day the governor priced at $0.5707, a 48%
+    undercount of the same day from the same table. Since 2026-08-08 that number
+    also decides whether the day is parked, so the disagreement stopped being
+    cosmetic. Those figures must not disagree — see shared/costs.py.
+    """
     conn = _conn()
     try:
         cur = conn.cursor()
         if _is_postgres():
             cur.execute(
                 "SELECT recorded_at::date AS day, model, "
-                "SUM(input_tokens) AS in_tok, SUM(output_tokens) AS out_tok "
+                "SUM(input_tokens) AS in_tok, SUM(output_tokens) AS out_tok, "
+                "SUM(COALESCE(cache_write_tokens,0)) AS cw_tok, "
+                "SUM(COALESCE(cache_read_tokens,0)) AS cr_tok "
                 "FROM token_usage WHERE recorded_at >= NOW() - INTERVAL %s "
                 "GROUP BY recorded_at::date, model ORDER BY day",
                 (f"{days} days",),
@@ -1330,7 +1343,9 @@ def get_daily_costs(days=7):
         else:
             cur.execute(
                 "SELECT date(recorded_at) AS day, model, "
-                "SUM(input_tokens) AS in_tok, SUM(output_tokens) AS out_tok "
+                "SUM(input_tokens) AS in_tok, SUM(output_tokens) AS out_tok, "
+                "SUM(COALESCE(cache_write_tokens,0)) AS cw_tok, "
+                "SUM(COALESCE(cache_read_tokens,0)) AS cr_tok "
                 "FROM token_usage WHERE recorded_at >= datetime('now', ?) "
                 "GROUP BY date(recorded_at), model ORDER BY day",
                 (f"-{days} days",),

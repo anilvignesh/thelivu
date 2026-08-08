@@ -364,8 +364,13 @@ def costs(request, data):
         by_model.append({"model": r["model"], "today_usd": t, "month_usd": mo,
                          "total_usd": al,
                          "total_tokens": (r["total_in"] or 0) + (r["total_out"] or 0)})
+    # Cache counters included — the trend chart sat directly under a by_model
+    # table that already counted them and quietly drew a different, lower number
+    # for the same days. Same miss as the overview banner (shared/db.py,
+    # get_daily_costs).
     daily = [{"day": str(x["day"])[:10], "model": x["model"],
-              "usd": cost_usd(x["model"], x["in_tok"], x["out_tok"])}
+              "usd": cost_usd(x["model"], x["in_tok"], x["out_tok"],
+                              x.get("cw_tok") or 0, x.get("cr_tok") or 0)}
              for x in res["daily"]]
     by_skill = res["by_skill"]
     for x in by_skill:

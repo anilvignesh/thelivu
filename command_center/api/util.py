@@ -147,23 +147,45 @@ def endpoint(fn):
 # Cost model — one table for the whole repo, in shared/costs.py.
 from shared.costs import cost_usd, USD_TO_INR as INR  # noqa: F401 (re-exported)
 
+# None is a meaningful value for both cap and reserve (no cap / no reserve), so
+# "not supplied" needs its own sentinel or a fan-out that legitimately read
+# `cap = None` would be re-read from kv.
+_UNSET = object()
 
-def budget_state(spent_usd=None):
+
+def budget_state(spent_usd=None, cap=_UNSET, reserve=_UNSET):
     """Cap + today's spend + whether the governor is parking model stages.
 
-    Pass `spent_usd` when the caller already computed today's cost (the
-    overview does) — that turns this into a single kv read. Cap parsing lives
-    in shared.budget so the UI and the engine can never disagree about it.
+    Pass `spent_usd` when the caller already computed today's cost, and
+    `cap`/`reserve` when they came from a fan-out — the overview passes all
+    three, so the banner still costs no round trip of its own. Cap and reserve
+    parsing live in shared.budget so the UI and the engine can never disagree.
+
+    `over` means what the ENGINE means by it: parked because what remains is
+    under the reserve a cycle needs, which trips before the cap itself is
+    reached (shared/budget.py, DEFAULT_RESERVE_USD). Comparing spend to the cap
+    alone would paint a parked day healthy and send the owner hunting for a bug.
+    This is the one implementation — overview, system view and banner all come
+    through here.
     """
     from shared import budget
 
-    if spent_usd is None:
-        spent, cap, _ = budget.status()
-    else:
-        spent, cap = spent_usd, budget.cap_usd()
+    if spent_usd is None and cap is _UNSET:
+        spent, cap, over = budget.status()
+        reserve = budget.reserve_usd(cap) if cap is not None else 0.0
+        return {"cap_usd": cap, "reserve_usd": round(reserve, 4),
+                "spent_today_usd": round(spent, 4), "over": over}
+
+    spent = budget.status()[0] if spent_usd is None else spent_usd
+    if cap is _UNSET:
+        cap = budget.cap_usd()
+    if reserve is _UNSET:
+        reserve = budget.reserve_usd(cap) if cap is not None else 0.0
+    reserve = reserve or 0.0
     return {"cap_usd": cap,
+            "reserve_usd": round(reserve, 4),
             "spent_today_usd": round(spent, 4),
-            "over": cap is not None and spent >= cap}
+            "over": cap is not None and spent + reserve >= cap}
 
 
 def breaker_state():

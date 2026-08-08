@@ -23,6 +23,83 @@ chat. To bootstrap it:
 
 ---
 
+## The silent scout and the soft cap (2026-08-08)
+
+Both items left open by the alternating-desks change, fixed. Full working:
+`docs/the-silent-scout-and-the-soft-cap.md`.
+
+**Correction first.** The claim that `ek:belief-scout` "ran once and added zero
+rows, so its output did not survive `validate_candidate`" was a **misreading**.
+Those three 2026-08-05 calls are `python -m engine.desks.ek.scout` *without*
+`--commit` — the inspection CLI, which prints and writes nothing by design.
+Identical input tokens across all three. `validate_candidate` is not implicated.
+
+**The scout had never run at all, and its timestamp said otherwise.** run.py's
+sweep pattern was `if not last_X: kv_set(now)` — stamp and skip. On the first
+tick after the desks deployed it stamped `last_belief_scout_at = 2026-08-04` and
+did not run, which deferred the first scout run by a week *and* wrote a value
+indistinguishable from a successful one. The command centre read "last scout 04
+Aug"; the honest answer was **never**. Four days of an empty queue were blamed on
+the scout's output before anyone looked at the stamp. A weekly sweep that has
+never run **is** due, and kv persists across deploys, so first sight now runs it.
+The tech steward carried the identical branch (already stamped in production, so
+the fix cannot fire a sweep on this deploy) and is fixed the same way.
+
+**`_notify` was the back door the 2026-08-05 rule missed.** That change put the
+capture inside `_notify_card` "so every future card is recorded by construction"
+— and it did, for all nineteen card sites. But `_notify` posts plain text with no
+`record_event`, and **thirteen engine call sites** still use it: the scout's
+proposals, the belief desk's "run #N is ready", "no leads in the queue",
+"news-monitor returned no usable selection", source-scout results,
+meta-synthesis, a failed carousel. `_notify` now records before it posts, same
+order and same reasoning — one place rather than thirteen, so nothing the engine
+says can live only in Telegram. Probed both directions: a Telegram outage leaves
+the row, a DB failure still sends the notice.
+
+The scout's own notice fired `if added`, so a run that proposed nothing, parsed
+nothing, or had everything rejected said **nothing at all**. It now reports every
+outcome with a tally, and distinguishes format drift from a quiet week. A sweep
+that *raises* also reports now (`_sweep_failed`), instead of dying into a Railway
+log line nobody reads.
+
+**The cap was a cap only at tick granularity.** The governor is checked once per
+tick and `run_daily_cycle()` then runs to completion unwatched, so it could
+refuse to start a tick but could not bound a day: $1.32, $1.28, $1.16 against a
+$1.00 cap. The obvious fix — check between stages and abort — is the exact
+failure `shared/budget.py` exists to prevent ("a story half-verified, a draft
+never written"), so **the check moved earlier instead of getting sharper.**
+
+Measured over **63 real cycles in 21 days**: p50 $0.211, p80 $0.337, p95 $0.993,
+max $1.090. A **reserve** (kv `daily_budget_reserve_usd`, default **$0.35** = the
+p80) parks model work when `spent + reserve >= cap`. At a $1.00 cap the engine
+now parks at $0.65, so roughly four days in five land under the cap instead of
+over it. **This is a throughput cut and it does not make the cap inviolable** — a
+p95-tail cycle breaks a $1.00 cap whichever end you check. Reserve 0 restores the
+old behaviour exactly. Suite: `shared.tests.run_budget_cases` (new).
+
+**Two things the build turned up that nobody was looking for.**
+
+1. *A NaN reserve would have uncapped the engine.* Caught by the new suite's
+   first run: `float("nan")` parses, `nan <= 0` is False, and thereafter
+   `spent + nan >= cap` is False for ever. Same class `cadence_days` already
+   guarded and the reserve had not inherited. `math.isfinite` now gates it.
+2. *The overview banner was reading a 48% undercount, and the reserve made it
+   load-bearing.* The 2026-08-05 cache-accounting fix converted the governor, the
+   steward and the cost report but **missed `get_daily_costs`**, which selects
+   only `input_tokens`/`output_tokens`. The command centre priced today at
+   **$0.2967**; the governor priced the same day from the same table at
+   **$0.5707**. Both callers passed three args to a five-arg `cost_usd`, so
+   nothing raised. Fixed in the overview banner and in the Costs view's 30-day
+   trend — which had been drawing a lower line than the by_model table directly
+   above it. The banner was also keyed to **local** date against the governor's
+   UTC day. Both endpoints now report $0.5707.
+
+`over` had three independent implementations; `util.budget_state` is now the only
+one, taking pre-fetched cap/reserve so the overview keeps its no-extra-round-trip
+property.
+
+---
+
 ## The desks alternate now — the belief desk had never once run (2026-08-08)
 
 The cadence was not broken and the code was not wrong. **The belief desk was
