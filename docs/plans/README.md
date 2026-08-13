@@ -29,6 +29,7 @@ baked in so you don't have to re-derive it.
 | 5 | [05-technical-steward.md](05-technical-steward.md) | A periodic agent that keeps model routing apt, watches Claude/Gemini/NVIDIA for new offerings + price changes, and keeps cost managed. Depends on plan 01 (shared cost model + budget governor). Build after 01 lands. |
 | 3 | [03-brand-consolidation.md](03-brand-consolidation.md) | Small; folds the 2026-07-26 brand locks into BRAND.md. |
 | 4 | [04-streamlit-retirement.md](04-streamlit-retirement.md) | Only after the command center has proven itself for ~a week. |
+| 6 | [06-reel-autonomy.md](06-reel-autonomy.md) | Added 2026-08-12. Auto-triggers reel builds on publish and moves the render off Anil's laptop onto an always-on Oracle VM. Independent of 01-05; written after the command center + illustrated reels already existed. |
 
 Suggested execution order: **01 → 05 → 02 → 03 → 04**. Plan 05 is the "technical
 manager" Anil asked for — it rests on the cost model and env-overridable model

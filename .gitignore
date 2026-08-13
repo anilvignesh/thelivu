@@ -30,3 +30,8 @@ Thumbs.db
 
 # Rendered reel MP4s — generated media, not source (like articles/slides)
 articles/reels/
+articles/drafts/
+
+# Oracle VM secrets (DATABASE_PUBLIC_URL, NVIDIA_API_KEY) — written directly on
+# the VM by ops/oracle-vm/deploy-secrets.sh, never committed. See plan 06.
+ops/oracle-vm/reel-worker.env

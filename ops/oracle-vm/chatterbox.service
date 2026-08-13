@@ -1,0 +1,19 @@
+[Unit]
+Description=Thelivu Chatterbox voice server (Anil's cloned voice, 127.0.0.1:3901 only)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/thelivu
+Environment=CBX_REF=/home/ubuntu/thelivu_voice_ref2.wav
+Environment=CBX_TEMPERATURE=0.7
+ExecStart=/home/ubuntu/cbx/bin/python -m publishing.chatterbox_server
+Restart=always
+RestartSec=5
+# CPU torch only, no GPU on this box — see HANDOFF.md's warning about not
+# letting chatterbox-tts pull CUDA torch. Binds 127.0.0.1 by design
+# (publishing/chatterbox_server.py) — never add a public port for this.
+
+[Install]
+WantedBy=multi-user.target

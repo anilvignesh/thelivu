@@ -30,7 +30,7 @@ from shared.config import (
     CONTACT_HANDLE,
     SLIDE_SERVER_BASE_URL,
 )
-from shared.db import get_run, get_pending_runs, get_cost_report_data, get_queue_state, kv_get, kv_set, init_db, save_publication, update_run, queue_topic, approve_proposal, skip_proposal, reset_run_for_review, get_recheckable_runs, clear_agents_for_run, clear_stale_agents, clear_stale_topics, deactivate_approved_source, get_approved_sources, queue_carousel_run, get_carousel_run, update_carousel_run, get_carousel_slides, add_bio_link, list_bio_links, delete_bio_link, set_bio_link_pinned, set_run_slug
+from shared.db import get_run, get_pending_runs, get_cost_report_data, get_queue_state, kv_get, kv_set, init_db, save_publication, update_run, queue_topic, approve_proposal, skip_proposal, reset_run_for_review, get_recheckable_runs, clear_agents_for_run, clear_stale_agents, clear_stale_topics, deactivate_approved_source, get_approved_sources, queue_carousel_run, get_carousel_run, update_carousel_run, get_carousel_slides, add_bio_link, list_bio_links, delete_bio_link, set_bio_link_pinned, set_run_slug, get_reel, update_reel
 
 logging.basicConfig(
     level=logging.INFO,
@@ -139,6 +139,41 @@ async def cmd_topic(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Queued. The agent picks this up within 2 minutes — I'll send the draft when ready.\n\nTopic: {topic}"
     )
     log.info("Topic queued: %s", topic[:80])
+
+
+async def cmd_remake(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/remake <reel_id> <notes> — the Telegram analog of the command center's
+    remake-suggestion box. This bot has no Chatterbox access (that's the
+    reel_worker's job, co-located with the voice server on the Oracle VM), so
+    all this does is flag the request in the DB — reel_worker.py polls for
+    status='remake_requested' and does the actual rebuild on its next pass,
+    pushing the fresh cut back here the same way the original was pushed."""
+    args = context.args or []
+    if not args or not args[0].isdigit():
+        await update.message.reply_text(
+            "Usage: /remake <reel_id> <what to change>\n\n"
+            "Example: /remake 42 open on the pellet round, cut the third beat"
+        )
+        return
+    reel_id = int(args[0])
+    notes = " ".join(args[1:]).strip()
+    if not notes:
+        await update.message.reply_text("Give it something to change — /remake <reel_id> <notes>.")
+        return
+    reel = get_reel(reel_id)
+    if reel is None:
+        await update.message.reply_text(f"Reel #{reel_id} not found.")
+        return
+    if reel.get("status") == "posted":
+        await update.message.reply_text(f"Reel #{reel_id} is already posted — can't remake it.")
+        return
+    if reel.get("status") == "remake_requested":
+        await update.message.reply_text(f"Reel #{reel_id} already has a remake queued — it'll pick up these notes too on the next pass.")
+    update_reel(reel_id, status="remake_requested", notes=notes)
+    await update.message.reply_text(
+        f"Remake queued for reel #{reel_id}. The worker builds a fresh cut with "
+        f"your notes on its next pass (~10 min) and sends it here.\n\nNotes: {notes}")
+    log.info("Remake requested for reel #%d: %s", reel_id, notes[:120])
 
 
 async def cmd_runnow(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -477,6 +512,7 @@ NEEDS YOUR TAP (buttons on the card):
 📰 New story ready — the draft card. Read the draft link, then Approve (posts to channel + bio page + queues a carousel), Kill (discard), or Hold (retry in 3 days).
 🔄 Re-checked story — a held story re-investigated; same three buttons.
 🖼 Carousel — the slide album; approve posts it to Instagram.
+🎬 Reel — auto-built, no tap needed to make it; watch it here, then Post or Kill. Want a different cut? /remake <id> <notes> instead of tapping Kill.
 📡 Source proposal — the scout suggests a feed; approve or skip.
 
 FYI ONLY (the engine explaining itself, no action needed):
@@ -493,6 +529,7 @@ KEY COMMANDS:
 /pending — everything waiting on you, one card
 /drafts /held /queue /status — what's in the pipeline
 /topic [text] — submit a story idea
+/remake <reel_id> <notes> — rebuild a reel with what to change
 /dig [theme] — targeted watchlist dig (no theme = scout picks the ripest)
 /priors — what the learning loop currently believes
 /links /addlink /dellink /pinlink — manage the bio page
@@ -1172,6 +1209,22 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await _handle_carousel_kill(query, carousel_id)
         return
 
+    if action in ("reelapprove", "reelkill"):
+        try:
+            reel_id = int(payload)
+        except ValueError:
+            await query.message.reply_text("Bad reel ID.")
+            return
+        reel = get_reel(reel_id)
+        if reel is None:
+            await query.message.reply_text(f"Reel #{reel_id} not found in database.")
+            return
+        if action == "reelapprove":
+            await _handle_reel_approve(query, reel_id, reel)
+        else:
+            await _handle_reel_kill(query, reel_id)
+        return
+
     # All remaining actions operate on a pipeline run
     try:
         run_id = int(payload)
@@ -1403,6 +1456,49 @@ async def _handle_carousel_kill(query, carousel_id):
     log.info("Killed carousel #%d", carousel_id)
 
 
+async def _handle_reel_approve(query, reel_id, reel):
+    """Mirrors _handle_carousel_approve exactly — same shared publish path
+    (publishing/publish.py::post_reel_run), same one-tap-retry-on-failure
+    shape. This is the ONLY place a reel gets posted from Telegram; the
+    reel_worker that builds/pushes reels never has IG credentials."""
+    if reel.get("status") == "posted":
+        await query.message.reply_text(f"Reel #{reel_id} was already posted.")
+        return
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
+    from publishing.publish import post_reel_run
+    res = post_reel_run(reel_id)
+    if res.get("ok"):
+        link_line = f"\n{res['permalink']}" if res.get("permalink") else ""
+        await query.message.reply_text(f"Posted reel #{reel_id} to Instagram ✓{link_line}")
+        log.info("Posted reel #%d to Instagram (media %s)", reel_id, res.get("media_id"))
+    elif res.get("needs_config"):
+        await query.message.reply_text(
+            f"Reel #{reel_id} approved — but Instagram isn't configured yet "
+            f"(set IG_USER_ID / IG_ACCESS_TOKEN). Post it manually for now.")
+    else:
+        retry_kb = InlineKeyboardMarkup([[
+            InlineKeyboardButton("🔁 Retry post", callback_data=f"reelapprove_{reel_id}"),
+            InlineKeyboardButton("✗ Kill",        callback_data=f"reelkill_{reel_id}"),
+        ]])
+        await query.message.reply_text(
+            f"Instagram publish failed for reel #{reel_id}:\n{res.get('error')}\n\n"
+            "Often a transient Meta error — tap Retry.", reply_markup=retry_kb)
+
+
+async def _handle_reel_kill(query, reel_id):
+    update_reel(reel_id, status="killed")
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    await query.message.reply_text(f"Reel #{reel_id} killed.")
+    log.info("Killed reel #%d", reel_id)
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -1412,6 +1508,7 @@ async def _post_init(app):
     try:
         await app.bot.set_my_commands([
             BotCommand("topic",    "Submit a story to investigate now"),
+            BotCommand("remake",   "Redo a reel with notes: /remake <id> <notes>"),
             BotCommand("track",    "Check status of current or recent story"),
             BotCommand("drafts",   "List all drafts pending your review"),
             BotCommand("held",     "List held stories you can re-develop"),
@@ -1461,6 +1558,7 @@ def main():
     app.add_handler(CommandHandler("drafts", cmd_drafts))
     app.add_handler(CommandHandler("cost", cmd_cost))
     app.add_handler(CommandHandler("topic", cmd_topic))
+    app.add_handler(CommandHandler("remake", cmd_remake))
     app.add_handler(CommandHandler("runnow", cmd_runnow))
     app.add_handler(CommandHandler("republish", cmd_republish))
     app.add_handler(CommandHandler("held", cmd_held))

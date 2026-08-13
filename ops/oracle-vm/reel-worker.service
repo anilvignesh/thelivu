@@ -1,0 +1,18 @@
+[Unit]
+Description=Thelivu reel_worker — auto-builds reels for published runs
+After=network.target chatterbox.service
+Wants=chatterbox.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/thelivu
+EnvironmentFile=/home/ubuntu/thelivu/ops/oracle-vm/reel-worker.env
+ExecStart=/home/ubuntu/thelivu/venv/bin/python -m publishing.reel_worker
+Restart=always
+RestartSec=30
+# See docs/plans/06-reel-autonomy.md. Builds only — never posts. Posting stays
+# the human gate in the command center, unchanged, on Anil's laptop/phone.
+
+[Install]
+WantedBy=multi-user.target
