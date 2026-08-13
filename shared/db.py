@@ -227,6 +227,68 @@ CREATE TABLE IF NOT EXISTS belief_queue (
     created_at  TIMESTAMP DEFAULT NOW(),
     updated_at  TIMESTAMP DEFAULT NOW()
 );
+
+-- Readership. The engine has measured its own production in detail since day
+-- one and its readership not at all. See docs/reach-analytics.md.
+--
+-- No IP, no raw user-agent, no cookie, no third party. `visitor_hash` is
+-- sha256(ip + ua + a salt regenerated each UTC day), so "unique readers today"
+-- is answerable and cross-day tracking is impossible by construction rather
+-- than by policy. `referrer_host` is the host only — a full referrer can carry
+-- a search query, which is content about the reader.
+CREATE TABLE IF NOT EXISTS page_reads (
+    id            SERIAL PRIMARY KEY,
+    slug          TEXT NOT NULL,
+    run_id        INTEGER,
+    is_bot        BOOLEAN DEFAULT FALSE,   -- crawlers/link-unfurlers, kept not dropped
+    visitor_hash  TEXT,
+    referrer_host TEXT,
+    read_at       TIMESTAMP DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_page_reads_at ON page_reads (read_at);
+CREATE INDEX IF NOT EXISTS idx_page_reads_slug ON page_reads (slug);
+
+-- Instagram. One row per post; `run_id` ties it back to the story it came from.
+CREATE TABLE IF NOT EXISTS ig_media (
+    media_id      TEXT PRIMARY KEY,
+    media_type    TEXT,               -- CAROUSEL_ALBUM | VIDEO
+    product_type  TEXT,               -- FEED | REELS
+    permalink     TEXT,
+    caption       TEXT,
+    run_id        INTEGER,
+    posted_at     TIMESTAMP,
+    seen_at       TIMESTAMP DEFAULT NOW()
+);
+
+-- Append-only snapshots: a post's numbers keep moving for days and the shape of
+-- that curve is the interesting part. Both media types return this exact metric
+-- set, which is why one table covers reels and carousels.
+CREATE TABLE IF NOT EXISTS ig_media_metrics (
+    id          SERIAL PRIMARY KEY,
+    media_id    TEXT NOT NULL,
+    reach       INTEGER,
+    views       INTEGER,
+    likes       INTEGER,
+    comments    INTEGER,
+    saved       INTEGER,
+    shares      INTEGER,
+    captured_at TIMESTAMP DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ig_metrics_media ON ig_media_metrics (media_id, captured_at);
+
+-- One row per UTC day, upserted. Exists because the API will not give us
+-- yesterday: account reach with period=day returns two days, and
+-- followers_count is a bare current number with no history at all. If we do not
+-- snapshot, the history does not exist.
+CREATE TABLE IF NOT EXISTS audience_daily (
+    day                TEXT PRIMARY KEY,   -- YYYY-MM-DD, UTC
+    followers          INTEGER,   -- Instagram
+    reach_day          INTEGER,
+    accounts_engaged   INTEGER,
+    total_interactions INTEGER,
+    tg_subscribers     INTEGER,   -- Telegram channel; per-post views are MTProto-only
+    updated_at         TIMESTAMP DEFAULT NOW()
+);
 """
 
 # SQLite fallback schema (same structure, SQLite syntax)
@@ -448,6 +510,52 @@ CREATE TABLE IF NOT EXISTS belief_queue (
     created_at  TEXT DEFAULT (datetime('now')),
     updated_at  TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS page_reads (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug          TEXT NOT NULL,
+    run_id        INTEGER,
+    is_bot        INTEGER DEFAULT 0,
+    visitor_hash  TEXT,
+    referrer_host TEXT,
+    read_at       TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_page_reads_at ON page_reads (read_at);
+CREATE INDEX IF NOT EXISTS idx_page_reads_slug ON page_reads (slug);
+
+CREATE TABLE IF NOT EXISTS ig_media (
+    media_id      TEXT PRIMARY KEY,
+    media_type    TEXT,
+    product_type  TEXT,
+    permalink     TEXT,
+    caption       TEXT,
+    run_id        INTEGER,
+    posted_at     TEXT,
+    seen_at       TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS ig_media_metrics (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    media_id    TEXT NOT NULL,
+    reach       INTEGER,
+    views       INTEGER,
+    likes       INTEGER,
+    comments    INTEGER,
+    saved       INTEGER,
+    shares      INTEGER,
+    captured_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_ig_metrics_media ON ig_media_metrics (media_id, captured_at);
+
+CREATE TABLE IF NOT EXISTS audience_daily (
+    day                TEXT PRIMARY KEY,
+    followers          INTEGER,
+    reach_day          INTEGER,
+    accounts_engaged   INTEGER,
+    total_interactions INTEGER,
+    tg_subscribers     INTEGER,
+    updated_at         TEXT DEFAULT (datetime('now'))
+);
 """
 
 
@@ -523,12 +631,44 @@ def _fetchall(cur):
     return [dict(r) for r in rows]
 
 
+def _strip_sql_comments(sql):
+    """Drop `-- …` line comments so the naive split on ';' can't cut a statement.
+
+    Only line comments, and only outside single quotes — the schema has no
+    string literals containing `--`, but stripping inside one would corrupt a
+    default value rather than a comment, and that is a worse failure than the
+    one being fixed.
+    """
+    out = []
+    for line in sql.splitlines():
+        in_str, cut = False, None
+        i = 0
+        while i < len(line):
+            ch = line[i]
+            if ch == "'":
+                in_str = not in_str
+            elif not in_str and ch == "-" and line[i + 1:i + 2] == "-":
+                cut = i
+                break
+            i += 1
+        out.append(line if cut is None else line[:cut])
+    return "\n".join(out)
+
+
 def init_db():
     conn = _conn()
     try:
         cur = conn.cursor()
         if _is_postgres():
-            for statement in _SCHEMA.strip().split(";"):
+            # Comments are stripped BEFORE the split, because the split is on ";"
+            # and a semicolon inside a `-- comment` cuts the statement it belongs
+            # to in half. Both halves then fail silently in the rollback below,
+            # and the table simply never exists — which is exactly how
+            # `ig_media` and `audience_daily` failed to be created on
+            # 2026-08-08 while their neighbours were fine. A schema loader that
+            # loses a table because of a punctuation mark in a comment should
+            # not stay that way.
+            for statement in _strip_sql_comments(_SCHEMA).strip().split(";"):
                 s = statement.strip()
                 if s:
                     try:
@@ -1245,6 +1385,119 @@ def expire_old_leads(max_age_days=7):
         n = cur.rowcount
         conn.commit()
         return n
+    finally:
+        conn.close()
+
+
+# ── Reach: Instagram snapshots + article reads ────────────────────────────────
+# See docs/reach-analytics.md. The Instagram API keeps two days of account reach
+# and no follower history at all, so these tables ARE the record.
+
+def upsert_ig_media(media_id, *, media_type=None, product_type=None,
+                    permalink=None, caption=None, posted_at=None, run_id=None):
+    """One row per post. Idempotent — a sweep runs every 6 hours over the same
+    posts, and `seen_at` is deliberately not touched on update so it keeps
+    meaning 'when we first saw this'."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        if _is_postgres():
+            cur.execute(
+                "INSERT INTO ig_media (media_id, media_type, product_type, permalink, "
+                "caption, run_id, posted_at) VALUES (%s,%s,%s,%s,%s,%s,%s) "
+                "ON CONFLICT (media_id) DO UPDATE SET permalink = EXCLUDED.permalink, "
+                "caption = EXCLUDED.caption, "
+                # COALESCE so a later sweep that cannot resolve the run does not
+                # erase a link an earlier one worked out.
+                "run_id = COALESCE(EXCLUDED.run_id, ig_media.run_id)",
+                (media_id, media_type, product_type, permalink, caption, run_id, posted_at))
+        else:
+            cur.execute("SELECT run_id FROM ig_media WHERE media_id = ?", (media_id,))
+            row = _fetchone(cur)
+            if row:
+                # _fetchone returns a dict keyed by column name in BOTH dialects,
+                # never a tuple — row[0] is a KeyError, not the first column.
+                cur.execute("UPDATE ig_media SET permalink=?, caption=?, run_id=? "
+                            "WHERE media_id=?",
+                            (permalink, caption, run_id or row["run_id"], media_id))
+            else:
+                cur.execute("INSERT INTO ig_media (media_id, media_type, product_type, "
+                            "permalink, caption, run_id, posted_at) VALUES (?,?,?,?,?,?,?)",
+                            (media_id, media_type, product_type, permalink, caption,
+                             run_id, posted_at))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def add_ig_media_metrics(media_id, **vals):
+    """Append one snapshot. Append-only on purpose: a post's numbers keep moving
+    for days and the shape of that curve is the interesting part."""
+    cols = ("reach", "views", "likes", "comments", "saved", "shares")
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(
+            f"INSERT INTO ig_media_metrics (media_id, {', '.join(cols)}) "
+            f"VALUES ({', '.join([ph] * (len(cols) + 1))})",
+            (media_id, *[vals.get(c) for c in cols]))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def upsert_audience_day(day, **vals):
+    """One row per UTC day. Upserted rather than appended — several sweeps a day
+    are describing the same day, not different ones."""
+    cols = ("followers", "reach_day", "accounts_engaged", "total_interactions",
+            "tg_subscribers")
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        if _is_postgres():
+            cur.execute(
+                f"INSERT INTO audience_daily (day, {', '.join(cols)}, updated_at) "
+                f"VALUES (%s,%s,%s,%s,%s,%s,NOW()) ON CONFLICT (day) DO UPDATE SET "
+                + ", ".join(f"{c} = COALESCE(EXCLUDED.{c}, audience_daily.{c})"
+                            for c in cols)
+                + ", updated_at = NOW()",
+                (day, *[vals.get(c) for c in cols]))
+        else:
+            cur.execute("INSERT OR REPLACE INTO audience_daily "
+                        f"(day, {', '.join(cols)}) VALUES (?,?,?,?,?,?)",
+                        (day, *[vals.get(c) for c in cols]))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def ig_run_id_for_media(media_id, permalink=None):
+    """Trace a post back to the story it came from, via the ids we stored at
+    post time. Returns None when it cannot be resolved — an older post from
+    before we recorded the linkage, which is not an error."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        for table in ("reels", "carousel_runs"):
+            try:
+                cur.execute(f"SELECT run_id FROM {table} WHERE ig_media_id = {ph}",
+                            (media_id,))
+                row = _fetchone(cur)
+                if row and row.get("run_id"):
+                    return row["run_id"]
+                if permalink:
+                    cur.execute(f"SELECT run_id FROM {table} WHERE ig_permalink = {ph}",
+                                (permalink,))
+                    row = _fetchone(cur)
+                    if row and row.get("run_id"):
+                        return row["run_id"]
+            except Exception:
+                # carousel_runs may not carry these columns on an older schema;
+                # an unresolved link is not worth failing a sweep over.
+                continue
+        return None
     finally:
         conn.close()
 

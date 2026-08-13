@@ -145,6 +145,26 @@ if service == "thelivu-agent":
         except Exception as e:
             log.error("Auto-recheck failed: %s", e)
 
+        # Instagram insights — snapshot reach/views/likes into our own tables.
+        #
+        # ABOVE the breaker and the budget governor on purpose, and it belongs
+        # there: this is HTTP against Meta, not a model call, so it costs nothing
+        # and records no token_usage. Parking it with the model stages would
+        # punch holes in the history on exactly the busiest days — and the
+        # history is the point, because the API keeps two days of account reach
+        # and no follower history at all. If we don't write it down, nobody has
+        # it. See docs/reach-analytics.md.
+        try:
+            from engine.agents.ig_insights import run_ig_sync, sync_due
+            forced_ig = kv_get("force_ig_sync")
+            if forced_ig:
+                kv_set("force_ig_sync", "")
+            if forced_ig or sync_due(now_utc):
+                log.info("Instagram sync: %s", run_ig_sync())
+        except Exception as e:
+            log.error("Instagram sync failed: %s", e, exc_info=True)
+            _sweep_failed("Instagram sync", e)
+
         # ── Quota breaker ─────────────────────────────────────────────────────
         # Both providers ran dry on 2026-07-21 and the tick spent 22 hours
         # crashing on a 429 every 2 minutes. While the breaker is open we skip

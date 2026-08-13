@@ -76,6 +76,19 @@ def _make_handler(slides_dir):
                 self.send_header("Cache-Control", "no-cache")
                 self.end_headers()
                 self.wfile.write(page)
+                # Counted AFTER the bytes are out, and only for a real article.
+                # A 404 is a wrong or unpublished URL, not a read. `record` only
+                # queues — the DB write happens on another thread, so a Railway
+                # round trip never lands in front of a reader.
+                if code == 200:
+                    try:
+                        from publishing import reads
+                        reads.record(name[2:], run_id=(run or {}).get("id"),
+                                     ip=self._client_ip(),
+                                     user_agent=self.headers.get("User-Agent"),
+                                     referrer=self.headers.get("Referer"))
+                    except Exception as e:
+                        log.warning("Read not counted for %r: %s", name, e)
                 return
             # Reel MP4s: /reel/<id>.mp4 — served from the DB (Piper/ffmpeg run on
             # Anil's laptop, so Railway can't regenerate them; the bytes live in the
@@ -138,6 +151,19 @@ def _make_handler(slides_dir):
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
+
+        def _client_ip(self):
+            """The reader's address, for hashing only — never stored.
+
+            Railway terminates TLS at its edge, so `client_address` is the
+            proxy for every request and would hash every reader to the same
+            value, turning "unique readers" into "1". The leftmost
+            X-Forwarded-For entry is the original client.
+            """
+            fwd = self.headers.get("X-Forwarded-For")
+            if fwd:
+                return fwd.split(",")[0].strip()
+            return self.client_address[0] if self.client_address else ""
 
         def _serve_bytes(self, data, content_type):
             """Serve an in-memory blob with HTTP Range support (Instagram's video

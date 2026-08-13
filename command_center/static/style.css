@@ -15,6 +15,18 @@
   --info: #8fc7ff;
   --mono: 'DejaVu Sans Mono', 'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, monospace;
   --sans: -apple-system, 'Segoe UI', Roboto, 'Noto Sans', sans-serif;
+
+  /* Chart series. NOT the UI tokens above — those are tuned as text on the dark
+     surface and are too light and too desaturated to work as marks (OKLCH
+     L 0.76/0.81 against a 0.48–0.67 band, chroma under the 0.10 floor, so they
+     read gray). These are deeper steps of the same gold and blue, validated
+     against --surface #221C13: lightness band PASS, chroma PASS, CVD separation
+     ΔE 23.2 protan / 21.8 tritan, normal-vision ΔE 24.8, contrast >= 3:1.
+     Assigned in fixed order and never cycled — carousels are always gold and
+     reels always blue, whatever a filter leaves on screen. */
+  --series-a: #BF8A2E;   /* carousels · human reads */
+  --series-b: #4E93D8;   /* reels · bot hits */
+  --grid: #332B1E;       /* recessive: the data must outrank the scaffolding */
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -246,6 +258,37 @@ video.reel { width: min(300px, 80vw); border-radius: 10px; border: 1px solid var
 .bars { display: flex; align-items: flex-end; gap: 3px; height: 120px; padding: 8px 0; }
 .bars .bar { flex: 1; background: var(--gold); border-radius: 3px 3px 0 0; min-width: 4px; opacity: .85; }
 .bars .bar:hover { opacity: 1; }
+
+/* ── Charts ──────────────────────────────────────────────────────────────── */
+.chart { position: relative; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart .gridline { stroke: var(--grid); stroke-width: 1; }
+.chart .axislbl { fill: var(--muted); font-family: var(--mono); font-size: 9px; }
+/* 2px lines, per the mark spec — thin enough that the grid stays behind them. */
+.chart .series { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+/* Markers are >=8px only on hover; a dot on every point is noise at 30 days. */
+.chart .dot { r: 0; transition: r .08s; }
+.chart .dot.on { r: 4.5; stroke: var(--surface); stroke-width: 2; }
+.chart .crosshair { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0; }
+.chart .hit { fill: transparent; cursor: crosshair; }
+.chart-tip {
+  position: absolute; pointer-events: none; opacity: 0; transform: translate(-50%, -100%);
+  background: var(--ink); border: 1px solid var(--line); border-radius: 8px;
+  padding: 6px 9px; font-family: var(--mono); font-size: 11px; color: var(--kraft);
+  white-space: nowrap; z-index: 5; box-shadow: 0 4px 14px rgba(0,0,0,.45);
+}
+.chart-tip .k { color: var(--muted); }
+/* 2px surface gap between adjacent fills, so bars read as separate marks. */
+.chart .barmark { stroke: var(--surface); stroke-width: 2; }
+.legend { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin: 2px 0 8px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px;
+               font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+/* Identity never rests on colour alone: the chip carries a word too. */
+.kindchip { font-family: var(--mono); font-size: 10px; padding: 1px 6px; border-radius: 999px;
+            border: 1px solid var(--line); white-space: nowrap; }
+.inbar { height: 6px; border-radius: 3px; min-width: 2px; display: block; }
+.empty { color: var(--muted); font-size: 13px; padding: 14px 2px; }
 
 /* ── Modal ─────────────────────────────────────────────────────────────── */
 .modal-back {

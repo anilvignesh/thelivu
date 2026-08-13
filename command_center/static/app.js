@@ -42,6 +42,135 @@ function clock(epoch) {
 }
 function pill(status) { return `<span class="pill ${esc(status)}">${esc(status || '—')}</span>`; }
 function inr(usd) { return `₹${(usd * (state.inrRate || 84)).toFixed(2)}`; }
+function num(n) { return (n == null) ? '—' : Number(n).toLocaleString('en-IN'); }
+
+/* ── charts ────────────────────────────────────────────────────────────────
+   Hand-rolled inline SVG, because "no new deps" is a standing rule here and a
+   charting library would be the largest dependency in the repo for four plots.
+
+   Two forms only, chosen by the job the data does: a line for a quantity over
+   time, and grouped bars for two counts compared per day. Both ship a hover
+   layer — an SVG chart on a screen IS interactive, and a chart you cannot
+   interrogate makes you guess at the values.
+
+   Deliberately NOT here: any dual-axis helper. Followers and reach are
+   different scales, so they get two charts rather than two y-axes. */
+
+function chartTip(host) {
+  const tip = el('<div class="chart-tip"></div>');
+  host.appendChild(tip);
+  return {
+    show(x, y, html) { tip.innerHTML = html; tip.style.left = x + 'px'; tip.style.top = (y - 8) + 'px'; tip.style.opacity = 1; },
+    hide() { tip.style.opacity = 0; },
+  };
+}
+
+/* One series over time. `pts` = [{x: 'YYYY-MM-DD', y: Number|null}].
+   A single series needs no legend — the card title names it. */
+function lineChart(pts, { color = 'var(--series-a)', label = '', fmt = num, height = 130 } = {}) {
+  const host = el('<div class="chart"></div>');
+  const vals = pts.filter(p => p.y != null);
+  if (!vals.length) { host.appendChild(el('<div class="empty">No data yet.</div>')); return host; }
+  if (vals.length === 1) {
+    // One point is not a trend and drawing it as a flat line would imply one.
+    host.appendChild(el(`<div class="empty">${esc(fmt(vals[0].y))} on ${esc(vals[0].x)} —
+      one day so far, so there is nothing to trend yet.</div>`));
+    return host;
+  }
+  const W = 640, H = height, P = { t: 10, r: 10, b: 18, l: 34 };
+  const ys = vals.map(p => p.y);
+  const lo = Math.min(...ys, 0), hi = Math.max(...ys) || 1;
+  const X = i => P.l + (W - P.l - P.r) * (pts.length === 1 ? 0.5 : i / (pts.length - 1));
+  const Y = v => H - P.b - (H - P.t - P.b) * ((v - lo) / ((hi - lo) || 1));
+
+  const ticks = [lo, lo + (hi - lo) / 2, hi];
+  const grid = ticks.map(t =>
+    `<line class="gridline" x1="${P.l}" x2="${W - P.r}" y1="${Y(t).toFixed(1)}" y2="${Y(t).toFixed(1)}"/>
+     <text class="axislbl" x="${P.l - 6}" y="${(Y(t) + 3).toFixed(1)}" text-anchor="end">${fmt(Math.round(t))}</text>`).join('');
+  const d = pts.map((p, i) => (p.y == null ? null : `${X(i).toFixed(1)},${Y(p.y).toFixed(1)}`))
+    .filter(Boolean).map((c, i) => (i ? 'L' : 'M') + c).join(' ');
+  const dots = pts.map((p, i) => p.y == null ? '' :
+    `<circle class="dot" data-i="${i}" cx="${X(i).toFixed(1)}" cy="${Y(p.y).toFixed(1)}" fill="${color}"/>`).join('');
+
+  host.appendChild(el(`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}">
+    ${grid}
+    <text class="axislbl" x="${P.l}" y="${H - 4}">${esc(pts[0].x)}</text>
+    <text class="axislbl" x="${W - P.r}" y="${H - 4}" text-anchor="end">${esc(pts[pts.length - 1].x)}</text>
+    <line class="crosshair" y1="${P.t}" y2="${H - P.b}"/>
+    <path class="series" stroke="${color}" d="${d}"/>
+    ${dots}
+    <rect class="hit" x="0" y="0" width="${W}" height="${H}"/>
+  </svg>`));
+
+  const tip = chartTip(host);
+  const svg = host.querySelector('svg');
+  const cross = host.querySelector('.crosshair');
+  svg.querySelector('.hit').addEventListener('mousemove', ev => {
+    const box = svg.getBoundingClientRect();
+    const vx = (ev.clientX - box.left) / box.width * W;
+    let best = 0, bd = Infinity;
+    pts.forEach((p, i) => { const dd = Math.abs(X(i) - vx); if (p.y != null && dd < bd) { bd = dd; best = i; } });
+    const p = pts[best];
+    if (p.y == null) return;
+    host.querySelectorAll('.dot').forEach(c => c.classList.toggle('on', +c.dataset.i === best));
+    cross.setAttribute('x1', X(best)); cross.setAttribute('x2', X(best)); cross.style.opacity = .7;
+    tip.show(X(best) / W * box.width, Y(p.y) / H * box.height,
+      `<span class="k">${esc(p.x)}</span> &nbsp;${esc(fmt(p.y))}`);
+  });
+  svg.addEventListener('mouseleave', () => {
+    tip.hide(); cross.style.opacity = 0;
+    host.querySelectorAll('.dot').forEach(c => c.classList.remove('on'));
+  });
+  return host;
+}
+
+/* Two counts per day, side by side. Grouped rather than stacked: these are
+   compared with each other ("how much of this is crawlers?"), and a stack makes
+   the upper segment's own magnitude unreadable. */
+function groupedBars(rows, series, { height = 150, fmt = num } = {}) {
+  const host = el('<div class="chart"></div>');
+  if (!rows.length) { host.appendChild(el('<div class="empty">No reads recorded yet.</div>')); return host; }
+  const W = 640, H = height, P = { t: 10, r: 10, b: 18, l: 34 };
+  const hi = Math.max(1, ...rows.flatMap(r => series.map(s => r[s.key] || 0)));
+  const bw = (W - P.l - P.r) / rows.length;
+  const gw = Math.max(2, (bw - 6) / series.length);
+  const Y = v => H - P.b - (H - P.t - P.b) * (v / hi);
+
+  const ticks = [0, hi / 2, hi];
+  const grid = ticks.map(t =>
+    `<line class="gridline" x1="${P.l}" x2="${W - P.r}" y1="${Y(t).toFixed(1)}" y2="${Y(t).toFixed(1)}"/>
+     <text class="axislbl" x="${P.l - 6}" y="${(Y(t) + 3).toFixed(1)}" text-anchor="end">${fmt(Math.round(t))}</text>`).join('');
+
+  const marks = rows.map((r, i) => series.map((s, j) => {
+    const v = r[s.key] || 0;
+    const x = P.l + i * bw + 3 + j * gw;
+    const y = Y(v), h = Math.max(v > 0 ? 2 : 0, H - P.b - y);
+    return h ? `<rect class="barmark" data-i="${i}" x="${x.toFixed(1)}" y="${y.toFixed(1)}"
+      width="${gw.toFixed(1)}" height="${h.toFixed(1)}" rx="3" fill="${s.color}"/>` : '';
+  }).join('')).join('');
+
+  host.appendChild(el(`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="reads per day">
+    ${grid}
+    <text class="axislbl" x="${P.l}" y="${H - 4}">${esc(rows[0].day)}</text>
+    <text class="axislbl" x="${W - P.r}" y="${H - 4}" text-anchor="end">${esc(rows[rows.length - 1].day)}</text>
+    ${marks}
+    <rect class="hit" x="0" y="0" width="${W}" height="${H}"/>
+  </svg>`));
+
+  const tip = chartTip(host);
+  const svg = host.querySelector('svg');
+  svg.querySelector('.hit').addEventListener('mousemove', ev => {
+    const box = svg.getBoundingClientRect();
+    const i = Math.min(rows.length - 1, Math.max(0, Math.floor(((ev.clientX - box.left) / box.width * W - P.l) / bw)));
+    const r = rows[i];
+    if (!r) return;
+    tip.show((P.l + i * bw + bw / 2) / W * box.width, P.t / H * box.height,
+      `<span class="k">${esc(r.day)}</span><br>` +
+      series.map(s => `${esc(s.name)} ${esc(fmt(r[s.key] || 0))}`).join('<br>'));
+  });
+  svg.addEventListener('mouseleave', () => tip.hide());
+  return host;
+}
 
 /* Minimal markdown → HTML for drafts/briefs (escaped first — no injection). */
 function md(text) {
@@ -207,6 +336,9 @@ const VIEWS = [
   ['cos',       '🧭', 'Chief of staff', vCos],
   ['sources',   '📡', 'Sources',       vSources],
   ['ingest',    '📥', 'Ingest',        vIngest],
+  /* Everything else in this list is about what the engine PRODUCES. This is the
+     only view about who read it. */
+  ['reach',     '📈', 'Reach',         vReach],
   ['system',    '⚙',  'System',        vSystem],
   ['costs',     '₹',  'Costs',         vCosts],
 ];
@@ -1630,6 +1762,139 @@ async function vSystem(main) {
 }
 
 /* ══ COSTS ══════════════════════════════════════════════════════════════ */
+/* ── Reach ─────────────────────────────────────────────────────────────────
+   The engine has measured its own production in detail since day one and its
+   readership not at all. This view is the other half.
+
+   Every number here is one we actually hold. Two things a reader might expect
+   are absent on purpose: Instagram profile views (the API returns an empty
+   array on our token) and Telegram per-post views (MTProto-only, not reachable
+   with a bot token). A dashboard that fills a gap with a plausible number is
+   worse than one that shows the gap — see the note at the foot of the view. */
+async function vReach(main) {
+  const d = await api('/reach');
+  const t = d.totals;
+  main.innerHTML = '';
+
+  const head = el(`<div class="row between">
+    <div><h1>Reach</h1><div class="sub">Who read it — Instagram, the article pages, the channel.</div></div>
+    <div class="actions" data-x="a"></div></div>`);
+  addBtn(head.querySelector('[data-x=a]'), 'Refresh from Instagram', 'small', async () => {
+    const r = await api('/reach/sync', { method: 'POST' });
+    toast(r.note, 'ok', 7000);
+  });
+  main.appendChild(head);
+
+  main.appendChild(el(`<div class="tiles">
+    <div class="tile gold"><div class="v">${num(t.followers)}</div><div class="l">ig followers</div></div>
+    <div class="tile"><div class="v">${num(t.reach)}</div><div class="l">reach, all posts</div></div>
+    <div class="tile"><div class="v">${num(t.views)}</div><div class="l">views</div></div>
+    <div class="tile"><div class="v">${num(t.likes)}</div><div class="l">likes</div></div>
+    <div class="tile"><div class="v">${num(t.reads_humans)}</div><div class="l">article reads</div></div>
+    <div class="tile"><div class="v">${num(t.tg_subscribers)}</div><div class="l">tg subscribers</div></div>
+  </div>`));
+
+  const synced = d.last_sync_at
+    ? `Instagram last pulled ${ago(d.last_sync_at)}${d.last_sync_result ? ' — ' + esc(d.last_sync_result) : ''}.`
+    : 'Instagram has not been pulled yet — the engine sweeps every 6 hours, or press Refresh.';
+  main.appendChild(el(`<div class="muted small" style="margin:-6px 0 14px">${synced}</div>`));
+
+  /* Audience over time. Two charts, not one with two axes: followers are in the
+     tens and reach in the hundreds, and putting them on a shared scale would
+     flatten one of them into the axis. */
+  const days = d.audience.map(a => a.day);
+  if (days.length) {
+    const grid2 = el('<div class="grid2"></div>');
+    const f = el('<div class="card"><div class="eyebrow" style="margin-top:0">Instagram followers</div></div>');
+    f.appendChild(lineChart(d.audience.map(a => ({ x: a.day, y: a.followers })),
+      { color: 'var(--series-a)', label: 'Instagram followers over time' }));
+    const rr = el('<div class="card"><div class="eyebrow" style="margin-top:0">Account reach per day</div></div>');
+    rr.appendChild(lineChart(d.audience.map(a => ({ x: a.day, y: a.reach_day })),
+      { color: 'var(--series-b)', label: 'Instagram account reach per day' }));
+    grid2.appendChild(f); grid2.appendChild(rr);
+    main.appendChild(grid2);
+  }
+
+  /* Posts. A sorted table rather than a bar chart: 22 rows of a two-word label
+     is a table's job, and the inline bar gives the comparison a bar chart would
+     without giving up the exact numbers beside it. */
+  main.appendChild(el(`<div class="eyebrow">Posts — ${t.posts} (${t.reels} reels, ${t.carousels} carousels)</div>`));
+  main.appendChild(el(`<div class="legend">
+    <span><i style="background:var(--series-b)"></i> Reel</span>
+    <span><i style="background:var(--series-a)"></i> Carousel</span>
+    <span class="muted">sorted by reach</span></div>`));
+
+  if (!d.posts.length) {
+    main.appendChild(el(`<div class="card empty">Nothing pulled from Instagram yet.</div>`));
+  } else {
+    const sorted = [...d.posts].sort((a, b) => (b.reach || 0) - (a.reach || 0));
+    const maxReach = Math.max(1, ...sorted.map(p => p.reach || 0));
+    main.appendChild(el(`<div class="tablewrap"><table>
+      <tr><th>post</th><th>posted</th><th>reach</th><th>views</th><th>likes</th>
+          <th>comments</th><th>saves</th><th>shares</th></tr>
+      ${sorted.map(p => {
+        const c = p.kind === 'Reel' ? 'var(--series-b)' : 'var(--series-a)';
+        return `<tr>
+          <td style="min-width:280px">
+            <span class="kindchip" style="color:${c};border-color:${c}">${p.kind}</span>
+            ${p.permalink ? `<a href="${esc(p.permalink)}" target="_blank" rel="noopener">${esc(p.title || '(no caption)')}</a>`
+                          : esc(p.title || '(no caption)')}
+            ${p.run_id ? `<span class="id" style="cursor:pointer" onclick="openRun(${p.run_id})">#${p.run_id}</span>` : ''}
+            <span class="inbar" style="background:${c};width:${Math.max(2, (p.reach || 0) / maxReach * 100)}%"></span>
+          </td>
+          <td class="muted">${fdate(p.posted_at)}</td>
+          <td><b>${num(p.reach)}</b></td><td>${num(p.views)}</td><td>${num(p.likes)}</td>
+          <td>${num(p.comments)}</td><td>${num(p.saved)}</td><td>${num(p.shares)}</td>
+        </tr>`;
+      }).join('')}</table></div>`));
+  }
+
+  /* Article reads. Bots are shown, not hidden: a large share of /a/ traffic is
+     Telegram's link-unfurler and search crawlers, and folding those into the
+     headline would inflate it in the flattering direction. */
+  main.appendChild(el(`<div class="eyebrow">Article reads — ${num(t.reads_humans)} people, ${num(t.reads_bots)} crawlers</div>`));
+  main.appendChild(el(`<div class="legend">
+    <span><i style="background:var(--series-a)"></i> People</span>
+    <span><i style="background:var(--series-b)"></i> Crawlers &amp; link previews</span></div>`));
+  const readsCard = el('<div class="card"></div>');
+  readsCard.appendChild(groupedBars(d.reads_by_day, [
+    { key: 'humans', name: 'People', color: 'var(--series-a)' },
+    { key: 'bots', name: 'Crawlers', color: 'var(--series-b)' },
+  ]));
+  main.appendChild(readsCard);
+
+  if (d.reads_by_article.length) {
+    main.appendChild(el(`<div class="tablewrap"><table>
+      <tr><th>article</th><th>people</th><th>unique</th><th>crawlers</th><th>last read</th></tr>
+      ${d.reads_by_article.map(a => `<tr>
+        <td>${a.run_id ? `<span class="id" style="cursor:pointer" onclick="openRun(${a.run_id})">#${a.run_id}</span>` : ''}
+            ${esc(a.slug)}</td>
+        <td><b>${num(a.humans)}</b></td><td>${num(a.uniques)}</td>
+        <td class="muted">${num(a.bots)}</td><td class="muted">${fdate(a.last_read)}</td>
+      </tr>`).join('')}</table></div>`));
+  }
+
+  if (d.referrers.length) {
+    main.appendChild(el(`<div class="eyebrow">Where readers came from</div>`));
+    main.appendChild(el(`<div class="tablewrap"><table>
+      <tr><th>source</th><th>reads</th></tr>
+      ${d.referrers.map(x => `<tr><td>${esc(x.host)}</td><td>${num(x.n)}</td></tr>`).join('')}
+      </table></div>`));
+  }
+
+  main.appendChild(el(`<div class="card muted small">
+    <b>What is not here, and why.</b> Instagram <i>profile views</i> returns an empty
+    result on our token, so it is not shown rather than shown as zero. Telegram
+    <i>per-post views</i> — the eye-count in the channel — is MTProto-only and cannot be
+    read with a bot token; only the subscriber count is available.
+    Article reads store no IP, no user-agent and no cookie: a reader is a hash of
+    address and browser with a salt that is regenerated every day and never kept, so
+    "how many people today" is answerable and "was this the same person on Tuesday"
+    is not. Reads are queued in memory and written in batches, so a restart can lose
+    a few — treat these as a good count, never an exact one.
+  </div>`));
+}
+
 async function vCosts(main) {
   const d = await api('/costs');
   state.inrRate = d.inr_rate;
