@@ -254,10 +254,11 @@ def _build_caption(fields, article_url):
 def _plan_shots(voiced):
     """How many sub-shots each beat gets, from its REAL synthesised duration.
 
-    A beat is 6-12s of speech (the script's 110-135 words over 5-6 beats makes that
-    arithmetic unavoidable), so one picture per beat means one picture per ~9s. This
-    plans 2-3 pictures for the long ones. The narration is untouched — only the number
-    of images changes — so nothing here can affect what the reel SAYS.
+    A beat is roughly 6-12s of speech (the script's 110-180 words over 5-7 beats
+    makes that arithmetic unavoidable), so one picture per beat means one picture
+    per ~9s. This plans 2-3 pictures for the long ones. The narration is untouched
+    — only the number of images changes — so nothing here can affect what the reel
+    SAYS.
 
     This used to estimate the duration from the word count at 147wpm, before the voice
     existed. It overshot on one beat of the first Assam reel and cut a 5.8s line into
