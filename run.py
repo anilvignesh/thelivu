@@ -233,6 +233,71 @@ if service == "thelivu-agent":
             continue
         _budget_logged_at = None
 
+        # Belief desks — take one approved belief to the human gate on its turn,
+        # or when signalled. The cycle does its own budget and queue checks and
+        # returns the reason it did nothing, so a quiet desk is explicable.
+        #
+        # FIRST thing in the tick, before any other model-costing sweep — not
+        # just before the RSS block. The 2026-08-08 fix (docs/alternating-desks.md)
+        # only moved this ahead of run_daily_cycle(), on the theory that the RSS
+        # cycle was the thing spending the cap before belief got a look. It
+        # wasn't the whole story: process_recheck_requests() and
+        # process_queued_carousels() run unconditionally on every single tick
+        # (whenever Anil has something queued, which is often), and the weekly/
+        # monthly scout + chief-of-staff's daily sweep all used to sit between
+        # here and the belief block too — any one of them spending past the
+        # $0.55-of-cap headroom before belief's own turn reproduces the exact
+        # standdown the Aug-8 fix was meant to fix. Confirmed via token_usage:
+        # real spend was landing at 00:00:44 UTC, and the belief desk went 12
+        # days straight without a single run despite `cycle_due()` correctly
+        # returning True the whole time. Moving the whole belief section here —
+        # ahead of literally everything else that spends money — is the only
+        # place "first crack at a fresh $0.00 cap" is actually true.
+        try:
+            if kv_get("force_belief_scout"):
+                kv_set("force_belief_scout", "")
+                log.info("Belief scout signalled")
+                from engine.desks.ek.scout import run_belief_scout
+                run_belief_scout()
+        except Exception as e:
+            log.error("Belief scout (manual) failed: %s", e, exc_info=True)
+            _sweep_failed("Belief scout", e)
+
+        # Belief desks — weekly scout, so the queue is never empty when Anil is.
+        try:
+            last_bs = kv_get("last_belief_scout_at")
+            if not last_bs:
+                # First sight: RUN it. This branch used to stamp and return, which
+                # deferred the very first scout run by a full week AND wrote a
+                # timestamp indistinguishable from a successful one — the command
+                # centre read "last scout 04 Aug" when the honest answer was
+                # "never". Four days of an empty queue were blamed on the scout's
+                # output before anyone looked at the stamp. A weekly sweep that has
+                # never run IS due, and kv persists across deploys, so this fires
+                # exactly once in the life of the key.
+                log.info("Belief scout has never run — running it now")
+                kv_set("last_belief_scout_at", now_utc.isoformat())
+                from engine.desks.ek.scout import run_belief_scout
+                run_belief_scout()
+            elif (now_utc - datetime.fromisoformat(last_bs)).days >= 7:
+                # Stamp BEFORE running — same retry-storm rule as the sweeps above.
+                kv_set("last_belief_scout_at", now_utc.isoformat())
+                from engine.desks.ek.scout import run_belief_scout
+                run_belief_scout()
+        except Exception as e:
+            log.error("Belief scout (weekly) failed: %s", e, exc_info=True)
+            _sweep_failed("Belief scout", e)
+
+        try:
+            from engine.desks.ek.scout import cycle_due, run_belief_cycle
+            forced = kv_get("force_belief_run")
+            if forced:
+                kv_set("force_belief_run", "")
+            if forced or cycle_due(now_utc):
+                log.info("Belief cycle: %s", run_belief_cycle())
+        except Exception as e:
+            log.error("Belief cycle failed: %s", e, exc_info=True)
+
         # Weekly: source scout + story scout + story tracker
         try:
             last_scout = kv_get("last_scout_at")
@@ -396,65 +461,6 @@ if service == "thelivu-agent":
                 run_tech_steward()
         except Exception as e:
             log.error("Tech steward (weekly) failed: %s", e)
-
-        # Belief desks — scout, manual signal (command center "Run now").
-        try:
-            if kv_get("force_belief_scout"):
-                kv_set("force_belief_scout", "")
-                log.info("Belief scout signalled")
-                from engine.desks.ek.scout import run_belief_scout
-                run_belief_scout()
-        except Exception as e:
-            log.error("Belief scout (manual) failed: %s", e, exc_info=True)
-            _sweep_failed("Belief scout", e)
-
-        # Belief desks — weekly scout, so the queue is never empty when Anil is.
-        try:
-            last_bs = kv_get("last_belief_scout_at")
-            if not last_bs:
-                # First sight: RUN it. This branch used to stamp and return, which
-                # deferred the very first scout run by a full week AND wrote a
-                # timestamp indistinguishable from a successful one — the command
-                # centre read "last scout 04 Aug" when the honest answer was
-                # "never". Four days of an empty queue were blamed on the scout's
-                # output before anyone looked at the stamp. A weekly sweep that has
-                # never run IS due, and kv persists across deploys, so this fires
-                # exactly once in the life of the key.
-                log.info("Belief scout has never run — running it now")
-                kv_set("last_belief_scout_at", now_utc.isoformat())
-                from engine.desks.ek.scout import run_belief_scout
-                run_belief_scout()
-            elif (now_utc - datetime.fromisoformat(last_bs)).days >= 7:
-                # Stamp BEFORE running — same retry-storm rule as the sweeps above.
-                kv_set("last_belief_scout_at", now_utc.isoformat())
-                from engine.desks.ek.scout import run_belief_scout
-                run_belief_scout()
-        except Exception as e:
-            log.error("Belief scout (weekly) failed: %s", e, exc_info=True)
-            _sweep_failed("Belief scout", e)
-
-        # Belief desks — take one approved belief to the human gate on its turn,
-        # or when signalled. The cycle does its own budget and queue checks and
-        # returns the reason it did nothing, so a quiet desk is explicable.
-        #
-        # BEFORE the RSS block, and that is the whole of the 2026-08-08 change
-        # (docs/alternating-desks.md). This block used to sit after it, so the
-        # belief desk saw the cap only once the news desk had spent from it —
-        # and since the news cycle clears 55% of the cap in its first pass, the
-        # desk stood down every day for a fortnight and never once ran. The
-        # desks alternate now: on its turn the belief desk goes first against a
-        # fresh $0.00 cap, spends ~$0.15, and the RSS cycle below runs with the
-        # remaining ~$0.85. On a news day `cycle_due` is false and this is a
-        # no-op, so the news desk's behaviour is unchanged.
-        try:
-            from engine.desks.ek.scout import cycle_due, run_belief_cycle
-            forced = kv_get("force_belief_run")
-            if forced:
-                kv_set("force_belief_run", "")
-            if forced or cycle_due(now_utc):
-                log.info("Belief cycle: %s", run_belief_cycle())
-        except Exception as e:
-            log.error("Belief cycle failed: %s", e, exc_info=True)
 
         # Owner topics — check every 2 minutes, run immediately if queued
         try:

@@ -187,3 +187,36 @@ Non-regression:
 - The daily cap is $1.00 and the news desk hit $1.32 / $1.28 / $1.16: the
   governor parks work only *after* the cap is crossed, so the cap overruns by
   design. Alternation does not change that.
+
+---
+
+## 7. 2026-08-13 follow-up — the fix didn't fully land
+
+Twelve days after this shipped, the belief desk still had zero unattended
+publishes and `last_belief_cycle_result` still read the exact pre-fix
+stand-down message. The code in §3.3 was verified byte-correct: cadence is 2,
+`cycle_due` uses the whole-date comparison, and the belief block genuinely sat
+before `run_daily_cycle()` (the RSS block) in `run.py`.
+
+The gap: §3.3 only ever named the RSS block as competition. It wasn't the only
+thing spending before the belief block got its turn. By 2026-08-13 several
+other sweeps had accumulated ahead of it in `run.py`'s tick — weekly
+source/story scout, monthly meta-synthesis, and critically
+**`process_recheck_requests()`** and **`process_queued_carousels()`**, which
+run unconditionally on *every* tick whenever Anil has something queued, plus
+`run_chief_of_staff()`'s daily proactive sweep. None of these existed in the
+tick's current form when §3.3 was written, or weren't accounted for as
+budget-spending competition. `token_usage` showed real spend starting at
+00:00:44 UTC — before the belief block could plausibly run first no matter how
+correct its own ordering relative to the RSS block was.
+
+Fix: moved the entire belief section (manual scout signal, weekly scout, and
+the belief cycle itself) to immediately after the top-of-tick budget gate —
+before *every* other model-costing sweep, not just the RSS block. This is the
+literal version of "the belief desk goes first against a fresh $0.00 cap" from
+§3.3, rather than "goes first among the things we remembered to check."
+
+The lesson for next time: "runs before X" fixes are fragile against new code
+landing between the fix and the top of the loop. Pinning the ordering to a
+fixed anchor (top of tick, right after the budget gate) rather than to a named
+neighbour is the version that doesn't rot as the tick grows.
