@@ -103,36 +103,9 @@ if service == "thelivu-agent":
         except Exception as e:
             log.warning("Could not report the %s failure: %s", what, e)
 
-    # Active window (Anil, 2026-08-15): the automated loop — RSS ingestion,
-    # beat-monitor, chief-of-staff, story-scout, dig auto-advance, and picking
-    # up on-demand /dig, /scoutnow etc. signals — only runs 1am-8am IST. Outside
-    # it the process just sleeps; it does NOT touch model spend the rest of the
-    # day. This exists to keep the automated engine's model calls from ever
-    # overlapping Anil's own interactive Claude Code usage, ahead of routing
-    # engine calls through the subscription token instead of the metered API.
-    # The Telegram bot (approve/kill/publish) is a SEPARATE Railway service and
-    # is unaffected — drafts can still be approved/killed/published any time.
-    # What DOES wait for the window: an approved carousel queued for posting is
-    # picked up by process_queued_carousels() in this same loop, so "approve at
-    # 2pm" means "posts after 1am", not immediately.
-    _IST_OFFSET = timedelta(hours=5, minutes=30)
-    _WINDOW_START_HOUR, _WINDOW_END_HOUR = 1, 8  # [1am, 8am) IST
-    _off_window_logged_at = None
-
-    def _in_active_window(now_utc):
-        ist_hour = (now_utc + _IST_OFFSET).hour
-        return _WINDOW_START_HOUR <= ist_hour < _WINDOW_END_HOUR
-
     while True:
         now_utc = datetime.now(timezone.utc)
         today = now_utc.date()
-
-        if not _in_active_window(now_utc):
-            if _off_window_logged_at is None or (now_utc - _off_window_logged_at).total_seconds() >= 3600:
-                log.info("Outside the 1am-8am IST active window — sleeping, no model spend.")
-                _off_window_logged_at = now_utc
-            time.sleep(TOPIC_POLL_SECONDS)
-            continue
 
         # Daily cost report — time configurable via /setcost HH:MM (kv: cost_report_utc)
         if _cost_report_due(now_utc) and _cost_report_sent_date != today:
