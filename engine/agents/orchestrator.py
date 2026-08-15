@@ -71,6 +71,7 @@ from shared.db import (
     list_digs,
     get_dig_updates,
     get_due_digs,
+    get_recent_leads_by_source,
 )
 from engine.agents.skill_runner import (run_skill, run_structured_skill,
                                         StructuredOutputError, MARK)
@@ -1364,10 +1365,25 @@ def run_daily_cycle():
         log.info("Running beat-monitor (courts, ECI, RBI, CAG, govt portals)...")
         try:
             kv_set("last_beat_at", datetime.now(timezone.utc).isoformat())
+            # Hand it its own recent output so it can recognise a re-worded repeat
+            # of a finding it already surfaced — the sha1(throughline) dedup below
+            # only catches exact-string repeats, and this beat re-describes the
+            # same handful of CAG/RBI findings under fresh phrasing daily otherwise
+            # (audit 2026-08-15: five near-identical CAG leads in one day).
+            recent = get_recent_leads_by_source("beat-monitor", days=14, limit=25)
+            recent_text = "\n".join(
+                f"- [{r.get('date')}] {(r.get('throughline') or '')[:160]}" for r in recent
+            ) or "(none in the last 14 days)"
             beat_output = run_skill("beat-monitor",
                 "Run the beat monitor for today's cycle. "
                 "Scan primary feeds: Kerala High Court, ECI, RBI, CAG, government portals. "
-                "Surface under-covered leads only — skip anything already well-covered.")
+                "Surface under-covered leads only — skip anything already well-covered.\n\n"
+                "ALREADY SURFACED IN THE LAST 14 DAYS (do not re-emit — if a candidate lead "
+                "is the same underlying finding/report/scheme as one below, even reworded or "
+                "with a different rupee figure drawn from the same audit, SKIP it; only "
+                "surface it again if something genuinely NEW has happened — a response, a "
+                "follow-up action, a fresh document):\n"
+                f"{recent_text}")
             # Parse beat-monitor leads and add to pool as synthetic lead dicts
             for line in beat_output.splitlines():
                 if line.startswith("## Lead"):
@@ -1617,11 +1633,24 @@ def run_story_scout(theme_hint=None):
             f"WATCHLIST:\n{watchlist_text}"
         )
     else:
+        # "Doesn't already have a story in progress" is only checkable if the scout
+        # can actually see what's in progress — show it the open digs table, not
+        # just the static watchlist (audit 2026-08-15: this instruction had no data
+        # behind it, so the same watchlist themes kept getting reopened).
+        open_digs = [d for d in list_digs(include_closed=True)
+                     if d.get("status") not in ("parked", "killed")]
+        open_digs_text = "\n".join(
+            f"- dig-{d['id']} [{d.get('status')}] (watchlist: {d.get('watchlist_id') or '—'}) "
+            f":: {(d.get('title') or '')[:120]}" for d in open_digs
+        ) or "(none — nothing currently open)"
         prompt = (
             "Run the weekly story scout. Pick the highest-priority theme from the "
-            "watchlist below that doesn't already have a story in progress, form a "
-            "sharp falsifiable question, identify the primary records to pull, and "
-            "output a dig brief.\n\n"
+            "watchlist below that doesn't already have a story in progress — check "
+            "the OPEN DIGS list first; if every ripe theme already has an open dig, "
+            "say so and pick the theme whose open dig looks most stalled instead of "
+            "opening a duplicate, or pick an unstarted theme. Form a sharp falsifiable "
+            "question, identify the primary records to pull, and output a dig brief.\n\n"
+            f"OPEN DIGS (already in progress):\n{open_digs_text}\n\n"
             f"WATCHLIST:\n{watchlist_text}"
         )
     try:
@@ -1735,6 +1764,33 @@ def run_dig_advance(dig_id):
 
     kind = "brief" if first_step else "finding"
     add_dig_update(dig_id, result, kind=kind)
+
+    # Auto-park a dig that's been advanced repeatedly without ever reaching
+    # ready-to-write/parked/killed on its own — the skill's own discipline says
+    # "willing to publish nothing" is a successful outcome, but nothing was
+    # forcing that outcome: 28 digs opened between 2026-07-15 and 2026-08-15,
+    # only 1 ever reached ready-to-write, and NONE were ever parked or killed —
+    # they just cycled in scoping/verifying indefinitely (audit 2026-08-15).
+    # Cap on advance count (not just age) so a fast-cadence dig doesn't slip
+    # through on age alone.
+    _MAX_ADVANCES = 8
+    _MAX_AGE_DAYS = 21
+    advance_count = len(updates) + 1  # including this step
+    age_days = _days_ago(dig.get("created_at"))
+    stale = new_status not in ("ready-to-write", "parked", "killed") and (
+        advance_count >= _MAX_ADVANCES or age_days >= _MAX_AGE_DAYS
+    )
+    if stale:
+        add_dig_update(
+            dig_id,
+            f"Auto-parked: {advance_count} advance(s) over {age_days} day(s) without "
+            "reaching ready-to-write. Per the dig discipline, a thread that can't "
+            "establish its core from records is a successful negative, not a stall — "
+            "parking it rather than cycling it forever. Revive manually if a genuinely "
+            "new document or development lands.",
+            kind="auto-park",
+        )
+        new_status = "parked"
 
     # Schedule the next auto-advance (or stop, if terminal / ready).
     from datetime import timedelta
@@ -1863,6 +1919,11 @@ def _build_cos_snapshot():
     killed = [r for r in runs if r.get("status") in ("killed", "kill")][:10]
     digs = list_digs(include_closed=True)
     dropped_digs = [d for d in digs if d.get("status") in ("parked", "killed")]
+    # Everything currently in flight — shown so the sweep checks before proposing a
+    # NEW_DIGS thread that duplicates one already open (audit 2026-08-15: five
+    # separate "Kerala cooperative bank stress" digs opened over three weeks because
+    # this list was never shown, only the parked/killed ones below).
+    open_digs = [d for d in digs if d.get("status") not in ("parked", "killed")]
 
     def _run_line(r):
         return (f"- run-{r['id']} [{r.get('status')}] gate={r.get('trust_gate') or '—'} "
@@ -1872,6 +1933,10 @@ def _build_cos_snapshot():
     parts += [_run_line(r) for r in held] or ["  (none)"]
     parts.append("\nAT THE GATE, GOING STALE (>=2 days in pending_human):")
     parts += [_run_line(r) for r in stale_gate] or ["  (none)"]
+    parts.append("\nOPEN DIGS (already in progress — do NOT propose a duplicate; "
+                  "recommend 'advance' on the matching dig-<id> instead):")
+    parts += [f"- dig-{d['id']} [{d.get('status')}] :: {(d.get('title') or '')[:120]} — "
+              f"{(d.get('question') or '')[:100]}" for d in open_digs] or ["  (none)"]
     parts.append("\nDROPPED / PARKED DIGS:")
     parts += [f"- dig-{d['id']} [{d.get('status')}] :: {(d.get('title') or '')[:120]} — "
               f"{(d.get('question') or '')[:100]}" for d in dropped_digs] or ["  (none)"]

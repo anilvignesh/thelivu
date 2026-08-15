@@ -29,12 +29,18 @@ themes:
     discipline_note: "Forecasts are time-sensitive — verify the CURRENT advisory before writing anything."
 
   - id: public-money-flows
-    question: "Where does Kerala's borrowed and off-budget money actually go, and who decides?"
-    why_under_told: "KIIFB has been examined; the wider pattern of off-budget vehicles, PSU debt and contracts has not."
+    question: "Where does Kerala's borrowed and off-budget money actually go, who decides, and — for any CAG finding on it — did the flagged fund misuse ever get answered by the department, or just tabled and forgotten?"
+    why_under_told: "KIIFB has been examined; the wider pattern of off-budget vehicles, PSU debt and contracts has not. CAG reports are tabled in legislatures but rarely read — findings disappear without follow-up."
     kerala_anchor: "native"
-    primary_records: [CAG reports, budget and supplementary-demand documents, PSU / KIIFB filings, RTI]
+    primary_records:
+      - "CAG reports, budget and supplementary-demand documents, PSU / KIIFB filings, RTI"
+      - "site:cag.gov.in — search Kerala and India audit reports 2022-2024"
+      - "State legislature records — was the CAG report debated?"
+      - "PFMS data — did spending recover after the finding?"
+    method: "For each CAG finding flagging fund misuse: (a) was it covered by any outlet? (b) did the department respond? (c) did the next budget increase or decrease that department's allocation? All three are stories."
     rtis: []
     status: scoping
+    note: "Merged with the former cag-findings-follow-up theme 2026-08-15 — same question, was producing duplicate digs. One CAG/public-money thread open at a time; see [[project-thelivu]] dig discipline."
 
   - id: regulatory-enforcement
     question: "Are the bodies meant to police the powerful — pollution boards, building and coastal-zone authorities, clinical-establishment regulators — actually doing it?"
@@ -69,28 +75,16 @@ themes:
     rtis: []
     status: scoping
 
-  - id: cag-findings-follow-up
-    question: "Which CAG findings on Kerala/India schemes have gone unimplemented or unreported, and what happened to the funds?"
-    why_under_told: "CAG reports are tabled in legislatures but rarely read — findings disappear without follow-up."
-    kerala_anchor: "CAG Kerala state finance reports, scheme-specific audit reports"
-    primary_records:
-      - "site:cag.gov.in — search Kerala and India audit reports 2022-2024"
-      - "State legislature records — was the CAG report debated?"
-      - "PFMS data — did spending recover after the finding?"
-    method: "For each CAG finding flagging fund misuse: (a) was it covered by any outlet? (b) did the department respond? (c) did the next budget increase or decrease that department's allocation? All three are stories."
-    rtis: []
-    status: scoping
-
   - id: cooperative-bank-health
-    question: "Which Kerala cooperative banks are under financial stress, RBI regulatory action, or politically connected loan write-offs?"
-    why_under_told: "Cooperative banking failures hit ordinary depositors hardest; they're rarely covered until collapse."
-    kerala_anchor: "Kerala cooperative banks, district cooperative banks, PACS"
+    question: "Which cooperative banks — anywhere in India — are under financial stress, RBI regulatory action, or politically connected loan write-offs, and are depositors' funds actually safe?"
+    why_under_told: "Cooperative banking failures hit ordinary depositors hardest; they're rarely covered until collapse. National in scope — India has thousands of these, not a Kerala-specific instrument."
+    kerala_anchor: "Kerala cooperative banks, district cooperative banks, PACS — use if a Kerala instance is the strongest case, not by default"
     primary_records:
       - "RBI enforcement actions: rbi.org.in penalties search"
       - "CAG cooperative sector audit"
       - "RTI on NPA levels at district cooperative banks"
-      - "Kerala Cooperative Societies Act compliance records"
-    method: "Search RBI penalty database for Kerala coop banks last 3 years. For each penalised bank: who are the directors? Any political office holders? What is the NPA ratio? Are deposits safe?"
+      - "State Cooperative Societies Act compliance records"
+    method: "Search RBI penalty database for coop banks nationally, last 3 years. For each penalised bank: who are the directors? Any political office holders? What is the NPA ratio? Are deposits safe?"
     rtis: []
     status: scoping
 
@@ -104,6 +98,32 @@ themes:
       - "KSPCB consent orders and violations"
       - "High Court: PIL cases on environmental violations in Kerala"
     method: "Pull NGT orders for Kerala (last 24 months). Cross-check which projects have court orders vs which are still operating. Any project continuing after a stop-notice is a story."
+    rtis: []
+    status: scoping
+
+  - id: digital-lending-enforcement
+    question: "Which digital lending apps continue operating (via new entities, app-store re-listings, or partner-bank arrangements) after RBI or state police action against them for coercive recovery or usurious rates?"
+    why_under_told: "RBI bans and FIRs against individual apps get covered once; whether the same operators resurface under a new name almost never does."
+    kerala_anchor: ""
+    primary_records:
+      - "RBI digital lending apps whitelist / press releases"
+      - "MCA21 director filings — new company registrations by named individuals from banned apps"
+      - "Google Play Store removal history vs. re-listing under a new developer name"
+      - "State police cyber-cell FIRs on loan-app coercion"
+    method: "Take RBI's list of flagged/banned apps and their known promoters. Search MCA21 for new companies incorporated by the same directors after the ban date. Cross-check app-store listings for functional re-launches."
+    rtis: []
+    status: scoping
+
+  - id: gulf-migrant-labour-pipeline
+    question: "Which recruitment agencies sending Indian workers to the Gulf show a pattern of contract substitution, passport confiscation, or unpaid wages that outlasts any single company's blacklisting?"
+    why_under_told: "Individual worker distress cases get local coverage; the recruiter-side pattern across cases — same agency network, same destination employer, repeat offences — rarely gets assembled. International in scope, but materially affects Indian (heavily Kerala-origin) workers' lives and money — not a trivia story."
+    kerala_anchor: "Kerala accounts for a large share of Gulf-bound labour migration — a strong natural anchor where the record supports it, not a requirement"
+    primary_records:
+      - "Ministry of External Affairs eMigrate portal — recruiting agent registry and suspensions"
+      - "Protector of Emigrants complaint records (RTI)"
+      - "Destination-country labour ministry blacklists (UAE MOHRE, Saudi MHRSD) where public"
+      - "Indian embassy/consulate labour-welfare wing reports"
+    method: "Pull suspended/blacklisted agents from eMigrate. For each, check if the same promoters registered a new agency. Cross-reference worker complaint patterns (RTI to Protector of Emigrants) against agencies still actively recruiting."
     rtis: []
     status: scoping
 

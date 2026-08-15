@@ -6,6 +6,61 @@ state of the work — update it as you go. For how the engine runs, see
 
 ---
 
+## Kerala/CAG duplication fixed at the root — dig-creation blindness + paraphrase-proof dedup (2026-08-15)
+
+Anil flagged the pipeline as "obsessed with Kerala and CAG reports, so many similar
+articles." Traced to three compounding, independently-diagnosed causes — not one bug:
+
+1. **`beat-monitor`'s CAG beat re-surfaced the same 2-3 audit reports daily**, and
+   the lead-pool dedup key (`sha1(throughline)`, `orchestrator.py`) is exact-string —
+   trivially defeated when the model re-describes the same finding in different
+   words. Proof: Aug 5 alone produced 5 separate `pipeline_runs` rows (#150-155) all
+   describing the identical ₹54,282cr CAG utilisation-certificate finding. **Fix:**
+   `beat-monitor` is now handed its own last-14-days throughlines
+   (`get_recent_leads_by_source`, `shared/db.py`) and told explicitly to skip a
+   candidate if it's the same underlying finding as one already listed, reworded or not.
+2. **Two independent dig-creation paths were blind to what was already open.**
+   `run_story_scout` (weekly) was told to skip themes "already in progress" but was
+   only ever shown the static `watchlist.yaml`, never the `digs` table. `run_chief_of_staff`
+   (daily) proposed `NEW_DIGS` from a snapshot that showed it only parked/killed digs,
+   never active ones — and its own SKILL.md few-shot example was literally titled
+   *"Kerala cooperative bank stress,"* actively anchoring it toward the exact duplicate.
+   Result: that theme alone was opened as a fresh dig 5 times (dig #4, #5, #19, #27, #29)
+   over three weeks. **Fix:** both paths now see the open-digs list before creating
+   anything; `chief-of-staff/SKILL.md` explicit rule added ("check open digs, recommend
+   `advance` on the matching `dig-<id>` instead of duplicating"); the anchoring example
+   swapped for an unrelated one (SEBI settlements).
+3. **Digs never converged, so duplicates never had a chance to merge back.** 28 digs
+   opened since Jul 15; exactly 1 ever reached `ready-to-write`; **zero** were ever
+   parked or killed despite the skill's own stated discipline ("publishing nothing is a
+   successful dig"). **Fix:** `run_dig_advance` now auto-parks a dig after 8 advances or
+   21 days without reaching `ready-to-write`/`parked`/`killed` — it can be revived
+   manually if something genuinely new lands.
+4. **`watchlist.yaml` itself was structurally stacked**: 3 of 8 standing themes were
+   explicit CAG/Kerala-finance, and 7 of 8 carried a Kerala anchor, despite
+   `story-scout/SKILL.md` saying the anchor should be "a bonus, never the price of
+   entry." **Fix:** merged `cag-findings-follow-up` into `public-money-flows` (same
+   question, was itself producing duplicate digs), broadened `cooperative-bank-health`
+   to national scope with Kerala as an optional strongest-case anchor rather than the
+   default, and added two new non-Kerala/non-CAG themes (`digital-lending-enforcement`,
+   `gulf-migrant-labour-pipeline`) so the "ripest theme" pick isn't structurally
+   pre-biased. 10 themes now, 1 without a Kerala requirement at all.
+
+**Immediate cleanup applied to the live backlog** (not just future prevention): of 28
+open digs, 15 were near-duplicates of another open dig on the exact same question —
+5× Kerala coop-bank stress, 5× CAG Kerala fiscal, 5× NEET/exam integrity, 2× internet
+shutdowns, 2× leptospirosis, 2× E20 ethanol. Consolidated each cluster into its most-
+advanced member and parked the rest with a note pointing at the survivor. **28 open
+digs → 13**, none duplicated.
+
+**Left for Anil:** dig #2 (E20 ethanol) has been sitting at `ready-to-write` since
+2026-07-18 with 9 logged advances and was never promoted to the pipeline — worth a
+manual `promote_dig(2)` or a look at why nothing does that automatically for
+long-`ready-to-write` digs (possible follow-up: chief-of-staff should recommend
+promoting stale `ready-to-write` digs, not just advancing/killing).
+
+---
+
 ## How to continue in Claude Code (or a fresh chat)
 
 A new assistant will **not** have the conversation that built this — it starts cold.

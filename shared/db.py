@@ -1065,6 +1065,35 @@ def get_held_runs(older_than_days=3, limit=None, desk="news"):
         conn.close()
 
 
+def get_recent_leads_by_source(source, days=14, limit=25):
+    """Recent throughlines from one lead source (e.g. 'beat-monitor'), newest
+    first. Used to hand a monitor its own recent output so it can recognise a
+    re-worded repeat of a finding it already surfaced, not just an exact-string
+    match (audit 2026-08-15: beat-monitor's CAG beat re-surfaced the same
+    findings under fresh phrasing daily, defeating the sha1(throughline) dedup)."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        if _is_postgres():
+            cur.execute(
+                f"""SELECT throughline, created_at::date as date FROM pipeline_runs
+                    WHERE source = {ph} AND created_at > NOW() - INTERVAL '{int(days)} days'
+                    ORDER BY created_at DESC LIMIT {ph}""",
+                (source, limit),
+            )
+        else:
+            cur.execute(
+                f"""SELECT throughline, created_at FROM pipeline_runs
+                    WHERE source = {ph} AND created_at > datetime('now', '-{int(days)} days')
+                    ORDER BY created_at DESC LIMIT {ph}""",
+                (source, limit),
+            )
+        return _fetchall(cur)
+    finally:
+        conn.close()
+
+
 def get_recheckable_runs(limit=30, desk="news"):
     """Held stories the owner can ask to re-develop — both human-held ('held') and
     verifier-held ('hold'), newest first."""
