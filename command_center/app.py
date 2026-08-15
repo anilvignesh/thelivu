@@ -43,7 +43,11 @@ async def login(request):
 
 
 async def index(request):
-    return FileResponse(STATIC / "index.html")
+    # Same reasoning as asset()'s no-cache: index.html has no bundler hash to
+    # bust the URL, so a heuristically-cached shell can go stale and silently
+    # keep serving old markup (e.g. missing #login/#shell) after a deploy —
+    # bit us on the phone via Tailscale 2026-08-14.
+    return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-cache"})
 
 
 async def asset(request):
