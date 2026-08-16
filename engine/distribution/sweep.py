@@ -102,23 +102,31 @@ def _autopublish_pending_runs():
     from shared.db import get_runs_by_status, get_run
     from publishing.publish import publish_run
 
-    for run in get_runs_by_status("pending_human", limit=50):
-        run_id = run["id"]
-        full = get_run(run_id) or run
-        if not _autopublish_eligible(full):
-            continue  # needs the human tap — unchanged path (or is backlog)
-        try:
-            result = publish_run(run_id)
-        except Exception as e:
-            log.error("Autopublish failed for run #%s: %s", run_id, e, exc_info=True)
-            _notify_safe(f"⚠️ Autopublish failed for run #{run_id}: {e}")
-            continue
-        if result.get("ok"):
-            log.info("Autopublished run #%s (no real-person allegation; legal-clear)", run_id)
-            _notify_safe(f"🤖 Auto-published run #{run_id} — no named-person allegation, "
-                         f"reviewer said LEGAL-FLAG: NO. {result.get('article_url', '')}")
-        else:
-            log.warning("Autopublish for run #%s returned not-ok: %s", run_id, result)
+    # get_runs_by_status defaults to desk='news' — calling it bare here silently
+    # excluded the belief desks (ek, gk) from autopublish entirely since the
+    # feature launched. Caught 2026-08-16 when Anil asked why ek pieces weren't
+    # moving. Same legal gate applies to every desk; this was never about
+    # relaxing anything for ek, just not skipping it.
+    for desk in ("news", "ek", "gk"):
+        for run in get_runs_by_status("pending_human", limit=50, desk=desk):
+            run_id = run["id"]
+            full = get_run(run_id) or run
+            if not _autopublish_eligible(full):
+                continue  # needs the human tap — unchanged path (or is backlog)
+            try:
+                result = publish_run(run_id)
+            except Exception as e:
+                log.error("Autopublish failed for run #%s: %s", run_id, e, exc_info=True)
+                _notify_safe(f"⚠️ Autopublish failed for run #{run_id}: {e}")
+                continue
+            if result.get("ok"):
+                log.info("Autopublished run #%s (desk=%s, legal-clear)", run_id, desk)
+                _notify_safe(f"🤖 Auto-published run #{run_id} ({desk}) — no named-person "
+                             f"allegation, reviewer said LEGAL-FLAG: NO. "
+                             f"{result.get('article_url', '')}")
+            else:
+                log.warning("Autopublish for run #%s (desk=%s) returned not-ok: %s",
+                           run_id, desk, result)
 
 
 def _autopost_ready_carousels():
