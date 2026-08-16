@@ -47,6 +47,20 @@ extra steps. Judge each story on whether the reader leaves both *informed* and
 question that makes someone stop scrolling and swipe. Close to the article's
 own title, tightened if needed. Under ~90 characters where possible.
 
+Four hook shapes, all pulled from the article itself (never invented) — pick
+whichever the story actually supports:
+- **Curiosity**: names a gap the reader needs the next slide to close ("The
+  audit found ₹9,531cr. The Navy's own number was ₹125cr.")
+- **Stakes**: the number or consequence up front, no setup ("₹2,000cr moved
+  through a fund the CAG says nobody audited.")
+- **Contrarian**: states the thing everyone assumes, then the record that
+  complicates it — only when the article actually earns that reversal.
+- **Direct address**: puts the reader in the frame ("You've paid this cess
+  since 2018. Here's where the CAG says it went.")
+
+Whichever shape, the same rule as everywhere else in this skill applies: it's a
+tightened quote or paraphrase of what the article already says, not a new claim.
+
 **Middle slides — the argument, in order.** Walk through the article's actual
 structure: the key fact, the context that reframes it, the evidence, the
 comparison, the turn. Each slide is one beat — one sentence's worth of idea,

@@ -114,6 +114,35 @@ for the reader, not process narration.
 **Test before you hand it over:** could a reader who has never heard of Thelivu
 read this without once being told how it was made? If not, cut until they can.
 
+## Sentence-level tells (added 2026-08-16 — style only, never touches a fact or a hedge)
+
+Everything above governs structure and stance. This is narrower: the word- and
+rhythm-level habits that read as machine-written even when the structure is
+right. **This section can never justify softening a verb, dropping a hedge, or
+smoothing an attribution** — "tabled" stays "tabled" even if "passed" reads
+better. If a fix here would touch what a sentence claims, don't make it.
+
+- **Cut AI-vocabulary tics**: *delve, boasts, underscores, testament to,
+  navigate, leverage, robust, moreover, furthermore, in today's world, it's
+  worth noting, it's important to note.* Say the plain word instead.
+- **Break up triplet-itis.** Three-item lists in a row ("clear, concise, and
+  effective") are an AI tell precisely because real writing doesn't reach for
+  three examples every time. One example, or five, reads more human than a
+  reflexive three.
+- **Vary sentence length on purpose.** A paragraph of uniform 18-word sentences
+  is a tell. Follow a long sentence with a short one. Let a single clause stand
+  alone sometimes.
+- **Don't hedge-stack.** "It could potentially perhaps suggest" is three hedges
+  doing one hedge's job — say the ONE hedge the evidence actually supports
+  ("suggests," not "could potentially suggest") and stop. This is about
+  redundant hedging, not the actual epistemic hedges the charter requires —
+  those stay exactly as strong as the evidence, just said once, not three times.
+- **Don't chain "not only X but also Y" or "it's not just X, it's Y."** These
+  read as a template, not a thought. Just say Y, or say both plainly.
+- **Read it aloud before handing it over.** If a sentence doesn't sound like
+  something a person would actually say out loud, rewrite it until it does —
+  without changing what it claims.
+
 ## The five hard rules
 
 1. **Build only from verified material.** Do not introduce a new claim at the writing stage.
