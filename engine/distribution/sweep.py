@@ -188,7 +188,8 @@ def _autopost_ready_reels():
             log.info("Autoposted reel #%s (%s)", reel["id"], rec["reason"])
             _notify_safe(f"🤖 Auto-posted reel for run #{run['id']} — {rec['reason']}. "
                          f"{result.get('permalink', '')}")
-        _crosspost_youtube(reel["id"], run)
+        # YouTube cross-post now happens inside post_reel_run itself (same beat,
+        # covers the dashboard tap too) — no separate call needed here.
 
 
 def _crosspost_youtube(reel_id, run):
@@ -206,7 +207,8 @@ def _crosspost_youtube(reel_id, run):
     video_bytes = get_reel_bytes(reel_id)
     if not video_bytes:
         return
-    title = (run.get("throughline") or f"Thelivu — run #{run['id']}")[:100]
+    title = ((run.get("throughline") if run else None)
+              or f"Thelivu — reel #{reel_id}")[:100]
     try:
         video_id, permalink = publish_short(
             video_bytes, title, description=r.get("caption") or "")

@@ -229,4 +229,16 @@ def post_reel_run(reel_id, progress=None):
         log.error("Instagram reel post failed for #%s: %s", reel_id, e)
         return {"ok": False, "error": str(e)}
     update_reel(reel_id, status="posted", ig_media_id=media_id, ig_permalink=permalink)
+    # Cross-post to YouTube Shorts in the same beat as the Instagram post — every
+    # NEW reel goes out to both platforms together, whether posted via the
+    # dashboard tap or the autopost sweep (both funnel through this function).
+    # Old reels that predate this (Instagram-only) are caught up separately by
+    # sweep.run_youtube_backfill_sweep, paced at YOUTUBE_BACKFILL_DAILY_CAP/day —
+    # that backlog path is intentionally decoupled from this one. (Anil, 2026-08-16)
+    try:
+        from shared.db import get_run
+        from engine.distribution.sweep import _crosspost_youtube
+        _crosspost_youtube(reel_id, get_run(r.get("run_id")) if r.get("run_id") else None)
+    except Exception as e:
+        log.error("YouTube cross-post (same-beat) failed for reel #%s: %s", reel_id, e, exc_info=True)
     return {"ok": True, "media_id": media_id, "permalink": permalink}
