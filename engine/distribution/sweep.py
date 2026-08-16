@@ -88,7 +88,7 @@ def _autopublish_eligible(run):
 def run_autopublish_sweep():
     """One pass: auto-publish eligible pending_human runs, then auto-post any
     pending_review carousel / ready reel for the SAME eligible runs whose posting
-    timing looks right (engine.agents.posting_time), capped by MAX_DELAY_HOURS so
+    timing looks right (engine.distribution.timing), capped by MAX_DELAY_HOURS so
     news freshness always wins over chasing a marginally better hour.
 
     Cheap no-op when nothing's eligible. Call once per orchestrator tick, same as
@@ -124,7 +124,7 @@ def _autopublish_pending_runs():
 def _autopost_ready_carousels():
     from shared.db import get_pending_carousels, get_run
     from publishing.publish import post_carousel_run
-    from engine.agents.posting_time import recommend_now
+    from engine.distribution.timing import recommend_now
 
     pending = get_pending_carousels()
     if not pending:
@@ -154,7 +154,7 @@ def _autopost_ready_carousels():
 def _autopost_ready_reels():
     from shared.db import get_ready_reels, get_run
     from publishing.publish import post_reel_run
-    from engine.agents.posting_time import recommend_now
+    from engine.distribution.timing import recommend_now
 
     ready = get_ready_reels()
     if not ready:

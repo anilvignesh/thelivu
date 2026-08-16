@@ -649,7 +649,7 @@ historical — this is current.
   without a human tap, timed by learned posting-time priors (`engine/agents/
   posting_time.py`), capped at 6h delay so freshness always wins. Anything else —
   an explicit YES, or a missing/unparseable verdict — still needs the tap; the
-  gate fails CLOSED on purpose. See `engine/agents/autopublish.py`.
+  gate fails CLOSED on purpose. See `engine/distribution/sweep.py`.
 
 ### Capabilities added this era (all deployed, all end at the human gate)
 1. **Persistent digs** — a thread investigated over multiple days. Tables `digs` +

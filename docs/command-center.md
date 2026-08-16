@@ -13,7 +13,7 @@ change backend — **the only gate is the final publish/post**. So the command
 center may do everything *up to* posting freely; posting stays behind the human
 gate for anything with real legal exposure (already enforced in code). As of
 2026-08-16 (trial) an explicitly legal-clear story posts autonomously — see
-`engine/agents/autopublish.py`. See memory `thelivu-autonomy`.
+`engine/distribution/sweep.py`. See memory `thelivu-autonomy`.
 
 ---
 

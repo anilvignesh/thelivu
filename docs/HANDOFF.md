@@ -31,9 +31,9 @@ closed.** Per the 2026-07-15 autonomy grant, publishing was the ONLY action
 gated on Anil; **as of 2026-08-16 (one-week trial, Saturday review)** that
 narrowed further — a run the editorial reviewer *explicitly* clears of naming
 a real person alongside an allegation (`LEGAL-FLAG: NO`) now publishes AND
-posts without a human tap, timed by `engine/agents/posting_time.py`'s learned
+posts without a human tap, timed by `engine/distribution/timing.py`'s learned
 priors. Anything else — a YES, or a missing/unparseable verdict — still needs
-the tap, same as always; see `engine/agents/autopublish.py`'s docstring before
+the tap, same as always; see `engine/distribution/sweep.py`'s docstring before
 touching this. Act autonomously on everything else and report.
 
 ---

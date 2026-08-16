@@ -60,7 +60,7 @@ Separation is the safeguard. The investigator is allowed to be enthusiastic; the
 
 ## The two hard guarantees
 
-1. **The human gate stops every story that carries real legal exposure.** The `publisher` is the only stage that can post. As of 2026-08-16 (one-week trial, Anil) a story the reviewer explicitly clears of naming a real person alongside an allegation (`LEGAL-FLAG: NO`) publishes without a human tap — see `engine/agents/autopublish.py`. Anything else — a YES, or a missing/unparseable verdict — still requires explicit human action, same as before. The split is enforced in code and fails CLOSED: only an explicit NO clears the autonomous path.
+1. **The human gate stops every story that carries real legal exposure.** The `publisher` is the only stage that can post. As of 2026-08-16 (one-week trial, Anil) a story the reviewer explicitly clears of naming a real person alongside an allegation (`LEGAL-FLAG: NO`) publishes without a human tap — see `engine/distribution/sweep.py`. Anything else — a YES, or a missing/unparseable verdict — still requires explicit human action, same as before. The split is enforced in code and fails CLOSED: only an explicit NO clears the autonomous path.
 2. **Under-coverage selects, it never confirms.** Obscurity tells the engine what to *look at*, never what to *believe*. Obscure claims clear a *higher* bar, not a lower one.
 
 ## Running it

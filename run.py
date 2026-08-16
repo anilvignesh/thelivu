@@ -341,9 +341,10 @@ if service == "thelivu-agent":
         # post without a human tap ONLY for runs the reviewer explicitly cleared
         # of legal/defamation risk (LEGAL-FLAG: NO). Anything else — including a
         # missing verdict — still waits for the human gate exactly as before. See
-        # engine/agents/autopublish.py docstring before touching this.
+        # engine/distribution/sweep.py docstring before touching this — it also
+        # carries the incident note for the duplicate-post bug caught same-day.
         try:
-            from engine.agents.autopublish import run_autopublish_sweep
+            from engine.distribution.sweep import run_autopublish_sweep
             run_autopublish_sweep()
         except Exception as e:
             log.error("Autopublish sweep failed: %s", e, exc_info=True)
