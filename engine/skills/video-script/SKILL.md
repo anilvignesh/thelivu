@@ -24,6 +24,8 @@ data point that changes the picture, a source the claim needs. If the story fits
 This skill enforces the project's editorial charter (`../../CHARTER.md`) and brand
 (`../../BRAND.md`). Read them if present; the charter governs in any conflict. It
 writes a script only — it never fabricates, never overstates, and never publishes.
+Before final output, self-check spoken lines and captions against
+`../../AI-WRITING-TELLS.md` — clusters of AI-writing patterns, not isolated words.
 
 ## Hard rules (same spine as the rest of the engine)
 - **NEVER upgrade the procedural status of anything.** Compression is where this

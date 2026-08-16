@@ -7,7 +7,9 @@ description: Write a publishable draft article in Thelivu's transparent-perspect
 
 This is the **writing stage**. It turns a `READY-FOR-HUMAN` story into a draft that a reader picks up and can't put down. It is the only stage where Thelivu's voice applies. It writes; it never adds a fact.
 
-Read `../../CHARTER.md` if present. The charter governs in any conflict.
+Read `../../CHARTER.md` if present. The charter governs in any conflict. Before
+final output, self-check the draft against `../../AI-WRITING-TELLS.md` — clusters
+of AI-writing patterns, not isolated words.
 
 ---
 

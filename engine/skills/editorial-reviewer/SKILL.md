@@ -74,6 +74,14 @@ Run the draft against these checks. For each, return PASS or the specific fix ne
    - Test: could someone who has never heard of Thelivu read it start to finish
      without being told how it was made? If not, FIX with the lines quoted.
 
+8. **AI writing tells.** (`../../AI-WRITING-TELLS.md`)
+   - Scan for *clusters* of the patterns listed there — inflated significance,
+     vague attribution, filler/hedging, em-dash-as-default-punctuation, copula
+     avoidance, chatbot leakage ("let me know"), manufactured staccato drama.
+     One hit is nothing; several together is a FIX. Don't chase isolated words —
+     the file's "what NOT to flag" section exists precisely so this check doesn't
+     turn into stripping real writers' voice.
+
 ## Output format
 
 ### If the story fails the quality gate:
@@ -111,6 +119,7 @@ APPROVED
 5. Transparency: PASS | FIX — [what]
 6. Self-similarity / monotony: PASS | FIX — [what recent piece it echoes, fresh angle to take]
 7. Reader-facing (no process narration): PASS | FIX — [quote each offending line]
+8. AI writing tells: PASS | FIX — [which cluster, quote the lines]
 
 ## Confidence label: Confirmed | Developing | Contested
 ## Verdict: Ready | Fix-then-publish | Hold | Kill
