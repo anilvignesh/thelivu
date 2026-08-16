@@ -3,7 +3,6 @@ openai>=1.30.0
 psycopg2-binary>=2.9
 python-telegram-bot>=21.0
 feedparser>=6.0
-praw>=7.7
 youtube-transcript-api>=0.6
 google-genai>=1.0
 requests>=2.31

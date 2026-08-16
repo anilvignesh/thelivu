@@ -28,7 +28,7 @@ CLI: `venv/bin/python -m engine.social_desk {yt-search|yt-channel|yt-transcript|
 
 **⚠️ Bridge reality (owner-tested 2026-08-15):** public Nitter instances rot fast and were largely unreachable as of this date (bot-challenge walls, redirects, 403s) — X has kept tightening access. `x_timeline`/`x_search` **raise loudly** rather than return empty when every bridge fails — treat that as "no X visibility today," not "nothing happened." Never paper over a bridge failure as a quiet news day.
 
-- `reddit_subreddit_latest(subreddit, n, sort)` · `reddit_search(query, subreddit, n)` — Reddit posts, **read-only via PRAW app-only OAuth** (a registered "script" app, no user login). This is Reddit's own official API, not a scrape — no account, no cookies, nothing to suspend. Needs `REDDIT_CLIENT_ID`/`REDDIT_CLIENT_SECRET` set (see `shared/config.py`); raises clearly if unconfigured.
+- `reddit_subreddit_latest(subreddit, n, sort)` · `reddit_search(query, subreddit, n)` — Reddit posts, **read-only via reddit.com's public Atom feeds** (`/r/<sub>/.rss`, `/search.rss`). No app, no registration, no account — tried PRAW's official app-only OAuth first (2026-08-16) but Reddit has gated new "script app" registration behind a "valid moderation use case" request; the plain-RSS path needs none of that. Reddit does 403 the default Python UA and 429s on rapid repeated calls, so it sends a real User-Agent and expects callers to space requests out.
 
 CLI adds: `reddit <subreddit>` · `reddit-search <query> [--subreddit ...]`
 

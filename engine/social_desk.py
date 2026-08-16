@@ -125,7 +125,7 @@ def web_read(url):
     return r.text
 
 
-def rss_latest(feed_url, n=10):
+def rss_latest(feed_url, n=10, headers=None):
     """Latest items from an RSS/Atom feed. Returns [{title, link, published, summary}].
 
     Raises on a feed that parsed to nothing. A silently-empty feed is how a sweep
@@ -133,9 +133,12 @@ def rss_latest(feed_url, n=10):
     2026-07-28 with thenewsminute.com/feed, which serves a single item.
     """
     import feedparser
-    d = feedparser.parse(feed_url)
+    d = feedparser.parse(feed_url, request_headers=headers) if headers else feedparser.parse(feed_url)
     if not d.entries:
-        why = getattr(d, "bozo_exception", None) or f"status={getattr(d, 'status', '?')}"
+        status = getattr(d, "status", None)
+        why = getattr(d, "bozo_exception", None) or f"status={status or '?'}"
+        if status == 429:
+            why = f"rate-limited (429) — back off, this isn't a quiet feed: {feed_url}"
         raise ValueError(f"feed returned no entries: {feed_url} ({why})")
     out = []
     for e in d.entries[:n]:
@@ -228,57 +231,47 @@ def x_search(query, n=15):
     raise RuntimeError(f"no Nitter bridge served search {query!r} — tried: {'; '.join(errors)}")
 
 
-# ── Reddit (read-only, no account) ─────────────────────────────────────────
+# ── Reddit (read-only, no account, no app registration) ────────────────────
 #
-# Unlike X/IG, Reddit's own API has a real free read-only tier: app-only OAuth
-# via a "script" app (reddit.com/prefs/apps) authenticates as the APP, not a
-# user — no login, no session cookie, no account to suspend. Register once,
-# drop REDDIT_CLIENT_ID/REDDIT_CLIENT_SECRET into env (see shared/config.py).
-
-def _reddit_client():
-    """Read-only PRAW client. Raises with a clear fix rather than returning
-    nothing when unconfigured — same discipline as the Nitter bridge list."""
-    import praw
-    from shared.config import REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_USER_AGENT
-    if not REDDIT_CLIENT_ID or not REDDIT_CLIENT_SECRET:
-        raise RuntimeError(
-            "Reddit not configured — register a free 'script' app at "
-            "reddit.com/prefs/apps and set REDDIT_CLIENT_ID/REDDIT_CLIENT_SECRET")
-    r = praw.Reddit(client_id=REDDIT_CLIENT_ID, client_secret=REDDIT_CLIENT_SECRET,
-                    user_agent=REDDIT_USER_AGENT)
-    r.read_only = True
-    return r
-
-
-def _reddit_row(post):
-    return {
-        "title": post.title,
-        "url": post.url,
-        "permalink": f"https://reddit.com{post.permalink}",
-        "author": str(post.author) if post.author else "[deleted]",
-        "score": post.score,
-        "num_comments": post.num_comments,
-        "created_utc": post.created_utc,
-        "selftext": (post.selftext or "")[:500],
-    }
+# Reddit still serves plain Atom feeds for public subreddit listings and
+# in-subreddit search with NO auth at all — same free-RSS pattern as
+# rss_latest(), just pointed at reddit.com. Tried PRAW's app-only OAuth first
+# (2026-08-16) but Reddit has locked the legacy "script app" registration path
+# behind a "valid moderation use case" request — the plain-RSS path below sidesteps
+# that entirely and needs zero credentials. The one thing it DOES need is a
+# real User-Agent: Reddit 403s the default Python/feedparser UA outright, and
+# 429s (rate-limit) hard on rapid repeated requests — space calls out.
+_REDDIT_UA = {"User-Agent": "thelivu-social-desk/1.0 (read-only, "
+                           "https://thelivu.up.railway.app)"}
 
 
 def reddit_subreddit_latest(subreddit, n=15, sort="new"):
-    """Posts from one subreddit, read-only. sort: new|hot|top. `subreddit` without
-    the leading r/. Returns [{title, url, permalink, author, score, num_comments,
-    created_utc, selftext}]."""
-    r = _reddit_client()
-    sub = r.subreddit(subreddit)
-    listing = {"new": sub.new, "hot": sub.hot, "top": sub.top}.get(sort, sub.new)
-    return [_reddit_row(p) for p in listing(limit=n)]
+    """Posts from one subreddit, read-only, via its public Atom feed. sort:
+    new|hot|top. `subreddit` without the leading r/. Returns the rss_latest shape
+    (title/link/published/summary) plus 'permalink' pointing at reddit.com."""
+    sub = subreddit.lstrip("r/").strip("/")
+    url = f"https://www.reddit.com/r/{sub}/{sort}/.rss?limit={n}"
+    items = rss_latest(url, n, headers=_REDDIT_UA)
+    for it in items:
+        it["permalink"] = it["link"]
+    return items
 
 
-def reddit_search(query, subreddit=None, n=15, sort="relevance"):
-    """Search Reddit, optionally scoped to one subreddit (default: all of Reddit).
-    Returns the same shape as reddit_subreddit_latest."""
-    r = _reddit_client()
-    scope = r.subreddit(subreddit) if subreddit else r.subreddit("all")
-    return [_reddit_row(p) for p in scope.search(query, sort=sort, limit=n)]
+def reddit_search(query, subreddit=None, n=15, sort="new"):
+    """Search Reddit, optionally scoped to one subreddit (default: all of
+    Reddit), via the public search Atom feed. Returns the same shape as
+    reddit_subreddit_latest."""
+    from urllib.parse import quote
+    if subreddit:
+        sub = subreddit.lstrip("r/").strip("/")
+        url = (f"https://www.reddit.com/r/{sub}/search.rss?q={quote(query)}"
+              f"&restrict_sr=1&sort={sort}&limit={n}")
+    else:
+        url = f"https://www.reddit.com/search.rss?q={quote(query)}&sort={sort}&limit={n}"
+    items = rss_latest(url, n, headers=_REDDIT_UA)
+    for it in items:
+        it["permalink"] = it["link"]
+    return items
 
 
 if __name__ == "__main__":
