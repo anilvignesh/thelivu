@@ -724,7 +724,11 @@ def init_db():
                     conn.commit()
                 except Exception:
                     conn.rollback()  # column already exists
-            for col, defn in [("notes", "TEXT")]:
+            for col, defn in [("notes", "TEXT"),
+                              # YouTube Shorts cross-post (2026-08-16) — separate
+                              # from ig_media_id/ig_permalink so each platform's
+                              # post status/double-post guard is independent.
+                              ("youtube_video_id", "TEXT"), ("youtube_permalink", "TEXT")]:
                 try:
                     cur.execute(f"ALTER TABLE reels ADD COLUMN {col} {defn}")
                     conn.commit()
@@ -765,7 +769,8 @@ def init_db():
                     cur.execute(f"ALTER TABLE carousel_runs ADD COLUMN {col} {defn}")
                 except Exception:
                     pass
-            for col, defn in [("notes", "TEXT")]:
+            for col, defn in [("notes", "TEXT"),
+                              ("youtube_video_id", "TEXT"), ("youtube_permalink", "TEXT")]:
                 try:
                     cur.execute(f"ALTER TABLE reels ADD COLUMN {col} {defn}")
                 except Exception:

@@ -180,6 +180,35 @@ def _autopost_ready_reels():
             log.info("Autoposted reel #%s (%s)", reel["id"], rec["reason"])
             _notify_safe(f"🤖 Auto-posted reel for run #{run['id']} — {rec['reason']}. "
                          f"{result.get('permalink', '')}")
+        _crosspost_youtube(reel["id"], run)
+
+
+def _crosspost_youtube(reel_id, run):
+    """Cross-post the same reel to YouTube Shorts, independent of the Instagram
+    post above (own double-post guard on youtube_video_id, so a retry of this
+    function never re-uploads). Same eligibility already checked by the caller —
+    this is purely "which platforms", not a second legal/backlog gate."""
+    from shared.db import get_reel, get_reel_bytes, update_reel
+    from publishing.youtube import publish_short, YouTubeNotConfigured
+
+    r = get_reel(reel_id)
+    if not r or r.get("youtube_video_id"):
+        return  # already cross-posted, or reel vanished — nothing to do
+    video_bytes = get_reel_bytes(reel_id)
+    if not video_bytes:
+        return
+    title = (run.get("throughline") or f"Thelivu — run #{run['id']}")[:100]
+    try:
+        video_id, permalink = publish_short(
+            video_bytes, title, description=r.get("caption") or "")
+    except YouTubeNotConfigured:
+        return  # not set up yet — silent, not an error; the Instagram post still landed
+    except Exception as e:
+        log.error("YouTube cross-post failed for reel #%s: %s", reel_id, e, exc_info=True)
+        return
+    update_reel(reel_id, youtube_video_id=video_id, youtube_permalink=permalink)
+    log.info("Cross-posted reel #%s to YouTube Shorts: %s", reel_id, permalink)
+    _notify_safe(f"🤖 Cross-posted to YouTube Shorts — {permalink}")
 
 
 def _notify_safe(text):

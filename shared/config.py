@@ -12,6 +12,15 @@ NVIDIA_API_KEY  = os.environ.get("NVIDIA_API_KEY", "")
 NVIDIA_MODEL    = os.environ.get("NVIDIA_MODEL", "google/gemma-4-31b-it")
 NVIDIA_BASE_URL = os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
 
+# --- YouTube (Data API v3, Shorts upload) ---
+# OAuth client (Desktop app type) + a refresh token minted once via the one-time
+# consent flow (publishing/youtube_auth.py) — the channel is whichever Google
+# account did that consent (the Thelivu Gmail). Leave blank until set; youtube.py
+# raises YouTubeNotConfigured so callers degrade gracefully, same pattern as IG.
+YOUTUBE_CLIENT_ID     = os.environ.get("YOUTUBE_CLIENT_ID", "")
+YOUTUBE_CLIENT_SECRET = os.environ.get("YOUTUBE_CLIENT_SECRET", "")
+YOUTUBE_REFRESH_TOKEN = os.environ.get("YOUTUBE_REFRESH_TOKEN", "")
+
 # --- Instagram (graph.instagram.com, Content Publishing) ---
 # IG_USER_ID: the Instagram professional account's numeric id. IG_ACCESS_TOKEN:
 # a token issued via the "Instagram API with Instagram Login" flow, scoped
