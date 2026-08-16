@@ -728,7 +728,12 @@ def init_db():
                               # YouTube Shorts cross-post (2026-08-16) — separate
                               # from ig_media_id/ig_permalink so each platform's
                               # post status/double-post guard is independent.
-                              ("youtube_video_id", "TEXT"), ("youtube_permalink", "TEXT")]:
+                              ("youtube_video_id", "TEXT"), ("youtube_permalink", "TEXT"),
+                              # Separate from posted_at (the Instagram post time) —
+                              # needed to rate-limit the YouTube backfill by day
+                              # (2026-08-16), which posted_at can't do since it's
+                              # already the IG timestamp, often days earlier.
+                              ("youtube_posted_at", "TIMESTAMP")]:
                 try:
                     cur.execute(f"ALTER TABLE reels ADD COLUMN {col} {defn}")
                     conn.commit()
@@ -770,7 +775,8 @@ def init_db():
                 except Exception:
                     pass
             for col, defn in [("notes", "TEXT"),
-                              ("youtube_video_id", "TEXT"), ("youtube_permalink", "TEXT")]:
+                              ("youtube_video_id", "TEXT"), ("youtube_permalink", "TEXT"),
+                              ("youtube_posted_at", "TEXT")]:
                 try:
                     cur.execute(f"ALTER TABLE reels ADD COLUMN {col} {defn}")
                 except Exception:
@@ -2278,6 +2284,44 @@ def get_reel_for_run(run_id):
             "notes, created_at, posted_at FROM reels WHERE run_id = " + ph +
             " ORDER BY id DESC LIMIT 1", (run_id,))
         return _fetchone(cur)
+    finally:
+        conn.close()
+
+
+def get_youtube_backfill_candidates(limit=50):
+    """Reels already posted to Instagram (so already through full editorial +
+    human approval, whenever that happened) that haven't reached YouTube yet.
+    Oldest first — 'catch up' means chronological, not newest-first. Ordered by
+    created_at, not posted_at: posted_at turns out to be unset on every existing
+    posted reel (checked 2026-08-16, 0/26) — a pre-existing gap in
+    publishing/publish.py, not something to silently rely on here."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(
+            "SELECT id, run_id, kind, caption, status, created_at FROM reels "
+            "WHERE status = 'posted' AND youtube_video_id IS NULL "
+            "ORDER BY created_at ASC LIMIT " + ph, (limit,))
+        return _fetchall(cur)
+    finally:
+        conn.close()
+
+
+def count_youtube_crossposts_today():
+    """How many reels crossed over to YouTube today (server-local UTC day) —
+    the backfill's daily rate limit reads this before adding more."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        if _is_postgres():
+            cur.execute("SELECT count(*) AS n FROM reels WHERE "
+                        "youtube_posted_at >= date_trunc('day', now())")
+        else:
+            cur.execute("SELECT count(*) AS n FROM reels WHERE "
+                        "date(youtube_posted_at) = date('now')")
+        row = _fetchone(cur)
+        return (row or {}).get("n", 0) or 0
     finally:
         conn.close()
 

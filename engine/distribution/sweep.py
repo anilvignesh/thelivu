@@ -188,6 +188,7 @@ def _crosspost_youtube(reel_id, run):
     post above (own double-post guard on youtube_video_id, so a retry of this
     function never re-uploads). Same eligibility already checked by the caller —
     this is purely "which platforms", not a second legal/backlog gate."""
+    from datetime import datetime, timezone
     from shared.db import get_reel, get_reel_bytes, update_reel
     from publishing.youtube import publish_short, YouTubeNotConfigured
 
@@ -206,9 +207,37 @@ def _crosspost_youtube(reel_id, run):
     except Exception as e:
         log.error("YouTube cross-post failed for reel #%s: %s", reel_id, e, exc_info=True)
         return
-    update_reel(reel_id, youtube_video_id=video_id, youtube_permalink=permalink)
+    update_reel(reel_id, youtube_video_id=video_id, youtube_permalink=permalink,
+               youtube_posted_at=datetime.now(timezone.utc))
     log.info("Cross-posted reel #%s to YouTube Shorts: %s", reel_id, permalink)
     _notify_safe(f"🤖 Cross-posted to YouTube Shorts — {permalink}")
+
+
+# Backfill, 2026-08-16 (Anil): every reel already posted to Instagram is, by
+# definition, already through full editorial review + human approval — publishing
+# to IG has always required the human tap, long before today's autopublish trial
+# existed. So catching YouTube up on that history is a pure distribution decision,
+# not a second legal/editorial gate. Paced deliberately: after posting 3 duplicate
+# reels within 2 minutes earlier today (see the incident note above), a bulk dump
+# is exactly what this project should not do again.
+YOUTUBE_BACKFILL_DAILY_CAP = 2
+
+
+def run_youtube_backfill_sweep():
+    """Cross-post the oldest not-yet-on-YouTube Instagram reels, capped at
+    YOUTUBE_BACKFILL_DAILY_CAP per day. Call once per tick alongside the main
+    sweep — cheap no-op once the backlog is cleared or today's cap is spent."""
+    from shared.db import get_youtube_backfill_candidates, count_youtube_crossposts_today, get_run
+
+    remaining = YOUTUBE_BACKFILL_DAILY_CAP - count_youtube_crossposts_today()
+    if remaining <= 0:
+        return
+    candidates = get_youtube_backfill_candidates(limit=remaining)
+    for reel in candidates:
+        run = get_run(reel.get("run_id")) if reel.get("run_id") else None
+        if not run:
+            continue
+        _crosspost_youtube(reel["id"], run)
 
 
 def _notify_safe(text):

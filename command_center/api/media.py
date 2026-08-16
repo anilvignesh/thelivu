@@ -195,7 +195,7 @@ def list_reels(request, data):
     lq.search("r.throughline", "re.caption")
     size = "OCTET_LENGTH(re.mp4)" if db.is_postgres() else "LENGTH(re.mp4)"
     reels = db.q(f"SELECT re.id, re.run_id, re.kind, re.caption, re.status, "
-                 f"re.ig_permalink, re.notes, re.created_at, re.posted_at, "
+                 f"re.ig_permalink, re.youtube_permalink, re.notes, re.created_at, re.posted_at, "
                  f"{size} AS size_bytes, r.throughline AS story FROM "
                  + _REEL_FROM + lq.where_sql() + lq.page_sql(), lq.page_params())
     total = db.q(lq.count_sql(_REEL_FROM), tuple(lq.params))[0]["n"]

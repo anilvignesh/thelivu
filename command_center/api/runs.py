@@ -66,8 +66,8 @@ def run_detail(request, data):
         run=lambda: get_run(rid),
         carousels=lambda: db.q("SELECT id, status, caption, ig_permalink, dark, article_url "
                                "FROM carousel_runs WHERE run_id = %s ORDER BY id DESC", (rid,)),
-        reels=lambda: db.q("SELECT id, kind, caption, status, ig_permalink, created_at, "
-                           "posted_at FROM reels WHERE run_id = %s ORDER BY id DESC", (rid,)),
+        reels=lambda: db.q("SELECT id, kind, caption, status, ig_permalink, youtube_permalink, "
+                           "created_at, posted_at FROM reels WHERE run_id = %s ORDER BY id DESC", (rid,)),
         pub=lambda: db.q("SELECT id, published_at, confidence FROM publications "
                          "WHERE run_id = %s", (rid,)),
         suggestions=lambda: kv_get(f"cc_suggest_{rid}"),

@@ -349,6 +349,16 @@ if service == "thelivu-agent":
         except Exception as e:
             log.error("Autopublish sweep failed: %s", e, exc_info=True)
 
+        # YouTube backfill (2026-08-16): catch up the reels that were already
+        # posted to Instagram before YouTube existed as a target, 2/day, oldest
+        # first — a pure distribution catch-up, not a new editorial decision (see
+        # engine/distribution/sweep.py). Separate from the block above on purpose.
+        try:
+            from engine.distribution.sweep import run_youtube_backfill_sweep
+            run_youtube_backfill_sweep()
+        except Exception as e:
+            log.error("YouTube backfill sweep failed: %s", e, exc_info=True)
+
         # Manual source scout signal (/scoutnow)
         try:
             if kv_get("force_scout_run"):

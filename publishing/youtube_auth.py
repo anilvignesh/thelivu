@@ -33,6 +33,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--client-id", required=True)
     ap.add_argument("--client-secret", required=True)
+    ap.add_argument("--code", default=None,
+                    help="Skip the interactive prompt — pass the code directly "
+                         "(e.g. when driving the browser step separately).")
     args = ap.parse_args()
 
     params = {
@@ -53,7 +56,7 @@ def main():
     print(f"After approving, Google redirects to {_REDIRECT}?code=... — that page")
     print("will fail to load (nothing is listening on that port), which is fine.")
     print("Copy the 'code' value out of the browser's address bar and paste it here.\n")
-    code = input("code: ").strip()
+    code = args.code or input("code: ").strip()
     if not code:
         sys.exit("no code given")
 

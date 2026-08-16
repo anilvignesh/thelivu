@@ -774,7 +774,7 @@ window.openRun = async function (rid) {
     ${(d.carousels || []).length ? `<div class="eyebrow">Carousels</div>` + d.carousels.map(c =>
       `<div class="small">🖼 #${c.id} ${pill(c.status)} ${c.ig_permalink ? `<a href="${esc(c.ig_permalink)}" target="_blank">on IG ↗</a>` : ''}</div>`).join('') : ''}
     ${(d.reels || []).length ? `<div class="eyebrow">Reels</div>` + d.reels.map(r =>
-      `<div class="small">🎬 #${r.id} ${pill(r.status)} ${r.ig_permalink ? `<a href="${esc(r.ig_permalink)}" target="_blank">on IG ↗</a>` : ''}</div>`).join('') : ''}
+      `<div class="small">🎬 #${r.id} ${pill(r.status)} ${r.ig_permalink ? `<a href="${esc(r.ig_permalink)}" target="_blank">on IG ↗</a>` : ''} ${r.youtube_permalink ? `<a href="${esc(r.youtube_permalink)}" target="_blank">on YT ↗</a>` : ''}</div>`).join('') : ''}
   </div>`);
   const close = openModal(box);
   const actions = box.querySelector('[data-x=actions]');
@@ -1165,6 +1165,9 @@ function renderReels(list, d) {
       });
     } else if (r.ig_permalink) {
       acts.appendChild(el(`<a class="btn small" href="${esc(r.ig_permalink)}" target="_blank">View on Instagram ↗</a>`));
+    }
+    if (r.youtube_permalink) {
+      acts.appendChild(el(`<a class="btn small" href="${esc(r.youtube_permalink)}" target="_blank">View on YouTube ↗</a>`));
     }
     list.appendChild(card);
   }
