@@ -2277,6 +2277,24 @@ def get_reel_for_run(run_id):
         conn.close()
 
 
+def get_ready_reels():
+    """Every reel waiting for its Post tap, one query — NOT a per-run lookup.
+    Added 2026-08-16 alongside the autopublish sweep: walking published runs and
+    calling get_reel_for_run() once each is an N+1 that took 40s+ over Railway's
+    ~0.5-1s/round-trip Postgres link at just 100 runs (docs/reach-analytics.md's
+    'a fetch in the command centre would leave holes' lesson, same root cause —
+    this project has hit this exact class of bug before, see command_center/db.py)."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, run_id, kind, caption, status, ig_media_id, ig_permalink, "
+            "notes, created_at, posted_at FROM reels WHERE status = 'ready' ORDER BY id")
+        return _fetchall(cur)
+    finally:
+        conn.close()
+
+
 def get_reel_bytes(reel_id):
     """The raw MP4 bytes for the fileserver to serve. None if absent."""
     conn = _conn()

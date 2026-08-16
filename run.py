@@ -337,6 +337,17 @@ if service == "thelivu-agent":
         except Exception as e:
             log.error("Carousel processing failed: %s", e, exc_info=True)
 
+        # Autonomy grant, 2026-08-16 (one-week trial, Saturday review): publish +
+        # post without a human tap ONLY for runs the reviewer explicitly cleared
+        # of legal/defamation risk (LEGAL-FLAG: NO). Anything else — including a
+        # missing verdict — still waits for the human gate exactly as before. See
+        # engine/agents/autopublish.py docstring before touching this.
+        try:
+            from engine.agents.autopublish import run_autopublish_sweep
+            run_autopublish_sweep()
+        except Exception as e:
+            log.error("Autopublish sweep failed: %s", e, exc_info=True)
+
         # Manual source scout signal (/scoutnow)
         try:
             if kv_get("force_scout_run"):

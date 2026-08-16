@@ -25,10 +25,16 @@ pointed to.*
    reality and the traps.
 
 The owner is **Anil** (Telegram: the draft chat the bot posts to). He is
-technical, direct, and approves every publish personally. **The human gate is
-absolute — there is deliberately no bypass flag. Do not add one.** Per the
-2026-07-15 autonomy grant, publishing is the ONLY action gated on Anil; act
-autonomously on everything else and report.
+technical, direct, and reviews publishes that carry real legal exposure. **The
+human gate on defamation-risk content is absolute — enforced in code, fails
+closed.** Per the 2026-07-15 autonomy grant, publishing was the ONLY action
+gated on Anil; **as of 2026-08-16 (one-week trial, Saturday review)** that
+narrowed further — a run the editorial reviewer *explicitly* clears of naming
+a real person alongside an allegation (`LEGAL-FLAG: NO`) now publishes AND
+posts without a human tap, timed by `engine/agents/posting_time.py`'s learned
+priors. Anything else — a YES, or a missing/unparseable verdict — still needs
+the tap, same as always; see `engine/agents/autopublish.py`'s docstring before
+touching this. Act autonomously on everything else and report.
 
 ---
 

@@ -642,7 +642,14 @@ historical — this is current.
   Drafts · Pipeline · Carousels · Digs · Follow-ups · Sources · Tasks · Costs.
 - **Owner autonomy grant (2026-07-15):** the assistant acts autonomously on
   everything — features, story work, backend, digs — and the **only** action gated on
-  the owner is the **final publish/post**. Enforced in code (no bypass flag).
+  the owner is the **final publish/post**. Enforced in code.
+- **Autonomy narrowed further (2026-08-16, one-week trial, Saturday review):** the
+  publish gate now applies only to runs carrying real legal exposure. A run the
+  editorial reviewer explicitly clears (`LEGAL-FLAG: NO`) publishes AND posts
+  without a human tap, timed by learned posting-time priors (`engine/agents/
+  posting_time.py`), capped at 6h delay so freshness always wins. Anything else —
+  an explicit YES, or a missing/unparseable verdict — still needs the tap; the
+  gate fails CLOSED on purpose. See `engine/agents/autopublish.py`.
 
 ### Capabilities added this era (all deployed, all end at the human gate)
 1. **Persistent digs** — a thread investigated over multiple days. Tables `digs` +
@@ -756,8 +763,10 @@ Emphasis is a sourcing priority, not a public frame — we do **not** brand as
 India-second, international as a lens; distance raises the bar" — owner's call:
 open to stories from around the world, Kerala emphasised for the audience, not a
 limit.)* Sources
-are leads; the open web verifies. **The human gate is absolute** (only the final
-publish/post is gated; everything else is autonomous per the 2026-07-15 grant).
+are leads; the open web verifies. **The human gate is absolute for anything
+carrying real legal exposure** (only the final publish/post is gated; everything
+else is autonomous per the 2026-07-15 grant; the gate itself narrowed 2026-08-16
+to legal-risk-only, see the autonomy-grant entry above).
 *(Superseded: the original "run attended on an M1 Mac, no local LLMs, automation
 deferred" is history — the engine now runs unattended on Railway with the human gate
 as the one control. The dev machine is Anil's Pop!_OS laptop.)*
@@ -787,7 +796,7 @@ Each was downgraded, attributed, or dropped. **Preserve this reflex above all el
 
 - Trust-score gate (categorical KILL / HOLD / READY) in the verifier.
 - Article-writer (transparent perspective); publisher with the human gate enforced
-  in code (no bypass flag, on purpose).
+  in code, fail-closed (2026-08-16: narrowed to legal-risk runs only, see above).
 - Context-gathering step in the investigator + a tightened pattern-synthesizer
   (evidence the link, name the weakest link, downgrade by default).
 - A **self-similarity / anti-monotony check** in the editorial-reviewer — added

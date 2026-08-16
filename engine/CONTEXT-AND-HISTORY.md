@@ -53,8 +53,10 @@ It moved through three positions before settling:
   problem. Rebuild from the record; credit the tip.
 - **Oversimplification is the explainer's failure mode.** The clean, satisfying arc
   is the dangerous one. Keep the complication.
-- **The human gate is non-negotiable** — and is enforced in code in the publisher,
-  with no bypass flag, on purpose.
+- **The human gate is non-negotiable for anything carrying real legal exposure** —
+  enforced in code in the publisher. As of 2026-08-16 (trial) a story explicitly
+  cleared of naming a real person with an allegation publishes autonomously; see
+  `engine/agents/autopublish.py`. Everything else still requires the human tap.
 
 ## The character of the project
 
