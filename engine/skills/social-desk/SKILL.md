@@ -28,7 +28,11 @@ CLI: `venv/bin/python -m engine.social_desk {yt-search|yt-channel|yt-transcript|
 
 **⚠️ Bridge reality (owner-tested 2026-08-15):** public Nitter instances rot fast and were largely unreachable as of this date (bot-challenge walls, redirects, 403s) — X has kept tightening access. `x_timeline`/`x_search` **raise loudly** rather than return empty when every bridge fails — treat that as "no X visibility today," not "nothing happened." Never paper over a bridge failure as a quiet news day.
 
-**Still deliberately NOT available:** Reddit, Instagram, Facebook account-scraping, or any credential-based X access (cookies/tokens). Those carry ToS/suspension risk and credential-exposure risk (agent-reach was evaluated twice — 2026-07-26 and 2026-08-15 — and declined both times for exactly this: it stores authenticated X cookies on the same box as the Instagram publish token and prod DB URL). A verification brand doesn't scrape via throwaway accounts.
+- `reddit_subreddit_latest(subreddit, n, sort)` · `reddit_search(query, subreddit, n)` — Reddit posts, **read-only via PRAW app-only OAuth** (a registered "script" app, no user login). This is Reddit's own official API, not a scrape — no account, no cookies, nothing to suspend. Needs `REDDIT_CLIENT_ID`/`REDDIT_CLIENT_SECRET` set (see `shared/config.py`); raises clearly if unconfigured.
+
+CLI adds: `reddit <subreddit>` · `reddit-search <query> [--subreddit ...]`
+
+**Still deliberately NOT available: Instagram/Facebook account-scraping, or any credential-based X access (login, cookies, session replay — e.g. Twikit-style tools).** Those aren't just an account-suspension risk to manage — they're automated access that circumvents the platform's own ToS by design (accessing internal/private APIs outside the approved channel), the same category of problem as running an unattended process against a subscription instead of a real API. A burner account doesn't fix that, it just moves the consequence off the owner. agent-reach was evaluated twice (2026-07-26, 2026-08-15) and declined both times, on top of that, for storing authenticated cookies next to the Instagram publish token and prod DB URL. If X/IG coverage matters enough, the legitimate paths are: (a) the owner personally reads and hands in a lead via `./attend topic`, or (b) X's official paid API.
 
 ## Output (structured)
 ```

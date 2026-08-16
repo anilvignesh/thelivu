@@ -12,6 +12,15 @@ NVIDIA_API_KEY  = os.environ.get("NVIDIA_API_KEY", "")
 NVIDIA_MODEL    = os.environ.get("NVIDIA_MODEL", "google/gemma-4-31b-it")
 NVIDIA_BASE_URL = os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
 
+# --- Reddit (read-only, engine/social_desk.py) ---
+# App-only OAuth via a free "script" app registered at reddit.com/prefs/apps.
+# Read-only: never logs in as a user, never posts/votes/comments — so there is
+# no account to risk, unlike the X/IG readers. Leave blank until registered;
+# reddit_* functions in social_desk.py raise clearly rather than going quiet.
+REDDIT_CLIENT_ID     = os.environ.get("REDDIT_CLIENT_ID", "")
+REDDIT_CLIENT_SECRET = os.environ.get("REDDIT_CLIENT_SECRET", "")
+REDDIT_USER_AGENT    = os.environ.get("REDDIT_USER_AGENT", "thelivu-social-desk/1.0 (read-only)")
+
 # --- Instagram (graph.instagram.com, Content Publishing) ---
 # IG_USER_ID: the Instagram professional account's numeric id. IG_ACCESS_TOKEN:
 # a token issued via the "Instagram API with Instagram Login" flow, scoped

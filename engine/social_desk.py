@@ -7,6 +7,7 @@ zero-config, well-known tools we control:
   - Any web page, clean text                       -> Jina Reader (r.jina.ai, public)
   - RSS/Atom                                        -> feedparser
   - X/Twitter timelines, READ-ONLY                 -> Nitter RSS (no account, no cookies)
+  - Reddit posts/search, READ-ONLY                 -> PRAW app-only OAuth (no account, no cookies)
 
 WHY NITTER AND NOT A SCRAPER (2026-07-28): we missed the Bareilly assault story —
 a saffron activist filmed slapping two students on their way to the CJP protest —
@@ -227,6 +228,59 @@ def x_search(query, n=15):
     raise RuntimeError(f"no Nitter bridge served search {query!r} — tried: {'; '.join(errors)}")
 
 
+# ── Reddit (read-only, no account) ─────────────────────────────────────────
+#
+# Unlike X/IG, Reddit's own API has a real free read-only tier: app-only OAuth
+# via a "script" app (reddit.com/prefs/apps) authenticates as the APP, not a
+# user — no login, no session cookie, no account to suspend. Register once,
+# drop REDDIT_CLIENT_ID/REDDIT_CLIENT_SECRET into env (see shared/config.py).
+
+def _reddit_client():
+    """Read-only PRAW client. Raises with a clear fix rather than returning
+    nothing when unconfigured — same discipline as the Nitter bridge list."""
+    import praw
+    from shared.config import REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_USER_AGENT
+    if not REDDIT_CLIENT_ID or not REDDIT_CLIENT_SECRET:
+        raise RuntimeError(
+            "Reddit not configured — register a free 'script' app at "
+            "reddit.com/prefs/apps and set REDDIT_CLIENT_ID/REDDIT_CLIENT_SECRET")
+    r = praw.Reddit(client_id=REDDIT_CLIENT_ID, client_secret=REDDIT_CLIENT_SECRET,
+                    user_agent=REDDIT_USER_AGENT)
+    r.read_only = True
+    return r
+
+
+def _reddit_row(post):
+    return {
+        "title": post.title,
+        "url": post.url,
+        "permalink": f"https://reddit.com{post.permalink}",
+        "author": str(post.author) if post.author else "[deleted]",
+        "score": post.score,
+        "num_comments": post.num_comments,
+        "created_utc": post.created_utc,
+        "selftext": (post.selftext or "")[:500],
+    }
+
+
+def reddit_subreddit_latest(subreddit, n=15, sort="new"):
+    """Posts from one subreddit, read-only. sort: new|hot|top. `subreddit` without
+    the leading r/. Returns [{title, url, permalink, author, score, num_comments,
+    created_utc, selftext}]."""
+    r = _reddit_client()
+    sub = r.subreddit(subreddit)
+    listing = {"new": sub.new, "hot": sub.hot, "top": sub.top}.get(sort, sub.new)
+    return [_reddit_row(p) for p in listing(limit=n)]
+
+
+def reddit_search(query, subreddit=None, n=15, sort="relevance"):
+    """Search Reddit, optionally scoped to one subreddit (default: all of Reddit).
+    Returns the same shape as reddit_subreddit_latest."""
+    r = _reddit_client()
+    scope = r.subreddit(subreddit) if subreddit else r.subreddit("all")
+    return [_reddit_row(p) for p in scope.search(query, sort=sort, limit=n)]
+
+
 if __name__ == "__main__":
     import argparse, json
     ap = argparse.ArgumentParser(description="Thelivu social desk (safe: YouTube/web/RSS)")
@@ -238,6 +292,10 @@ if __name__ == "__main__":
     r = sub.add_parser("rss"); r.add_argument("feed"); r.add_argument("-n", type=int, default=10)
     x = sub.add_parser("x"); x.add_argument("handle"); x.add_argument("-n", type=int, default=15)
     xs = sub.add_parser("x-search"); xs.add_argument("query"); xs.add_argument("-n", type=int, default=15)
+    rd = sub.add_parser("reddit"); rd.add_argument("subreddit"); rd.add_argument("-n", type=int, default=15)
+    rd.add_argument("--sort", default="new", choices=["new", "hot", "top"])
+    rds = sub.add_parser("reddit-search"); rds.add_argument("query")
+    rds.add_argument("--subreddit", default=None); rds.add_argument("-n", type=int, default=15)
     a = ap.parse_args()
     if a.cmd == "yt-search":
         print(json.dumps(youtube_search(a.query, a.n), indent=2))
@@ -256,3 +314,7 @@ if __name__ == "__main__":
         print(json.dumps(x_timeline(a.handle, a.n), indent=2))
     elif a.cmd == "x-search":
         print(json.dumps(x_search(a.query, a.n), indent=2))
+    elif a.cmd == "reddit":
+        print(json.dumps(reddit_subreddit_latest(a.subreddit, a.n, a.sort), indent=2))
+    elif a.cmd == "reddit-search":
+        print(json.dumps(reddit_search(a.query, a.subreddit, a.n), indent=2))
