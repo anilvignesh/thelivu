@@ -2278,21 +2278,31 @@ def get_reel_for_run(run_id):
 
 
 def get_ready_reels():
-    """Every reel waiting for its Post tap, one query — NOT a per-run lookup.
-    Added 2026-08-16 alongside the autopublish sweep: walking published runs and
-    calling get_reel_for_run() once each is an N+1 that took 40s+ over Railway's
-    ~0.5-1s/round-trip Postgres link at just 100 runs (docs/reach-analytics.md's
-    'a fetch in the command centre would leave holes' lesson, same root cause —
-    this project has hit this exact class of bug before, see command_center/db.py)."""
+    """The LATEST reel waiting for its Post tap, one per run — one query, NOT a
+    per-run lookup. Added 2026-08-16 alongside the autopublish sweep.
+
+    Deliberately dedupes to one row per run_id (keeping the highest id). A
+    /remake leaves the OLD reel row's status at 'ready' too (reel_worker.py:
+    "don't strand it stuck mid-remake") — the first version of this function
+    returned every one of them, and autopublish.py posted run #120's floods
+    story THREE TIMES (reels #18/19/20, three separate remakes) before this fix.
+    That bug is exactly why this used to be a plain WHERE status='ready' query
+    and now is not — see the incident note in autopublish.py."""
     conn = _conn()
     try:
         cur = conn.cursor()
         cur.execute(
             "SELECT id, run_id, kind, caption, status, ig_media_id, ig_permalink, "
             "notes, created_at, posted_at FROM reels WHERE status = 'ready' ORDER BY id")
-        return _fetchall(cur)
+        rows = _fetchall(cur)
     finally:
         conn.close()
+    latest_by_run = {}
+    for r in rows:
+        rid = r.get("run_id")
+        if rid is None or rid not in latest_by_run or r["id"] > latest_by_run[rid]["id"]:
+            latest_by_run[rid] = r
+    return list(latest_by_run.values())
 
 
 def get_reel_bytes(reel_id):

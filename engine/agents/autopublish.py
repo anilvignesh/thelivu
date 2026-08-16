@@ -30,11 +30,36 @@ So this module does NOT trust the stored column for its own decision. It
 re-derives eligibility straight from `review_text`, and only an EXPLICIT
 `LEGAL-FLAG: NO` counts as clear — anything else (YES, missing, unparseable)
 routes to the normal human-gated path, unchanged.
+
+## Incident, 2026-08-16, minutes after first deploy (read before touching this file)
+
+First live sweep posted run #120's Assam-floods reel to Instagram THREE TIMES
+(reels #18/19/20 — three separate /remake versions, all left at status='ready'
+by reel_worker.py, which the first cut of get_ready_reels() returned as three
+independent candidates) — and separately, it reached back into a *pre-existing
+backlog from 2026-07-30* to do it, not just new work from today. Two distinct
+bugs, both fixed the same day:
+
+1. `get_ready_reels()` now dedupes to the latest row per run_id (shared/db.py).
+2. `TRIAL_START` below — nothing whose PARENT RUN predates the trial is
+   autopublish-eligible, full stop, regardless of when its carousel/reel row
+   was created. "Only new ones" (Anil, 2026-08-16) is the standing rule now,
+   not just today's patch.
+
+Both checks now live in ONE place (`_autopublish_eligible`) instead of being
+repeated per call site — the duplicate-post bug was exactly the kind of thing
+that happens when the same judgment call is written three times and drifts.
 """
 import logging
 import re
+from datetime import datetime, timezone
 
 log = logging.getLogger("autopublish")
+
+# Nothing with a parent run created before this is autopublish-eligible, ever —
+# see the incident note above. Bump this only if Anil explicitly asks to widen
+# the trial to cover backlog; do not creep it forward silently.
+TRIAL_START = datetime(2026, 8, 16, 6, 45, 12, tzinfo=timezone.utc)
 
 
 def _explicitly_legal_clear(review_text):
@@ -44,6 +69,20 @@ def _explicitly_legal_clear(review_text):
     text = review_text or ""
     m = re.search(r"^\s*LEGAL-FLAG:\s*(YES|NO)\b", text, re.IGNORECASE | re.MULTILINE)
     return bool(m) and m.group(1).upper() == "NO"
+
+
+def _autopublish_eligible(run):
+    """The ONE gate: legal-clear AND not backlog. Every call site uses this —
+    see the incident note for why that matters."""
+    if not run:
+        return False
+    created = run.get("created_at")
+    if created is not None:
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        if created < TRIAL_START:
+            return False
+    return _explicitly_legal_clear(run.get("review_text"))
 
 
 def run_autopublish_sweep():
@@ -66,8 +105,8 @@ def _autopublish_pending_runs():
     for run in get_runs_by_status("pending_human", limit=50):
         run_id = run["id"]
         full = get_run(run_id) or run
-        if not _explicitly_legal_clear(full.get("review_text")):
-            continue  # needs the human tap — unchanged path
+        if not _autopublish_eligible(full):
+            continue  # needs the human tap — unchanged path (or is backlog)
         try:
             result = publish_run(run_id)
         except Exception as e:
@@ -97,7 +136,7 @@ def _autopost_ready_carousels():
     rec = recommend_now("FEED")
     for carousel in pending:
         run = get_run(carousel.get("run_id")) if carousel.get("run_id") else None
-        if not run or not _explicitly_legal_clear(run.get("review_text")):
+        if not _autopublish_eligible(run):
             continue  # not autopublish-eligible — waits for the human Post tap as before
         if not rec["post_now"]:
             continue  # holding for a better window, within the freshness cap
@@ -128,7 +167,7 @@ def _autopost_ready_reels():
     rec = recommend_now("REELS")
     for reel in ready:
         run = get_run(reel.get("run_id")) if reel.get("run_id") else None
-        if not run or not _explicitly_legal_clear(run.get("review_text")):
+        if not _autopublish_eligible(run):
             continue
         if not rec["post_now"]:
             continue
