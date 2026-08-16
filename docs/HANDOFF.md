@@ -131,6 +131,31 @@ API** — stubs are the only retirement).
   `init_db()`, insert fixtures, `publishing.fileserver.start(dir, port)`, hit
   it with urllib. `venv/bin/python -m py_compile <files>` before committing.
 
+### 4a. YouTube Shorts setup (2026-08-16, one-time, Anil's action)
+
+`publishing/youtube.py` cross-posts every reel to YouTube Shorts — not live
+until these are set. Uses the Thelivu Gmail account:
+
+1. **console.cloud.google.com** → log in as Thelivu's Gmail → create a project
+   ("Thelivu").
+2. **APIs & Services → Library** → enable **YouTube Data API v3**.
+3. **APIs & Services → OAuth consent screen** → User type **External** → app
+   name "Thelivu" → add scope `https://www.googleapis.com/auth/youtube.upload`
+   → save, leave in **Testing**, add the Thelivu Gmail as a **test user**.
+4. **APIs & Services → Credentials → Create Credentials → OAuth client ID** →
+   type **Desktop app**.
+5. `venv/bin/python -m publishing.youtube_auth --client-id ... --client-secret ...`
+   — opens a consent URL, approve as the Thelivu account, paste the `code` back.
+   Prints the `railway variable set` commands for `YOUTUBE_CLIENT_ID` /
+   `YOUTUBE_CLIENT_SECRET` / `YOUTUBE_REFRESH_TOKEN` on `thelivu-agent`.
+
+**⚠️ Testing-mode token expiry:** while the OAuth consent screen stays in
+Testing, Google expires the refresh token after **7 days** — re-run step 5 for
+a new one. Moving to "In production" needs Google's review for the
+`youtube.upload` scope (a restricted scope); worth doing once the integration
+is proven, not before. `publishing/youtube.py` raises a clear message
+(`invalid_grant`) rather than a raw traceback when this happens.
+
 ## 5. Hard-won gotchas (each cost real debugging time)
 
 1. **Indian ISPs block Telegram domains.** On Anil's connection `t.me` does
