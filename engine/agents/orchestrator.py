@@ -148,9 +148,19 @@ def _enrich_topic_with_link(topic_text):
 def _get_transcript(video_id):
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
-        chunks = YouTubeTranscriptApi.get_transcript(video_id)
+        # v1.x replaced the old classmethod .get_transcript(video_id) (dict
+        # snippets) with an instance .fetch(video_id) returning a
+        # FetchedTranscript of FetchedTranscriptSnippet objects (attribute
+        # access, not dict keys). requirements.txt only floors the version
+        # (>=0.6) so a routine `pip install` on any fresh deploy silently
+        # picked up 1.x and broke this — caught 2026-08-17 while checking
+        # whether pasted links get their content fetched at all; this
+        # except:None swallowed it with no error anywhere. Fixed to the
+        # current API; if this library breaks again, it will look exactly
+        # like "no transcript available", not a visible failure.
+        chunks = YouTubeTranscriptApi().fetch(video_id)
         return "\n".join(
-            f"[{int(c['start'])//60:02d}:{int(c['start'])%60:02d}] {c['text']}"
+            f"[{int(c.start)//60:02d}:{int(c.start)%60:02d}] {c.text}"
             for c in chunks
         )
     except Exception:
