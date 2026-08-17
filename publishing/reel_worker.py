@@ -159,9 +159,42 @@ def _notify_reel_ready(reel_id, run_id, story, kind, notes=None):
     _tg_post_video(video_url, caption, keyboard)
 
 
+# A run stuck failing every poll used to be a signal to look at that nobody
+# ever looked at — found 2026-08-17 (Anil asked why some published articles
+# never got a reel): run #171 had been silently retrying against a timed-out
+# NVIDIA endpoint for over an hour, every ~10-26 min, with no notification
+# anywhere. This many CONSECUTIVE failed builds (not attempts within one
+# build — make_narrated_reel already retries 3x internally) before one
+# Telegram alert. After that, keeps retrying at the normal cadence (the free
+# NVIDIA tier can recover on its own) but only alerts again if it goes quiet
+# and comes back to life failing.
+_STUCK_ALERT_AFTER = 3
+
+
+def _tg_post_text(text):
+    """Plain text push — same minimal, best-effort pattern as _tg_post_video:
+    a failed notification must never take the worker down."""
+    import requests
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    chat_id = os.environ.get("TELEGRAM_DRAFT_CHAT_ID", "")
+    if not token or not chat_id:
+        return None
+    try:
+        r = requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": str(chat_id), "text": text[:4096], "parse_mode": "HTML"},
+            timeout=30,
+        )
+        r.raise_for_status()
+        return r.json().get("result", {}).get("message_id")
+    except Exception as e:
+        log.warning("Telegram text push failed: %s", e)
+        return None
+
+
 def _build_one(run_id, slug):
     from publishing.make_reel import make_narrated_reel
-    from shared.db import get_run
+    from shared.db import get_run, kv_get, kv_set
 
     dark, article_url = _carousel_mood(run_id)
     if not article_url:
@@ -179,7 +212,9 @@ def _build_one(run_id, slug):
         # the belt-and-braces for anything unexpected. One run blowing up must
         # not take the rest of the batch down with it.
         log.exception("run #%s raised building its reel", run_id)
-        return {"ok": False, "error": str(e)}
+        result = {"ok": False, "error": str(e)}
+
+    fail_key = f"reel_build_fails_{run_id}"
     if result.get("ok"):
         log.info("run #%s -> reel #%s (%s, %s beats, %sKB)", run_id,
                   result.get("reel_id"), result.get("kind"),
@@ -187,11 +222,21 @@ def _build_one(run_id, slug):
         run = get_run(run_id) or {}
         _notify_reel_ready(result["reel_id"], run_id,
                            run.get("throughline"), result.get("kind"))
+        kv_set(fail_key, "")  # clear the streak — it recovered
     else:
         # Never raises by contract (make_reel.py docstring) — log and move on,
-        # next poll picks it up again. A run stuck failing every poll is a
-        # signal to look at, not a reason to crash the loop.
+        # next poll picks it up again.
         log.warning("run #%s did not build: %s", run_id, result)
+        n = int(kv_get(fail_key) or 0) + 1
+        kv_set(fail_key, str(n))
+        if n == _STUCK_ALERT_AFTER:
+            run = get_run(run_id) or {}
+            _tg_post_text(
+                f"⚠️ Reel stuck: run #{run_id} has failed to build {n}x in a row.\n\n"
+                f"{(run.get('throughline') or '')[:200]}\n\n"
+                f"Last error: {str(result.get('error', ''))[:300]}\n\n"
+                f"Still retrying automatically — this is a heads-up, not a request "
+                f"to do anything, unless it stays stuck.")
     return result
 
 
