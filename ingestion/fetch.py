@@ -26,6 +26,7 @@ _UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 
 _YT_RE = re.compile(r"(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/shorts/)([A-Za-z0-9_-]{11})")
+_IG_RE = re.compile(r"instagram\.com/(?:reel|p|tv)/[A-Za-z0-9_-]+")
 _URL_RE = re.compile(r"https?://[^\s<>\"')]+")
 
 
@@ -36,8 +37,79 @@ def find_url(text):
 
 
 def classify(url):
-    """'youtube' | 'article' for a URL."""
-    return "youtube" if _YT_RE.search(url or "") else "article"
+    """'youtube' | 'instagram' | 'article' for a URL."""
+    if _YT_RE.search(url or ""):
+        return "youtube"
+    if _IG_RE.search(url or ""):
+        return "instagram"
+    return "article"
+
+
+def fetch_instagram(url, timeout=30):
+    """A single public Instagram post/reel's caption + metadata → {'title',
+    'text', 'url', 'video_url'}. `text` is the full caption as posted — for a
+    narrated reel that's usually the whole spoken script, same as how a YouTube
+    link's transcript gets folded into a topic.
+
+    Deliberately narrow: ONE post a link was pasted for, no login, no cookies,
+    no account/profile/hashtag scraping — that stays the declined territory
+    (see engine/social_desk.py's module docstring). This is the same class of
+    access already used for YouTube (`social_desk.py`'s `_YTDLP`): yt-dlp
+    reading Instagram's own public post-embed data, nothing behind a login
+    wall. Plain requests+lxml (fetch_article, above) cannot do this — Instagram
+    serves an anonymous request a JS shell with no caption in the raw HTML;
+    verified empirically 2026-08-17, not assumed.
+
+    `video_url` is a short-lived signed CDN link when Instagram happens to
+    expose one combined audio+video stream (uncommon — verified empirically:
+    Instagram Reels typically DASH-split into separate video-only and
+    audio-only tracks, which `-j` metadata mode lists but does not merge). Most
+    of the time this comes back empty even though the post has a video —
+    that's not a failure, just this function not doing a real download. If
+    watching the actual video (not just its caption) turns out to matter —
+    e.g. viral-footage verification, social_desk.py's documented use case —
+    that needs an actual yt-dlp download+ffmpeg-merge step, which is a
+    different, heavier function than this one.
+
+    Requires yt-dlp (pip package + console script, added to requirements.txt
+    alongside this). Raises nothing the caller has to catch specially — same
+    graceful-degrade contract as fetch_article: an empty/failed result just
+    means the link stays bare for the pipeline to treat as an unverified lead.
+    """
+    import json
+    import subprocess
+    import sys
+    try:
+        # sys.executable -m yt_dlp rather than a bare "yt-dlp" on PATH: the
+        # console script's location varies by how/where pip installed it
+        # (venv bin, pipx shim, etc.) — the running interpreter is always
+        # right, and `-m` is how the pip package guarantees it's importable.
+        proc = subprocess.run(
+            [sys.executable, "-m", "yt_dlp", "--no-warnings", "-j", url],
+            capture_output=True, text=True, timeout=timeout)
+        if proc.returncode != 0:
+            log.warning("yt-dlp failed for %s: %s", url, proc.stderr[:300])
+            return {"title": "", "text": "", "url": url, "video_url": ""}
+        data = json.loads(proc.stdout.splitlines()[0])
+    except Exception as e:
+        log.warning("Instagram fetch failed for %s: %s", url, e)
+        return {"title": "", "text": "", "url": url, "video_url": ""}
+
+    # Prefer a combined (has_audio+has_video) format's direct URL over the
+    # bare `url` field, which on Instagram is often just the DASH audio track.
+    video_url = ""
+    for f in reversed(data.get("formats") or []):
+        if f.get("vcodec") not in (None, "none") and f.get("acodec") not in (None, "none"):
+            video_url = f.get("url", "")
+            break
+    video_url = video_url or data.get("url", "")
+
+    return {
+        "title": data.get("title") or data.get("description", "")[:80],
+        "text": data.get("description") or "",
+        "url": url,
+        "video_url": video_url,
+    }
 
 
 def youtube_id(url):

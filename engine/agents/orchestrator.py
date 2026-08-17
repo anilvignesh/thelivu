@@ -109,18 +109,21 @@ def _enrich_topic_with_link(topic_text):
     the topic text so topic-intake triages against the real material, not just a
     bare link. Handles both the [LINK] ingest marker and a URL pasted as a topic.
 
-    YouTube → transcript (+ source-ingestor claims). Article → readable text.
-    Fetch failures degrade gracefully: the link stays in the topic and the open
-    web verifies. Never raises."""
+    YouTube → transcript (+ source-ingestor claims). Instagram → the post's own
+    caption (added 2026-08-17, see ingestion.fetch.fetch_instagram — one post a
+    link was pasted for, no login, no account scraping). Article → readable
+    text. Fetch failures degrade gracefully: the link stays in the topic and
+    the open web verifies. Never raises."""
     try:
-        from ingestion.fetch import find_url, classify, fetch_article
+        from ingestion.fetch import find_url, classify, fetch_article, fetch_instagram
     except Exception:
         return topic_text
     url = find_url(topic_text)
     if not url:
         return topic_text
     try:
-        if classify(url) == "youtube":
+        kind = classify(url)
+        if kind == "youtube":
             vid = _video_id(url)
             transcript = _get_transcript(vid)
             block = f"\n\n--- INGESTED VIDEO ({url}) ---\n"
@@ -130,6 +133,18 @@ def _enrich_topic_with_link(topic_text):
                 block += "(No transcript available; treat the link as a lead and verify on the open web.)"
             log.info("Enriched topic with YouTube transcript: %s", url)
             return topic_text + block
+        if kind == "instagram":
+            ig = fetch_instagram(url)
+            if ig.get("text"):
+                log.info("Enriched topic with Instagram caption (%d chars): %s",
+                        len(ig["text"]), url)
+                return (topic_text +
+                        f"\n\n--- INGESTED INSTAGRAM POST ({url}) ---\n"
+                        f"Caption as posted (one source's claims — verify):\n{ig['text'][:6000]}\n"
+                        "(A social post, not a finding. Treat exactly like a viral claim: "
+                        "verify against the primary record before repeating anything.)")
+            log.warning("Instagram fetch returned no caption: %s", url)
+            return topic_text
         # Web article
         art = fetch_article(url)
         if art.get("text"):

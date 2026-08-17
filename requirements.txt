@@ -11,3 +11,4 @@ pyyaml>=6.0
 ddgs>=0.1
 Pillow>=10.0
 pytrends>=4.9  # unofficial Google Trends read — engine/desks/ek/interest.py, informational only
+yt-dlp>=2025.1  # public-post reads: YouTube transcripts (social_desk.py) + Instagram captions (ingestion/fetch.py)
