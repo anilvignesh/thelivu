@@ -10,16 +10,21 @@ stylized Thelivu presenter voices the story. Reels are the reach surface — thi
 the same argument as the carousel, compressed to what a person can say out loud,
 written for the ear and for a muted viewer reading captions.
 
-**Target tight, but the length is a range, not a wall.** Instagram's Graph API only
+**Target tight, but the length is a range, not a wall — and the range runs closer
+to the ceiling than earlier drafts of this skill used.** Instagram's Graph API only
 gives Reels-tab / discovery placement to videos of 5–90 seconds — past that a post
 technically still publishes but loses the exact non-follower reach this format
-exists for, so 90s is a hard ceiling this skill must never approach. Within that
-ceiling: default to the shorter end (a tight reel completes better, and completion
-rate is itself a reach signal — padding a reel that didn't need the extra room costs
-more reach than it buys). Spend the longer end only when compressing further would
-cut something the article established as load-bearing — a counter-case, a second
-data point that changes the picture, a source the claim needs. If the story fits in
-40–50s without losing anything real, stop there.
+exists for, so 90s is a hard ceiling this skill must never approach. Padding a reel
+that didn't need the extra room still costs more reach than it buys — a tight reel
+completes better, and completion rate is itself a reach signal, so never write past
+what the story actually has. But the correction (Anil, 2026-08-17, after reading
+real published pieces): most Thelivu articles are dense enough that compressing to
+the short end was cutting real substance — a second sourced data point, the
+counter-case, the specific figure that makes a claim checkable — not padding. Write
+the length the story earns. If it genuinely earns 40–50s, stop there; if the
+verified material runs deeper than that, use the room the platform actually gives
+before reaching for a shorter number that isn't reflecting what's really in the
+piece.
 
 This skill enforces the project's editorial charter (`../../CHARTER.md`) and brand
 (`../../BRAND.md`). Read them if present; the charter governs in any conflict. It
@@ -71,10 +76,15 @@ Before final output, self-check spoken lines and captions against
   wrongdoing. Defamation care applies at spoken pace too.
 
 ## Shape (write for the ear, and for muted viewing)
-- **Total: 110–180 words** (~40–75s at a natural pace). 110–135 is the default —
-  reach for the top of the range only when a genuinely load-bearing piece of the
-  story (see above) would otherwise be cut. Never exceed 180 — that is the line
-  that keeps a natural-pace read safely under the platform's 90s ceiling.
+- **Total: 110–210 words** (~40–85s at a natural pace, ~147wpm). Raised from the
+  original 110–180 (2026-08-17) — 180 words tops out around 73s, leaving 15+
+  seconds of the platform's actual allowance unused every time, and that gap was
+  coming out of real verified material, not filler. 110–160 is the working default;
+  reach into 160–210 when the story has genuinely earned it (a second sourced data
+  point, the counter-case, a specific figure a claim needs to stay checkable) —
+  which is common, not the exception, for a piece with real primary sourcing. Never
+  exceed 210 — that keeps a natural-pace read safely under the platform's 90s
+  ceiling. Still never pad: a 130-word story stays 130 words.
 - **Hook (first 3 seconds / ~1 sentence):** the sharpest fact or the stakes. This is
   the whole reel's fate — earn the next 3 seconds. No throat-clearing, no "in this
   video."
@@ -96,11 +106,13 @@ Before final output, self-check spoken lines and captions against
   The stake must be one the article established — sharpening is selection, never
   escalation. If the piece does not support a sharp hook, the honest fix is a
   narrower story, not a bigger claim.
-- **Body (3–4 short beats, up to 5 when the extra length is earned):** the key
-  fact → the context that reframes it → the evidence → the turn → (if a fifth
-  beat is truly load-bearing) the counter-case or the complication. One idea per
-  beat, plain spoken sentences, short words. A fifth beat is the exception, not
-  the plan — most stories are told in four.
+- **Body (3–4 short beats, up to 6 when the extra length is earned):** the key
+  fact → the context that reframes it → the evidence → the turn → (if a fifth or
+  sixth beat is truly load-bearing) the counter-case, a second data point, or the
+  complication. One idea per beat, plain spoken sentences, short words. The point
+  of the wider word budget above is more BEATS worth watching for, not the same
+  three or four ideas said more slowly — a longer script that doesn't add a new
+  idea per extra beat is padding even if every word is true.
 - **Close (1 line):** the "so what," or the question left hanging. Then a soft share
   cue is allowed once ("send this to someone who should see it") — never engagement
   bait.
