@@ -68,9 +68,16 @@ def publish_short(video_bytes, title, description="", tags=None, progress=None):
     """Upload a vertical video as a YouTube Short. Returns (video_id, permalink).
 
     `title` is truncated to YouTube's 100-char limit. `#Shorts` is appended to
-    the description if not already present — that, plus a <=60s vertical video,
-    is what gets Shorts-shelf treatment (longer uploads still work, just don't
-    get it — see engine/distribution docstring for the reel-length note).
+    the description if not already present.
+
+    Shorts-shelf eligibility (verified 2026-08-17, correcting a stale comment
+    that said <=60s): YouTube expanded the Shorts length ceiling from 60s to
+    3 minutes in October 2024. A vertical/square video just needs to be
+    <=3min to qualify — nowhere near what video-script's ~85s ceiling
+    produces, so the 2026-08-17 length increase (engine/skills/video-script/
+    SKILL.md, 110-210 words) doesn't cost Shorts placement here. Instagram's
+    own Reels-shelf ceiling (90s) is still the tighter constraint of the two
+    platforms — video-script's cap tracks Instagram's, not YouTube's.
     Raises YouTubeNotConfigured / YouTubePublishError."""
     def _p(frac, msg):
         if progress:
