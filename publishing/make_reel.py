@@ -447,6 +447,17 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
     # spine IS the narration the verifier passed and the reviewer read, so there
     # is no script step to run. See publishing/belief_reel.py.
     desk = (run.get("desk") or "news").lower()
+    if voice is None and desk in ("ek", "gk"):
+        # A second voice for the belief desks — Fio's, at her own suggestion
+        # (2026-08-17) — so "Everyone Knows"/"Turns Out" reads as a distinct
+        # series through audio rather than a second visual theme forking the
+        # locked brand system (see BRAND.md; only bg/illustration are allowed
+        # to vary by piece, never the signature). Only applies when nobody
+        # already forced a voice via kv `reel_voice` (checked above) — that
+        # manual override still wins, e.g. for an A/B test across desks.
+        from publishing.voices import available
+        if "fio" in available():
+            voice = "fio"
     belief = get_belief(run_id) if desk in ("ek", "gk") else None
     spine = (belief or {}).get("spine") or ""
     if desk in ("ek", "gk") and not spine:
