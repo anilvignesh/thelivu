@@ -506,6 +506,44 @@ def synth_beats(beats, backend, work_dir, voice=None):
     return out
 
 
+# Progressive caption reveal — added 2026-08-17 (Anil: "should we add subtitles").
+# The short on-screen caption used to sit static for the whole beat (6-12s) while much
+# more was being said; this reveals it word-by-word, timed against the beat's real
+# detected pauses (find_pauses/plan_cuts — the same mechanism sub-shot cuts already
+# use), so it reads as synced captioning rather than a title card sitting there. Only
+# the CAPTION changes — the illustration and the spoken words are untouched, so this
+# doesn't reopen the "second picture says nothing" call that turned sub-shots off
+# above; a caption that grows IS new information each cut, an identical picture was
+# not. Capped, not per-word unbounded: a long caption on a short beat would otherwise
+# produce sub-half-second ffmpeg segments that cost render time and are imperceptible.
+MAX_CAPTION_REVEALS = 6
+MIN_REVEAL_SECS = 0.5  # below this a word-step isn't readable; fold it into the next
+
+
+def _caption_reveal_steps(caption, dur):
+    """How many reveal steps a caption gets on a beat `dur` seconds long. A one-word
+    (or empty — the silent sign-off) caption never splits."""
+    words = (caption or "").split()
+    if len(words) <= 1:
+        return 1
+    m = min(len(words), MAX_CAPTION_REVEALS)
+    while m > 1 and dur / m < MIN_REVEAL_SECS:
+        m -= 1
+    return m
+
+
+def _revealed_caption(caption, step, steps):
+    """Caption text at reveal step `step` of `steps` (0-indexed) — words apportioned
+    evenly across steps so steps < word-count still reveals smoothly (5 words in 3
+    steps: 2/2/1, not 1/1/3 then a stalled repeat of the full text)."""
+    words = (caption or "").split()
+    if steps <= 1 or len(words) <= 1:
+        return caption
+    per = len(words) / steps
+    cutoff = max(1, round(per * (step + 1)))
+    return " ".join(words[:min(cutoff, len(words))])
+
+
 def _split_duration(total, k):
     """Split `total` into k parts that sum to EXACTLY `total`.
 
@@ -522,7 +560,7 @@ def _split_duration(total, k):
     return parts
 
 
-def _zoom_expr(frames, zmax=ZOOM_MAX):
+def _zoom_expr(frames, zmax=ZOOM_MAX, start_zoom=1.0, total_frames=None):
     """The zoompan `z` expression for a beat `frames` long.
 
     The increment MUST be derived from the beat's own length. It used to be a fixed
@@ -534,10 +572,22 @@ def _zoom_expr(frames, zmax=ZOOM_MAX):
     Measured before the fix: 2.2 mean pixel change per half-second while moving,
     0.001 after the ceiling.
 
+    Written against `on` (zoompan's per-invocation output-frame counter, always 0 at
+    the start of a run) rather than the old self-referencing `zoom+inc`, which only
+    ever worked because one ffmpeg call rendered the whole beat in one shot. Once a
+    beat's caption reveals progressively (see build_reel) each word is its own
+    ffmpeg invocation, and `zoom` would reset to 1.0 at every one of those — a
+    visible push-stutter-push several times a beat instead of one smooth push.
+    `start_zoom`/`total_frames` let each reveal segment continue the SAME curve:
+    pass the frame count of the segment's OWN slice as `frames`, the whole beat's
+    frame count as `total_frames` (defaults to `frames` — the old one-segment case),
+    and the zoom level the previous segment ended on as `start_zoom`.
+
     The min() stays as a clamp against float drift on the last frame.
     """
-    inc = (zmax - 1.0) / max(frames, 1)
-    return f"min(zoom+{inc:.8f},{zmax})"
+    total_frames = total_frames or frames
+    inc = (zmax - 1.0) / max(total_frames, 1)
+    return f"min({start_zoom:.8f}+{inc:.8f}*on,{zmax})"
 def build_reel(fields, dark, out_mp4, kicker=None, backend=None, render_frame=None,
                shots_per_beat=None, voiced=None, label="", voice=None):
     """Render frames + VO for each beat, animate with a gentle zoom, mux to MP4.
@@ -597,23 +647,42 @@ def build_reel(fields, dark, out_mp4, kicker=None, backend=None, render_frame=No
             # this degrades to the even split.
             cuts = plan_cuts(dur, k, pauses) if pauses else _split_duration(dur, k)
 
+            offset = 0.0
             for j, sub in enumerate(cuts):
-                png = work / f"f{i}_{j}.png"
-                draw_frame(caption, dark, i, n, kicker, png, shot=j, label=label)
-                seg = work / f"s{i}_{j}.mp4"
-                frames = max(int(round(sub * FPS)), 1)
-                # gentle Ken-Burns zoom-in on the still (retention on a static frame) —
-                # spread across the WHOLE sub-shot, so it never stalls into a freeze-frame
-                vf = (f"zoompan=z='{_zoom_expr(frames)}':d={frames}"
-                      f":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={W}x{H}:fps={FPS},"
-                      f"format=yuv420p")
-                subprocess.run(
-                    ["ffmpeg", "-y", "-loop", "1", "-i", str(png), "-t", f"{sub:.3f}",
-                     "-vf", vf, "-r", str(FPS), "-c:v", "libx264", "-pix_fmt", "yuv420p",
-                     str(seg)],
-                    check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                )
-                seg_paths.append(seg)
+                total_frames = max(int(round(sub * FPS)), 1)
+                # Reveal the caption progressively within this sub-shot — only when
+                # there's a real spoken line to sync against (never the silent
+                # sign-off, which has neither). Pauses are beat-absolute; shift into
+                # this sub-shot's own [0, sub) window before reusing plan_cuts.
+                steps = _caption_reveal_steps(caption, sub) if (spoken and caption) else 1
+                local_pauses = [p - offset for p in pauses if offset <= p < offset + sub]
+                reveal_cuts = ([sub] if steps <= 1 else
+                               (plan_cuts(sub, steps, local_pauses) if local_pauses
+                                else _split_duration(sub, steps)))
+                frame_off = 0
+                for r, rsub in enumerate(reveal_cuts):
+                    revealed = _revealed_caption(caption, r, len(reveal_cuts))
+                    png = work / f"f{i}_{j}_{r}.png"
+                    draw_frame(revealed, dark, i, n, kicker, png, shot=j, label=label)
+                    seg = work / f"s{i}_{j}_{r}.mp4"
+                    rframes = max(int(round(rsub * FPS)), 1)
+                    # gentle Ken-Burns zoom-in on the still (retention on a static
+                    # frame) — spread across the WHOLE sub-shot's frame count even
+                    # though each caption-reveal step is its own ffmpeg call, so the
+                    # push reads as one continuous move, not a stutter per word.
+                    start_zoom = min(1.0 + (ZOOM_MAX - 1.0) * frame_off / total_frames, ZOOM_MAX)
+                    vf = (f"zoompan=z='{_zoom_expr(rframes, start_zoom=start_zoom, total_frames=total_frames)}'"
+                          f":d={rframes}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={W}x{H}:fps={FPS},"
+                          f"format=yuv420p")
+                    subprocess.run(
+                        ["ffmpeg", "-y", "-loop", "1", "-i", str(png), "-t", f"{rsub:.3f}",
+                         "-vf", vf, "-r", str(FPS), "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                         str(seg)],
+                        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    )
+                    seg_paths.append(seg)
+                    frame_off += rframes
+                offset += sub
 
         # concat video segments
         concat_list = work / "segs.txt"
