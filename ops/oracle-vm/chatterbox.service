@@ -6,8 +6,14 @@ After=network.target
 Type=simple
 User=ubuntu
 WorkingDirectory=/home/ubuntu/thelivu
-Environment=CBX_REF=/home/ubuntu/thelivu_voice_ref2.wav
 Environment=CBX_TEMPERATURE=0.7
+# CBX_REF deliberately NOT set: it's a hard override that ignores the per-request
+# `voice` field entirely (publishing/chatterbox_server.py's _voice()), which is
+# exactly backwards now that publishing/voices.py's registry exists — it made
+# every reel narrate as "anil" regardless of desk (found + fixed 2026-08-17,
+# routing the belief desks to Fio's voice). Only set CBX_REF again for a
+# single-voice emergency pin, and know that it silently defeats desk routing
+# while it's set.
 ExecStart=/home/ubuntu/cbx/bin/python -m publishing.chatterbox_server
 Restart=always
 RestartSec=5

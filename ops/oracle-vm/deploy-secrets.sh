@@ -56,12 +56,30 @@ scp -i "$KEY" -o StrictHostKeyChecking=accept-new "$TMP_ENV" \
   ubuntu@"$VM_IP":/home/ubuntu/thelivu/ops/oracle-vm/reel-worker.env
 $SSH "chmod 600 /home/ubuntu/thelivu/ops/oracle-vm/reel-worker.env"
 
-echo "== copying voice reference clip =="
+echo "== copying voice reference clips =="
 if [ -f "$HOME/thelivu_voice_ref2.wav" ]; then
   scp -i "$KEY" -o StrictHostKeyChecking=accept-new \
     "$HOME/thelivu_voice_ref2.wav" ubuntu@"$VM_IP":/home/ubuntu/thelivu_voice_ref2.wav
 else
   echo "WARNING: $HOME/thelivu_voice_ref2.wav not found locally — copy it manually before starting chatterbox.service"
+fi
+# Second voice for the belief desks (publishing/voices.py), added 2026-08-17.
+# Optional — a fresh VM with just Anil's wav still works, it just narrates
+# ek/gk reels in the news-desk voice until this exists (see make_reel.py).
+if [ -f "$HOME/thelivu_voice_fio.wav" ]; then
+  scp -i "$KEY" -o StrictHostKeyChecking=accept-new \
+    "$HOME/thelivu_voice_fio.wav" ubuntu@"$VM_IP":/home/ubuntu/thelivu_voice_fio.wav
+  $SSH "mkdir -p ~/.jarvis && cat > ~/.jarvis/voices.json" <<'JSON'
+{
+  "default": "anil",
+  "voices": {
+    "anil": {"ref": "~/thelivu_voice_ref2.wav"},
+    "fio":  {"ref": "~/thelivu_voice_fio.wav"}
+  }
+}
+JSON
+else
+  echo "NOTE: $HOME/thelivu_voice_fio.wav not found locally — belief-desk reels will narrate as Anil until it's added and this script re-run."
 fi
 
 echo "== enabling + starting services =="
