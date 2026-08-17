@@ -647,18 +647,22 @@ def build_reel(fields, dark, out_mp4, kicker=None, backend=None, render_frame=No
             # this degrades to the even split.
             cuts = plan_cuts(dur, k, pauses) if pauses else _split_duration(dur, k)
 
-            offset = 0.0
             for j, sub in enumerate(cuts):
                 total_frames = max(int(round(sub * FPS)), 1)
                 # Reveal the caption progressively within this sub-shot — only when
                 # there's a real spoken line to sync against (never the silent
-                # sign-off, which has neither). Pauses are beat-absolute; shift into
-                # this sub-shot's own [0, sub) window before reusing plan_cuts.
+                # sign-off, which has neither).
                 steps = _caption_reveal_steps(caption, sub) if (spoken and caption) else 1
-                local_pauses = [p - offset for p in pauses if offset <= p < offset + sub]
-                reveal_cuts = ([sub] if steps <= 1 else
-                               (plan_cuts(sub, steps, local_pauses) if local_pauses
-                                else _split_duration(sub, steps)))
+                # Plain even split, not plan_cuts' pause-snapping: found by testing,
+                # not assumed — plan_cuts' boundary search was only ever exercised
+                # with the small k (<=3) the illustration sub-shot cut used, and with
+                # up to 6 reveal steps here it produced a negative-duration boundary
+                # ("-t '-0.012'" straight into ffmpeg, hard crash). Landing a picture
+                # cut on a real breath matters (a mid-clause cut looks like a
+                # glitch); landing a WORD reveal on one doesn't nearly as much, so
+                # the guaranteed-safe even split is the right tradeoff here, not a
+                # downgrade to fix around a bug worth debugging further.
+                reveal_cuts = [sub] if steps <= 1 else _split_duration(sub, steps)
                 frame_off = 0
                 for r, rsub in enumerate(reveal_cuts):
                     revealed = _revealed_caption(caption, r, len(reveal_cuts))
@@ -682,7 +686,6 @@ def build_reel(fields, dark, out_mp4, kicker=None, backend=None, render_frame=No
                     )
                     seg_paths.append(seg)
                     frame_off += rframes
-                offset += sub
 
         # concat video segments
         concat_list = work / "segs.txt"
