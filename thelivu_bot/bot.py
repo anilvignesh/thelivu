@@ -1093,6 +1093,27 @@ async def cmd_republish(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Usage: /republish [run_id] — run_id must be a number.")
         return
 
+    existing = get_run(run_id)
+    if existing is None:
+        await update.message.reply_text(f"Run #{run_id} not found.")
+        return
+    if not (existing.get("draft_text") or "").strip():
+        # /republish is documented for runs that WERE published (so had a
+        # draft) and need another pass — not for a run that was HELD/killed
+        # before ever reaching the writer. Calling it on one of those used to
+        # silently flip status to pending_human with Approve/Kill/Hold buttons
+        # over nothing to review — found 2026-08-17 auditing run #180, which
+        # got left in exactly that state (trust_gate still 'HOLD', no draft).
+        # Tapping Approve there would have tried to publish an empty draft.
+        await update.message.reply_text(
+            f"Run #{run_id} has no draft text — it was never written (status "
+            f"'{existing.get('status')}', trust_gate '{existing.get('trust_gate')}'). "
+            f"/republish is for undoing a real publication, not for a run that "
+            f"never reached the writer. Use /recheck {run_id} to send it back "
+            f"through, or /kill {run_id} if it's not worth pursuing."
+        )
+        return
+
     run = reset_run_for_review(run_id)
     if run is None:
         await update.message.reply_text(f"Run #{run_id} not found.")
