@@ -10,3 +10,4 @@ lxml>=5.0
 pyyaml>=6.0
 ddgs>=0.1
 Pillow>=10.0
+pytrends>=4.9  # unofficial Google Trends read — engine/desks/ek/interest.py, informational only
