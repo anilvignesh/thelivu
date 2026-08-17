@@ -165,6 +165,21 @@ if service == "thelivu-agent":
             log.error("Instagram sync failed: %s", e, exc_info=True)
             _sweep_failed("Instagram sync", e)
 
+        # Same reasoning as the Instagram sync above, same place in the tick
+        # (above the budget governor — HTTP against Google, not a model call,
+        # costs nothing and must never be parked with the paid stages). Added
+        # 2026-08-17 for the command centre's YouTube reach view.
+        try:
+            from engine.agents.yt_insights import run_yt_sync, sync_due as yt_sync_due
+            forced_yt = kv_get("force_yt_sync")
+            if forced_yt:
+                kv_set("force_yt_sync", "")
+            if forced_yt or yt_sync_due(now_utc):
+                log.info("YouTube sync: %s", run_yt_sync())
+        except Exception as e:
+            log.error("YouTube sync failed: %s", e, exc_info=True)
+            _sweep_failed("YouTube sync", e)
+
         # ── Quota breaker ─────────────────────────────────────────────────────
         # Both providers ran dry on 2026-07-21 and the tick spent 22 hours
         # crashing on a 429 every 2 minutes. While the breaker is open we skip

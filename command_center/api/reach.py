@@ -81,6 +81,19 @@ def _referrers():
         "FROM page_reads WHERE is_bot = FALSE GROUP BY 1 ORDER BY 2 DESC LIMIT 10")
 
 
+def _youtube_posts():
+    """Every cross-posted Short with its latest snapshot — the YouTube half of
+    this view, added 2026-08-17. No separate query module needed: shared.db's
+    get_yt_latest_metrics() already does the join, same shape as _posts()'s
+    ig_media query above."""
+    from shared.db import get_yt_latest_metrics
+    rows = get_yt_latest_metrics()
+    for r in rows:
+        cap = (r.get("throughline") or "").strip()
+        r["title"] = cap[:110]
+    return rows
+
+
 @endpoint
 def reach_state(request, data):
     r = db.parallel(
@@ -89,8 +102,10 @@ def reach_state(request, data):
         reads_day=_reads_by_day,
         reads_article=_reads_by_article,
         referrers=_referrers,
+        youtube=_youtube_posts,
         settings=lambda: {k: kv_get(k) for k in
-                          ("last_ig_sync_at", "last_ig_sync_result")},
+                          ("last_ig_sync_at", "last_ig_sync_result",
+                           "last_yt_sync_at", "last_yt_sync_result")},
     )
     posts, audience = r["posts"], r["audience"]
     latest = audience[-1] if audience else {}
@@ -102,12 +117,18 @@ def reach_state(request, data):
         return sum((p.get(field) or 0) for p in posts)
 
     reads = r["reads_day"]
+    yt_posts = r["youtube"]
+
+    def yt_total(field):
+        return sum((p.get(field) or 0) for p in yt_posts)
+
     return J({
         "posts": posts,
         "audience": audience,
         "reads_by_day": list(reversed(reads)),
         "reads_by_article": r["reads_article"],
         "referrers": r["referrers"],
+        "youtube": yt_posts,
         "totals": {
             "posts": len(posts),
             "reels": sum(1 for p in posts if p["kind"] == "Reel"),
@@ -119,9 +140,14 @@ def reach_state(request, data):
             "tg_subscribers": latest.get("tg_subscribers"),
             "reads_humans": sum((d.get("humans") or 0) for d in reads),
             "reads_bots": sum((d.get("bots") or 0) for d in reads),
+            "yt_videos": len(yt_posts),
+            "yt_views": yt_total("views"), "yt_likes": yt_total("likes"),
+            "yt_comments": yt_total("comments"),
         },
         "last_sync_at": r["settings"].get("last_ig_sync_at"),
         "last_sync_result": r["settings"].get("last_ig_sync_result"),
+        "last_yt_sync_at": r["settings"].get("last_yt_sync_at"),
+        "last_yt_sync_result": r["settings"].get("last_yt_sync_result"),
     })
 
 
@@ -131,6 +157,7 @@ def reach_sync(request, data):
     token lives on Railway and the history belongs to the process that is always
     on."""
     kv_set("force_ig_sync", "1")
+    kv_set("force_yt_sync", "1")
     return J({"ok": True,
               "note": "Refresh queued — the engine picks it up within ~2 minutes."})
 

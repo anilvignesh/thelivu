@@ -289,6 +289,23 @@ CREATE TABLE IF NOT EXISTS audience_daily (
     tg_subscribers     INTEGER,   -- Telegram channel; per-post views are MTProto-only
     updated_at         TIMESTAMP DEFAULT NOW()
 );
+
+-- YouTube — added 2026-08-17. Deliberately no yt_media table mirroring
+-- ig_media: a Short's video_id/run_id already lives on reels.youtube_video_id
+-- (set the moment it's cross-posted, see engine/distribution/sweep.py), so a
+-- title/permalink duplicate table would just be a second place for that to
+-- drift out of sync. This is metrics only, append-only same as Instagram's —
+-- the videos.list API gives current totals, not history, so if we don't
+-- snapshot it the curve doesn't exist.
+CREATE TABLE IF NOT EXISTS yt_video_metrics (
+    id          SERIAL PRIMARY KEY,
+    video_id    TEXT NOT NULL,
+    views       INTEGER,
+    likes       INTEGER,
+    comments    INTEGER,
+    captured_at TIMESTAMP DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_yt_metrics_video ON yt_video_metrics (video_id, captured_at);
 """
 
 # SQLite fallback schema (same structure, SQLite syntax)
@@ -556,6 +573,16 @@ CREATE TABLE IF NOT EXISTS audience_daily (
     tg_subscribers     INTEGER,
     updated_at         TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS yt_video_metrics (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_id    TEXT NOT NULL,
+    views       INTEGER,
+    likes       INTEGER,
+    comments    INTEGER,
+    captured_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_yt_metrics_video ON yt_video_metrics (video_id, captured_at);
 """
 
 
@@ -1483,6 +1510,67 @@ def add_ig_media_metrics(media_id, **vals):
             f"VALUES ({', '.join([ph] * (len(cols) + 1))})",
             (media_id, *[vals.get(c) for c in cols]))
         conn.commit()
+    finally:
+        conn.close()
+
+
+def add_yt_video_metrics(video_id, **vals):
+    """Append one snapshot, same append-only reasoning as add_ig_media_metrics —
+    videos.list gives current totals, not a curve, so if we don't write today's
+    number down there is no way to see it moved."""
+    cols = ("views", "likes", "comments")
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(
+            f"INSERT INTO yt_video_metrics (video_id, {', '.join(cols)}) "
+            f"VALUES ({', '.join([ph] * (len(cols) + 1))})",
+            (video_id, *[vals.get(c) for c in cols]))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_yt_posted_videos():
+    """Every reel that made it to YouTube — video_id, run_id, permalink, the
+    post's own posted_at — the join key for pulling fresh stats and for the
+    command centre's YouTube reach view. No separate yt_media table (see
+    schema comment): reels.youtube_video_id is already the one source of truth
+    for which videos exist."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id AS reel_id, run_id, youtube_video_id AS video_id, "
+            "youtube_permalink, youtube_posted_at FROM reels "
+            "WHERE youtube_video_id IS NOT NULL ORDER BY youtube_posted_at DESC")
+        return _fetchall(cur)
+    finally:
+        conn.close()
+
+
+def get_yt_latest_metrics():
+    """One row per video: the reel/run it's for, and its most recent snapshot.
+    Mirrors reach.py's _LATEST_METRICS pattern for Instagram — DISTINCT ON in
+    Postgres, portable correlated-subquery spelling for SQLite (the suites run
+    on SQLite, production talks to Postgres; see ig equivalent for the same
+    note)."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT r.id AS reel_id, r.run_id, r.youtube_video_id AS video_id, "
+            "r.youtube_permalink, r.youtube_posted_at, p.throughline, "
+            "x.views, x.likes, x.comments, x.captured_at "
+            "FROM reels r "
+            "LEFT JOIN pipeline_runs p ON p.id = r.run_id "
+            "LEFT JOIN yt_video_metrics x ON x.id = ("
+            "  SELECT id FROM yt_video_metrics WHERE video_id = r.youtube_video_id "
+            "  ORDER BY captured_at DESC, id DESC LIMIT 1) "
+            "WHERE r.youtube_video_id IS NOT NULL "
+            "ORDER BY r.youtube_posted_at DESC")
+        return _fetchall(cur)
     finally:
         conn.close()
 

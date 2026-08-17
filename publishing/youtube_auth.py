@@ -25,7 +25,14 @@ import requests
 
 _AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 _TOKEN_URL = "https://oauth2.googleapis.com/token"
-_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
+# youtube.readonly added 2026-08-17: uploads worked on youtube.upload alone,
+# but reading anything back (video statistics for the analytics dashboard,
+# channel branding) 403s with ACCESS_TOKEN_SCOPE_INSUFFICIENT on that scope
+# alone — verified directly against the live API before adding this, not
+# assumed. Re-consenting widens the token; it doesn't narrow what upload could
+# already do.
+_SCOPE = ("https://www.googleapis.com/auth/youtube.upload "
+         "https://www.googleapis.com/auth/youtube.readonly")
 _REDIRECT = "http://localhost:8734/"
 
 

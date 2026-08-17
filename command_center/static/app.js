@@ -1782,7 +1782,7 @@ async function vReach(main) {
   const head = el(`<div class="row between">
     <div><h1>Reach</h1><div class="sub">Who read it — Instagram, the article pages, the channel.</div></div>
     <div class="actions" data-x="a"></div></div>`);
-  addBtn(head.querySelector('[data-x=a]'), 'Refresh from Instagram', 'small', async () => {
+  addBtn(head.querySelector('[data-x=a]'), 'Refresh Instagram + YouTube', 'small', async () => {
     const r = await api('/reach/sync', { method: 'POST' });
     toast(r.note, 'ok', 7000);
   });
@@ -1795,12 +1795,17 @@ async function vReach(main) {
     <div class="tile"><div class="v">${num(t.likes)}</div><div class="l">likes</div></div>
     <div class="tile"><div class="v">${num(t.reads_humans)}</div><div class="l">article reads</div></div>
     <div class="tile"><div class="v">${num(t.tg_subscribers)}</div><div class="l">tg subscribers</div></div>
+    <div class="tile"><div class="v">${num(t.yt_views)}</div><div class="l">youtube views</div></div>
   </div>`));
 
   const synced = d.last_sync_at
     ? `Instagram last pulled ${ago(d.last_sync_at)}${d.last_sync_result ? ' — ' + esc(d.last_sync_result) : ''}.`
     : 'Instagram has not been pulled yet — the engine sweeps every 6 hours, or press Refresh.';
-  main.appendChild(el(`<div class="muted small" style="margin:-6px 0 14px">${synced}</div>`));
+  main.appendChild(el(`<div class="muted small" style="margin:-2px 0 2px">${synced}</div>`));
+  const yts = d.last_yt_sync_at
+    ? `YouTube last pulled ${ago(d.last_yt_sync_at)}${d.last_yt_sync_result ? ' — ' + esc(d.last_yt_sync_result) : ''}.`
+    : 'YouTube has not been pulled yet — same 6-hour sweep, or press Refresh.';
+  main.appendChild(el(`<div class="muted small" style="margin:0 0 14px">${yts}</div>`));
 
   /* Audience over time. Two charts, not one with two axes: followers are in the
      tens and reach in the hundreds, and putting them on a shared scale would
@@ -1850,6 +1855,29 @@ async function vReach(main) {
           <td>${num(p.comments)}</td><td>${num(p.saved)}</td><td>${num(p.shares)}</td>
         </tr>`;
       }).join('')}</table></div>`));
+  }
+
+  /* YouTube. Same table shape as Instagram's, added 2026-08-17 — no reach
+     figure (the Data API doesn't expose one for a Short the way Instagram
+     does), so this sorts by views instead. */
+  main.appendChild(el(`<div class="eyebrow">YouTube Shorts — ${t.yt_videos}</div>`));
+  if (!d.youtube.length) {
+    main.appendChild(el(`<div class="card empty">Nothing cross-posted to YouTube yet.</div>`));
+  } else {
+    const ytSorted = [...d.youtube].sort((a, b) => (b.views || 0) - (a.views || 0));
+    const maxViews = Math.max(1, ...ytSorted.map(p => p.views || 0));
+    main.appendChild(el(`<div class="tablewrap"><table>
+      <tr><th>short</th><th>posted</th><th>views</th><th>likes</th><th>comments</th></tr>
+      ${ytSorted.map(p => `<tr>
+          <td style="min-width:280px">
+            ${p.youtube_permalink ? `<a href="${esc(p.youtube_permalink)}" target="_blank" rel="noopener">${esc(p.title || '(no title)')}</a>`
+                          : esc(p.title || '(no title)')}
+            ${p.run_id ? `<span class="id" style="cursor:pointer" onclick="openRun(${p.run_id})">#${p.run_id}</span>` : ''}
+            <span class="inbar" style="background:var(--series-b);width:${Math.max(2, (p.views || 0) / maxViews * 100)}%"></span>
+          </td>
+          <td class="muted">${fdate(p.youtube_posted_at)}</td>
+          <td><b>${num(p.views)}</b></td><td>${num(p.likes)}</td><td>${num(p.comments)}</td>
+        </tr>`).join('')}</table></div>`));
   }
 
   /* Article reads. Bots are shown, not hidden: a large share of /a/ traffic is
