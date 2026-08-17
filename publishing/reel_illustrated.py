@@ -63,7 +63,8 @@ def _scrims(base):
     return Image.alpha_composite(base.convert("RGBA"), scrim).convert("RGB")
 
 
-def draw_illustrated_frame(image_path, caption, idx, n_illustrated, out_png, label=""):
+def draw_illustrated_frame(image_path, caption, idx, n_illustrated, out_png, label="",
+                           reveal_words=None):
     """One story frame: the illustration, scrims, masthead, caption, progress.
 
     `label` is the belief desk's shape-B view marker, drawn under the masthead on
@@ -87,7 +88,8 @@ def draw_illustrated_frame(image_path, caption, idx, n_illustrated, out_png, lab
     # No _font_safe here — _draw_emph_block renders the serif's missing math
     # operators from the mono face instead of degrading them to ASCII.
     _draw_emph_block(d, caption, f, int(92 * 1.14),
-                     W - 2 * pad_x, int(H * 0.63), (245, 240, 230), ACCENT, size=92)
+                     W - 2 * pad_x, int(H * 0.63), (245, 240, 230), ACCENT, size=92,
+                     reveal_words=reveal_words)
 
     bar_y = H - 300
     bar_w = W - 2 * pad_x
@@ -209,7 +211,8 @@ def make_renderer(image_paths):
     """
     n_ill = len(image_paths)
 
-    def render(caption, dark, idx, total, kicker, out_png, shot=0, label=""):
+    def render(caption, dark, idx, total, kicker, out_png, shot=0, label="",
+              reveal_words=None):
         if idx >= n_ill:
             # The sign-off card carries no label: it makes no claim to qualify.
             return draw_signoff_card(out_png)
@@ -219,6 +222,7 @@ def make_renderer(image_paths):
         # asked for (a FLUX refusal on one sub-shot), hold the last good one instead
         # of raising in the middle of a 15-minute render.
         path = shots[min(shot, len(shots) - 1)]
-        return draw_illustrated_frame(path, caption, idx, n_ill, out_png, label=label)
+        return draw_illustrated_frame(path, caption, idx, n_ill, out_png, label=label,
+                                      reveal_words=reveal_words)
 
     return render

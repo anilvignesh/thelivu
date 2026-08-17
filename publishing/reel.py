@@ -123,13 +123,25 @@ def _is_highlight_token(tok):
     return len(letters) >= 2 and all(c.isupper() for c in letters)
 
 
-def _draw_emph_block(d, caption, font, line_h, max_w, top_y, fg, accent, size=None):
+def _draw_emph_block(d, caption, font, line_h, max_w, top_y, fg, accent, size=None,
+                     reveal_words=None):
     """Word-wrap `caption` to max_w and draw it centred from top_y, colouring
     highlight tokens (numbers/₹/acronyms) in `accent`. Returns block height.
 
     Tokens carrying a glyph the serif lacks (the math operators) are drawn from
     the mono face so the symbol survives — measurement and drawing must use the
     SAME font per token or the centring drifts.
+
+    `reveal_words`, if given, draws only the first N words but wraps the FULL
+    caption first regardless — added 2026-08-17 for the progressive-caption-
+    reveal feature in build_reel(). The first cut of that feature passed
+    build_reel's already-truncated string in here each step, so the wrap ran
+    fresh on a growing string every time: line breaks recomputed from scratch
+    per word, so a line's words visibly reflow/jump as later words push earlier
+    ones onto a different line (found by Anil actually watching the render, not
+    caught in static frame review). Wrapping the complete text once and only
+    toggling which already-positioned words draw keeps every revealed word
+    pinned exactly where it will stay once the whole caption is up.
     """
     fb = None
     if size and any(_needs_fallback(w) for w in caption.split()):
@@ -152,15 +164,19 @@ def _draw_emph_block(d, caption, font, line_h, max_w, top_y, fg, accent, size=No
     if cur:
         lines.append(cur)
     y = top_y
+    shown = 0
+    limit = len(words) if reveal_words is None else reveal_words
     for ln in lines:
         line_w = sum(d.textlength(w, font=tf(w)) for w in ln) + space * (len(ln) - 1)
         x = (W - line_w) / 2
         for w in ln:
             f_tok = tf(w)
-            # Nudge the mono glyph down so it sits on the serif baseline.
-            dy = int(line_h * 0.06) if f_tok is fb else 0
-            d.text((x, y + dy), w, font=f_tok,
-                   fill=accent if _is_highlight_token(w) else fg)
+            if shown < limit:
+                # Nudge the mono glyph down so it sits on the serif baseline.
+                dy = int(line_h * 0.06) if f_tok is fb else 0
+                d.text((x, y + dy), w, font=f_tok,
+                       fill=accent if _is_highlight_token(w) else fg)
+            shown += 1
             x += d.textlength(w, font=f_tok) + space
         y += line_h
     return line_h * len(lines)
@@ -208,7 +224,8 @@ def _draw_view_label(d, text, x, y, fill, box):
     return y + 30 + 2 * pad_y
 
 
-def _render_frame(caption, dark, idx, total, kicker, out_png, shot=0, label=""):
+def _render_frame(caption, dark, idx, total, kicker, out_png, shot=0, label="",
+                  reveal_words=None):
     # `shot` is the sub-shot index within this beat. The text-slide look has nothing
     # to vary per sub-shot (the caption is the frame), so it ignores it — and
     # build_reel only ever splits a beat that has more than one illustration, so a
@@ -278,7 +295,8 @@ def _render_frame(caption, dark, idx, total, kicker, out_png, shot=0, label=""):
     if tmp_cur:
         nlines += 1
     top_y = (H - line_h * nlines) // 2 - 40
-    _draw_emph_block(d, caption, f, line_h, max_w, top_y, fg, accent, size=size)
+    _draw_emph_block(d, caption, f, line_h, max_w, top_y, fg, accent, size=size,
+                     reveal_words=reveal_words)
 
     # bottom: thin progress bar (cleaner than dots) + source line
     bar_y = H - 300
@@ -532,16 +550,19 @@ def _caption_reveal_steps(caption, dur):
     return m
 
 
-def _revealed_caption(caption, step, steps):
-    """Caption text at reveal step `step` of `steps` (0-indexed) — words apportioned
-    evenly across steps so steps < word-count still reveals smoothly (5 words in 3
-    steps: 2/2/1, not 1/1/3 then a stalled repeat of the full text)."""
+def _reveal_word_count(caption, step, steps):
+    """How many words of `caption` are visible at reveal step `step` of `steps`
+    (0-indexed) — apportioned evenly across steps so steps < word-count still
+    reveals smoothly (5 words in 3 steps: 2/2/1, not 1/1/3 then a stalled
+    repeat). Returns a word COUNT, not truncated text — see _draw_emph_block's
+    reveal_words: the caption passed to the renderer must stay the FULL string
+    every step so line-wrap is computed once and words never reflow as more
+    are revealed (found by watching an actual render, not caught in review)."""
     words = (caption or "").split()
     if steps <= 1 or len(words) <= 1:
-        return caption
+        return len(words)
     per = len(words) / steps
-    cutoff = max(1, round(per * (step + 1)))
-    return " ".join(words[:min(cutoff, len(words))])
+    return max(1, min(round(per * (step + 1)), len(words)))
 
 
 def _split_duration(total, k):
@@ -665,9 +686,13 @@ def build_reel(fields, dark, out_mp4, kicker=None, backend=None, render_frame=No
                 reveal_cuts = [sub] if steps <= 1 else _split_duration(sub, steps)
                 frame_off = 0
                 for r, rsub in enumerate(reveal_cuts):
-                    revealed = _revealed_caption(caption, r, len(reveal_cuts))
+                    reveal_n = _reveal_word_count(caption, r, len(reveal_cuts))
                     png = work / f"f{i}_{j}_{r}.png"
-                    draw_frame(revealed, dark, i, n, kicker, png, shot=j, label=label)
+                    # `caption` stays the FULL text every step — draw_frame's
+                    # renderers wrap it once and reveal_words only toggles which
+                    # already-positioned words draw (see _draw_emph_block).
+                    draw_frame(caption, dark, i, n, kicker, png, shot=j, label=label,
+                              reveal_words=reveal_n)
                     seg = work / f"s{i}_{j}_{r}.mp4"
                     rframes = max(int(round(rsub * FPS)), 1)
                     # gentle Ken-Burns zoom-in on the still (retention on a static
