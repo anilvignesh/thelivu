@@ -157,6 +157,8 @@ def caption(run, belief, article_url, hashtags=""):
         bits.append(label)
     if article_url:
         bits.append(f"Full story & sources: {article_url}")
+    from engine.agents.orchestrator import _FOLLOW_CTA
+    bits.append(_FOLLOW_CTA)
     if hashtags:
         bits.append(hashtags)
     return "\n\n".join(b for b in bits if b)[:2200]

@@ -2326,6 +2326,29 @@ def count_youtube_crossposts_today():
         conn.close()
 
 
+def most_recent_ig_post_at():
+    """The latest real post time, or None if nothing's ever posted. Added
+    2026-08-17 for the autopublish sweep's posting cooldown
+    (engine/distribution/sweep.py).
+
+    Deliberately reads `ig_media.posted_at` (populated by the real Instagram
+    API sync, engine/agents/ig_insights.py) rather than reels.posted_at /
+    carousel_runs.posted_at — those columns exist but publish.py's
+    update_reel()/update_carousel_run() calls never actually pass posted_at=,
+    so they're unset on every row ever posted (see get_youtube_backfill_
+    candidates' docstring, which hit the same gap on 2026-08-16 and worked
+    around it the same way — ordering by created_at instead). ig_media is the
+    one place a real post timestamp reliably lands."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT max(posted_at) FROM ig_media")
+        row = cur.fetchone()
+        return row[0] if row else None
+    finally:
+        conn.close()
+
+
 def get_ready_reels():
     """The LATEST reel waiting for its Post tap, one per run — one query, NOT a
     per-run lookup. Added 2026-08-16 alongside the autopublish sweep.

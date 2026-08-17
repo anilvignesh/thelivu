@@ -240,11 +240,12 @@ def _build_caption(fields, article_url):
     viewers), then the sources link, then hashtags. Hashtags reuse the orchestrator's
     _build_hashtags so the brand/geo evergreen set + story tags are normalised and
     capped exactly as carousels do — no second implementation."""
-    from engine.agents.orchestrator import _build_hashtags
+    from engine.agents.orchestrator import _build_hashtags, _FOLLOW_CTA
     story_tags = [t for t in (fields.get("hashtags") or "").replace(",", " ").split() if t]
     bits = [fields.get("narration") or ""]
     if article_url:
         bits.append(f"Full story & sources: {article_url}")
+    bits.append(_FOLLOW_CTA)
     tags = _build_hashtags(story_tags)
     if tags:
         bits.append(tags)

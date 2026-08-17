@@ -198,7 +198,9 @@ def post_carousel_run(carousel_id, progress=None):
     except Exception as e:
         log.error("Instagram post failed for carousel #%s: %s", carousel_id, e)
         return {"ok": False, "error": str(e)}
-    update_carousel_run(carousel_id, status="posted", ig_media_id=media_id, ig_permalink=permalink)
+    from datetime import datetime, timezone
+    update_carousel_run(carousel_id, status="posted", ig_media_id=media_id,
+                        ig_permalink=permalink, posted_at=datetime.now(timezone.utc))
     return {"ok": True, "media_id": media_id, "permalink": permalink, "count": len(image_urls)}
 
 
@@ -228,7 +230,9 @@ def post_reel_run(reel_id, progress=None):
     except Exception as e:
         log.error("Instagram reel post failed for #%s: %s", reel_id, e)
         return {"ok": False, "error": str(e)}
-    update_reel(reel_id, status="posted", ig_media_id=media_id, ig_permalink=permalink)
+    from datetime import datetime, timezone
+    update_reel(reel_id, status="posted", ig_media_id=media_id,
+               ig_permalink=permalink, posted_at=datetime.now(timezone.utc))
     # Cross-post to YouTube Shorts in the same beat as the Instagram post — every
     # NEW reel goes out to both platforms together, whether posted via the
     # dashboard tap or the autopost sweep (both funnel through this function).

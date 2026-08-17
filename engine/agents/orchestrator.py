@@ -2594,6 +2594,13 @@ def process_recheck_requests():
 _BASE_HASHTAGS = ["Thelivu", "FactCheck", "Journalism", "News"]
 _MAX_HASHTAGS = 15
 
+# A follow prompt was missing from every caption entirely (found 2026-08-17
+# auditing stagnant reach/followers — every post asks the reader to share, none
+# ever asks them to follow). One line, added centrally so reels, news
+# carousels and belief-desk carousels all get it the same way — no second
+# implementation, same reasoning as _build_hashtags above.
+_FOLLOW_CTA = "Follow @thelivu.reports for more stories the algorithm won't surface for you."
+
 
 def _build_hashtags(story_tags):
     """Combine evergreen brand/geo tags with the story-specific ones the composer
@@ -2720,6 +2727,7 @@ def process_queued_carousels():
                 caption_bits = [run.get("throughline") or ""]
                 if article_url:
                     caption_bits.append(f"Full story & sources: {article_url}")
+                caption_bits.append(_FOLLOW_CTA)
                 if hashtags:
                     caption_bits.append(hashtags)
                 caption = "\n\n".join(b for b in caption_bits if b)[:2200]

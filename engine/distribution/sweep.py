@@ -98,6 +98,40 @@ def run_autopublish_sweep():
     _autopost_ready_reels()
 
 
+# Minimum spacing between two autoposted pieces, across reels AND carousels —
+# added 2026-08-17 auditing why reach/followers had stalled. The sweep had no
+# cap on how many eligible items it posted per tick, so a backlog of ready
+# items posted back to back: 6 reels in 5 minutes on 2026-08-15, 6 more in 26
+# minutes on 2026-08-16 (visible directly in ig_media_metrics' posted_at
+# timestamps). On a 20-follower account that reads as spam to both Instagram's
+# distribution and any real follower, and every burst reel measurably
+# underperformed the account's single best post (the very first reel, posted
+# alone, hit 603 reach — nothing burst-posted since has passed 250). Not
+# formally tuned, just "clearly more human than 6-in-5-minutes" — revisit once
+# there's enough audience data to optimize a real number.
+AUTOPOST_MIN_GAP_HOURS = 3
+
+
+def _autopost_cooldown_active():
+    """True if something posted within AUTOPOST_MIN_GAP_HOURS — the caller
+    should stop autoposting for this tick, not just skip one candidate. Fails
+    open (False, i.e. no cooldown) on a DB error: a throttle that can silently
+    wedge autopost entirely is worse than an occasional double-pace tick."""
+    from datetime import datetime, timezone
+    from shared.db import most_recent_ig_post_at
+    try:
+        last = most_recent_ig_post_at()
+    except Exception as e:
+        log.error("Could not check posting cooldown, proceeding without one: %s", e)
+        return False
+    if not last:
+        return False
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    gap_hours = (datetime.now(timezone.utc) - last).total_seconds() / 3600
+    return gap_hours < AUTOPOST_MIN_GAP_HOURS
+
+
 def _autopublish_pending_runs():
     from shared.db import get_runs_by_status, get_run
     from publishing.publish import publish_run
@@ -148,6 +182,9 @@ def _autopost_ready_carousels():
             continue  # not autopublish-eligible — waits for the human Post tap as before
         if not rec["post_now"]:
             continue  # holding for a better window, within the freshness cap
+        if _autopost_cooldown_active():
+            log.info("Autopost cooldown active — holding remaining carousels this tick")
+            return  # something posted recently (this run or reels); space it out
         try:
             result = post_carousel_run(carousel["id"])
         except Exception as e:
@@ -157,6 +194,7 @@ def _autopost_ready_carousels():
             log.info("Autoposted carousel #%s (%s)", carousel["id"], rec["reason"])
             _notify_safe(f"🤖 Auto-posted carousel for run #{carousel['run_id']} — {rec['reason']}. "
                          f"{result.get('permalink', '')}")
+            return  # one post per tick — let the cooldown space out the rest
 
 
 def _autopost_ready_reels():
@@ -179,6 +217,9 @@ def _autopost_ready_reels():
             continue
         if not rec["post_now"]:
             continue
+        if _autopost_cooldown_active():
+            log.info("Autopost cooldown active — holding remaining reels this tick")
+            return  # something posted recently (this run or carousels); space it out
         try:
             result = post_reel_run(reel["id"])
         except Exception as e:
@@ -188,6 +229,7 @@ def _autopost_ready_reels():
             log.info("Autoposted reel #%s (%s)", reel["id"], rec["reason"])
             _notify_safe(f"🤖 Auto-posted reel for run #{run['id']} — {rec['reason']}. "
                          f"{result.get('permalink', '')}")
+            return  # one post per tick — let the cooldown space out the rest
         # YouTube cross-post now happens inside post_reel_run itself (same beat,
         # covers the dashboard tap too) — no separate call needed here.
 
