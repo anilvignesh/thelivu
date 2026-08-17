@@ -57,6 +57,18 @@ You are not a copy-editor. You are looking for the specific ways this desk fails
    corrected in the opposite direction.
 12. **Legal.** Living people: documented facts and contested processes only,
    never asserted wrongdoing. Flag anything that needs a lawyer's eye.
+13. **Self-similarity across the desk's output, not just within this piece.**
+   Mirror-writing (check 11) catches one-sided sourcing inside a single draft;
+   this catches the desk repeating the same *shape of verdict* piece after
+   piece. Read the last several published/approved beliefs from both series. If
+   this piece's target keeps landing in the same place — "the West secretly
+   caused it, the local account was blamed" — REVISE is too late for that; flag
+   it as a NOTE FOR THE HUMAN instead ("this is the Nth western-framing/
+   cold-war-interventions piece in a row"), because the fix isn't rewording this
+   draft, it's the desk's theme mix needing variety (`themes.yaml` has 9 themes;
+   a run that only ever pulls from 2 of them is a scouting problem, not a
+   writing one). A desk whose verdict a reader can guess from the topic alone is
+   a discounted one, same reasoning as the news desk's anti-monotony check.
 
 ## Verdicts
 
