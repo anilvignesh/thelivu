@@ -223,13 +223,20 @@ def _build_one(run_id, slug):
         _notify_reel_ready(result["reel_id"], run_id,
                            run.get("throughline"), result.get("kind"))
         kv_set(fail_key, "")  # clear the streak — it recovered
+        kv_set(f"reel_build_alerted_{run_id}", "")
     else:
         # Never raises by contract (make_reel.py docstring) — log and move on,
         # next poll picks it up again.
         log.warning("run #%s did not build: %s", run_id, result)
         n = int(kv_get(fail_key) or 0) + 1
         kv_set(fail_key, str(n))
-        if n == _STUCK_ALERT_AFTER:
+        # >= + a separate alerted flag, not `== _STUCK_ALERT_AFTER`: a service
+        # restart mid-streak (has happened — see the fix that shipped this)
+        # must not let the counter sail past the threshold without ever
+        # landing on it exactly, which would silently never alert.
+        alert_key = f"reel_build_alerted_{run_id}"
+        if n >= _STUCK_ALERT_AFTER and not kv_get(alert_key):
+            kv_set(alert_key, "1")
             run = get_run(run_id) or {}
             _tg_post_text(
                 f"⚠️ Reel stuck: run #{run_id} has failed to build {n}x in a row.\n\n"
