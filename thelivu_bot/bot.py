@@ -378,13 +378,27 @@ async def cmd_dig(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_priors(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show what the learning loop currently believes (docs/learning-loop.md)."""
+    """Show what the learning loop currently believes (docs/learning-loop.md) —
+    news desk first, then the EK/GK belief-desk counterpart added 2026-08-18."""
     from engine.agents.learning import format_priors_block
-    block = format_priors_block()
+    news_block = format_priors_block()
     await update.message.reply_text(
-        block if block else
-        "Not enough outcome history yet for any learned signal (features need "
-        "an effective n ≥ 1.5). This fills in as stories get published/killed."
+        (news_block if news_block else
+         "News desk: not enough outcome history yet for any learned signal "
+         "(features need an effective n ≥ 1.5). Fills in as stories get "
+         "published/killed.")
+    )
+    try:
+        from engine.desks.ek.learning import format_priors_block as ek_priors_block
+        ek_block = ek_priors_block()
+    except Exception as e:
+        log.warning("EK priors unavailable for /priors: %s", e)
+        ek_block = None
+    await update.message.reply_text(
+        (ek_block if ek_block else
+         "Belief desk (EK/GK): not enough outcome history yet for any learned "
+         "signal. This desk is newer and smaller — expect this to say so for a "
+         "while.")
     )
 
 
@@ -531,7 +545,7 @@ KEY COMMANDS:
 /topic [text] — submit a story idea
 /remake <reel_id> <notes> — rebuild a reel with what to change
 /dig [theme] — targeted watchlist dig (no theme = scout picks the ripest)
-/priors — what the learning loop currently believes
+/priors — what the learning loop currently believes (news desk + belief desk)
 /links /addlink /dellink /pinlink — manage the bio page
 /cost /stats — spend and lifetime numbers
 Full manual: MANUAL.md in the repo."""

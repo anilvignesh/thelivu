@@ -61,7 +61,10 @@ def compute_learned_priors(now=None):
     try:
         cur = conn.cursor()
         # News desk only: this learns which SOURCES produce good stories, and the
-        # belief desks have no sources in that sense.
+        # belief desks have no sources in that sense. They have their own
+        # equivalent over theme/shape instead — engine/desks/ek/learning.py,
+        # added 2026-08-18. Deliberately a separate module, not a desk= filter
+        # bolted on here: the features are genuinely different shapes.
         cur.execute("SELECT source, throughline, status, created_at FROM pipeline_runs "
                     "WHERE desk = 'news'")
         rows = cur.fetchall()

@@ -235,8 +235,16 @@ def scout_prompt():
     taken = ("BELIEFS THIS DESK HAS ALREADY TAKEN (do not re-propose these or "
              "near-duplicates):\n" + "\n".join(f"- {b}" for b in tb)) if tb else \
             "This desk has taken no beliefs yet."
+    priors_block = ""
+    try:
+        from engine.desks.ek.learning import format_priors_block
+        pb = format_priors_block()
+        if pb:
+            priors_block = "\n\n" + pb
+    except Exception as e:
+        log.warning("EK learned priors unavailable for scout: %s", e)
     return (f"Propose candidate received beliefs for the belief desks.\n\n"
-            f"STANDING THEMES:\n\n{_themes_block()}\n\n{taken}\n\n"
+            f"STANDING THEMES:\n\n{_themes_block()}\n\n{taken}{priors_block}\n\n"
             f"Work several themes, not one. Search for how each belief is stated "
             f"today AND for the record that would complicate it, separately.")
 

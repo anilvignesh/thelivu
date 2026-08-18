@@ -103,8 +103,16 @@ def run_belief(belief, *, note="", dry_run=False):
     out = {"belief": belief, "run_id": None}
 
     # ── 1. the gate ──────────────────────────────────────────────────────────
+    priors_block = ""
+    try:
+        from engine.desks.ek.learning import format_priors_block
+        priors_block = format_priors_block()
+        if priors_block:
+            priors_block = "\n\n" + priors_block
+    except Exception as e:
+        log.warning("EK learned priors unavailable for gate: %s", e)
     gate_out = run_structured_skill(
-        "ek:premise-check", f"CANDIDATE RECEIVED BELIEF:\n\n{belief}",
+        "ek:premise-check", f"CANDIDATE RECEIVED BELIEF:\n\n{belief}{priors_block}",
         marker=_M_VERDICT, max_tokens=1024, topic=belief[:60])
     # The verdict is computed from the gate's four judgments, not read off its
     # VERDICT line — the two have disagreed, and the disagreement binned a
