@@ -30,7 +30,15 @@ import re
 log = logging.getLogger(__name__)
 
 _NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
-_NVIDIA_MODEL = "google/gemma-4-31b-it"
+# Switched off google/gemma-4-31b-it 2026-08-18 — tested head-to-head on this
+# exact prompt before switching, not assumed from the make_reel.py fix alone:
+# Gemma read-timed-out at 120s; nemotron-3.5-lightning-30b-a3b completed
+# cleanly in 73.9s with well-formed JSON. Lightning is a reasoning model (see
+# make_reel.py's longer note on this) — verified its reasoning overhead here
+# too (~4200 completion tokens on this small a prompt) before raising
+# max_tokens below; 1400 would have truncated mid-reasoning the same way it
+# would have on the old model's slow path.
+_NVIDIA_MODEL = os.environ.get("NVIDIA_BELIEF_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b")
 
 MAX_CAPTION_WORDS = 8
 
@@ -200,7 +208,7 @@ Return exactly:
                 json={"model": _NVIDIA_MODEL,
                       "messages": [{"role": "system", "content": system},
                                    {"role": "user", "content": user}],
-                      "temperature": 0.4, "max_tokens": 1400},
+                      "temperature": 0.4, "max_tokens": 8000},
                 timeout=timeout,
             )
             r.raise_for_status()

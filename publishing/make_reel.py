@@ -78,7 +78,25 @@ def _ensure_voice(_p):
 
 
 _NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
-_NVIDIA_SCRIPT_MODEL = os.environ.get("NVIDIA_SCRIPT_MODEL", "google/gemma-4-31b-it")
+# Switched off google/gemma-4-31b-it 2026-08-18 — found and verified the actual
+# cause of 2026-08-17's stuck-reel incident: pinged it with a trivial 2-word
+# reply and it took 17.8s, which is exactly why a full script generation kept
+# blowing the 300s retry timeout under any real load. nemotron-3.5-lightning
+# is a reasoning model (emits a long chain-of-thought before the answer, in a
+# SEPARATE reasoning_content field once it actually finishes — see MAX_TOKENS
+# below), verified end-to-end against this project's real skill + a real
+# article before switching: clean, well-formed, on-spec output every time
+# tested, ~45s total (vs. Gemma's unbounded/frequently-timing-out 300s+).
+# Override via NVIDIA_SCRIPT_MODEL if this ever needs rolling back or swapping
+# again — re-verify empirically before trusting a new one, the same way this
+# one was checked (a model name alone doesn't tell you its real latency or
+# whether its reasoning trace leaks into the content field under load).
+_NVIDIA_SCRIPT_MODEL = os.environ.get("NVIDIA_SCRIPT_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b")
+# Reasoning models spend real budget on reasoning_content before content even
+# starts — verified 5000-5700 completion tokens of pure reasoning on a real
+# script generation before the actual answer began. 1200 (the old Gemma
+# budget) silently truncated mid-reasoning; this leaves real margin.
+_NVIDIA_SCRIPT_MAX_TOKENS = int(os.environ.get("NVIDIA_SCRIPT_MAX_TOKENS", "10000"))
 
 # The owner's revision notes from the remake box. Direction, NOT licence: the reel is a
 # POST-GATE artefact, so nothing re-verifies it after he taps Post — a note that asks for
@@ -188,7 +206,7 @@ def _gen_script_nvidia(draft, run_id=None):
             json={"model": _NVIDIA_SCRIPT_MODEL,
                   "messages": [{"role": "system", "content": system},
                                {"role": "user", "content": draft + extra}],
-                  "temperature": 0.5, "max_tokens": 1200},
+                  "temperature": 0.5, "max_tokens": _NVIDIA_SCRIPT_MAX_TOKENS},
             timeout=300,
         )
         r.raise_for_status()
