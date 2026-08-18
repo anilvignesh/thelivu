@@ -180,6 +180,22 @@ if service == "thelivu-agent":
             log.error("YouTube sync failed: %s", e, exc_info=True)
             _sweep_failed("YouTube sync", e)
 
+        # Same placement, same reasoning: free NVIDIA HTTP, not a paid model
+        # call, must stay above the budget governor so it keeps watching on
+        # exactly the days the paid stages are busiest. Added 2026-08-18 —
+        # the proactive half of what the reel-worker stuck-alert (2026-08-17)
+        # only caught reactively, after a real render had already failed.
+        try:
+            from engine.agents.model_health import run_health_check, sync_due as health_sync_due
+            forced_health = kv_get("force_model_health_check")
+            if forced_health:
+                kv_set("force_model_health_check", "")
+            if forced_health or health_sync_due(now_utc):
+                log.info("Model health: %s", run_health_check())
+        except Exception as e:
+            log.error("Model health check failed: %s", e, exc_info=True)
+            _sweep_failed("Model health check", e)
+
         # ── Quota breaker ─────────────────────────────────────────────────────
         # Both providers ran dry on 2026-07-21 and the tick spent 22 hours
         # crashing on a 429 every 2 minutes. While the breaker is open we skip
