@@ -95,7 +95,15 @@ def _explicitly_legal_clear(review_text):
 # checks verify, so re-requiring the regex-parseable LEGAL-FLAG line on top
 # would just fail runs 111/112 (no review_text survives from their build) that
 # were already read in full and found clean.
-_BACKLOG_CLEARED_RUN_IDS = {53, 87, 111, 112, 113, 126, 127, 130, 142}
+_BACKLOG_CLEARED_RUN_IDS = {53, 87, 112, 113, 126, 127, 130, 142}
+# 111 removed 2026-08-18: it already had a reel posted weeks ago (reel #9,
+# 2026-07-26) that this allowlist didn't check for — only the run/article was
+# vetted, not whether the reel TABLE already had a posted row for it. Two
+# leftover 'ready' rows from old remake history (#4, #7) both posted as
+# duplicates before this was caught. Real posts already live; can't be
+# undone via API (see publish.py's reset_run_for_review note — a bad post on
+# the channel needs deleting there by hand). Not re-adding without also
+# fixing the vetting to check reels-per-run, not just runs.
 
 
 def _autopublish_eligible(run):

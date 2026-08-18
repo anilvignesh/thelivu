@@ -583,6 +583,32 @@ CREATE TABLE IF NOT EXISTS yt_video_metrics (
     captured_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_yt_metrics_video ON yt_video_metrics (video_id, captured_at);
+
+CREATE TABLE IF NOT EXISTS model_health_checks (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    model       TEXT NOT NULL,
+    ok          INTEGER NOT NULL,
+    latency_s   REAL,
+    error       TEXT,
+    checked_at  TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_model_health_model ON model_health_checks (model, checked_at);
+
+-- System-wide health snapshots — added 2026-08-18, the third piece of the
+-- self-improving-framework work (news-desk learning, EK-desk learning, this).
+-- Same "if we don't write it down the history doesn't exist" reasoning as
+-- ig/yt metrics above: a model going from 0.5s to 18s doesn't announce
+-- itself, and yesterday's stuck-reel incident was exactly that happening
+-- invisibly until a real render failed. See engine/agents/model_health.py.
+CREATE TABLE IF NOT EXISTS model_health_checks (
+    id          SERIAL PRIMARY KEY,
+    model       TEXT NOT NULL,
+    ok          BOOLEAN NOT NULL,
+    latency_s   REAL,
+    error       TEXT,
+    checked_at  TIMESTAMP DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_model_health_model ON model_health_checks (model, checked_at);
 """
 
 
@@ -1575,6 +1601,46 @@ def get_yt_latest_metrics():
         conn.close()
 
 
+def add_model_health_check(model, ok, latency_s=None, error=None):
+    """Append one health snapshot. Append-only, same reasoning as the ig/yt
+    metrics tables — a single 'current status' overwrite would lose exactly
+    the trend (a model getting slower over days) that matters here."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        ok_val = bool(ok) if _is_postgres() else int(bool(ok))
+        cur.execute(
+            f"INSERT INTO model_health_checks (model, ok, latency_s, error) "
+            f"VALUES ({ph},{ph},{ph},{ph})",
+            (model, ok_val, latency_s, (error or "")[:500] or None))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_model_health_latest(hours=24):
+    """One row per model checked in the last `hours`: its most recent
+    snapshot. What /health (or the CC) shows — current status, not the curve."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        if _is_postgres():
+            cur.execute(
+                "SELECT DISTINCT ON (model) model, ok, latency_s, error, checked_at "
+                "FROM model_health_checks WHERE checked_at > NOW() - INTERVAL '1 hour' * "
+                + ph + " ORDER BY model, checked_at DESC", (hours,))
+        else:
+            cur.execute(
+                "SELECT model, ok, latency_s, error, checked_at FROM model_health_checks m "
+                "WHERE checked_at = (SELECT MAX(checked_at) FROM model_health_checks "
+                "WHERE model = m.model) ORDER BY model")
+        return _fetchall(cur)
+    finally:
+        conn.close()
+
+
 def upsert_audience_day(day, **vals):
     """One row per UTC day. Upserted rather than appended — several sweeps a day
     are describing the same day, not different ones."""
@@ -2419,18 +2485,32 @@ def most_recent_ig_post_at():
     2026-08-17 for the autopublish sweep's posting cooldown
     (engine/distribution/sweep.py).
 
-    Deliberately reads `ig_media.posted_at` (populated by the real Instagram
-    API sync, engine/agents/ig_insights.py) rather than reels.posted_at /
-    carousel_runs.posted_at — those columns exist but publish.py's
-    update_reel()/update_carousel_run() calls never actually pass posted_at=,
-    so they're unset on every row ever posted (see get_youtube_backfill_
-    candidates' docstring, which hit the same gap on 2026-08-16 and worked
-    around it the same way — ordering by created_at instead). ig_media is the
-    one place a real post timestamp reliably lands."""
+    FIXED 2026-08-18 — this was a real incident, not a hypothetical: it
+    originally read only ig_media.posted_at (populated by the Instagram API
+    sync, engine/agents/ig_insights.py, on a 6-hour cadence) because
+    reels.posted_at / carousel_runs.posted_at were unset on every row at the
+    time this was written. Later THE SAME DAY, publish.py was fixed to
+    actually set those columns — but this function never got updated to
+    match, so the cooldown kept reading a signal that could be up to 6 hours
+    stale. Consequence, caught 2026-08-18: 6 backlog reels posted within 9
+    minutes of each other, because every cooldown check saw the last IG-sync
+    timestamp from the day before and concluded nothing had posted recently.
+    Exactly the burst-posting pattern this function exists to prevent.
+
+    Now takes the MAX across reels.posted_at, carousel_runs.posted_at (set
+    immediately at post time) AND ig_media.posted_at (the synced cross-check,
+    kept as a fallback/second signal, not the only one)."""
     conn = _conn()
     try:
         cur = conn.cursor()
-        cur.execute("SELECT max(posted_at) FROM ig_media")
+        cur.execute(
+            "SELECT max(posted_at) FROM ("
+            "SELECT posted_at FROM reels WHERE posted_at IS NOT NULL "
+            "UNION ALL "
+            "SELECT posted_at FROM carousel_runs WHERE posted_at IS NOT NULL "
+            "UNION ALL "
+            "SELECT posted_at FROM ig_media WHERE posted_at IS NOT NULL"
+            ") t")
         row = cur.fetchone()
         return row[0] if row else None
     finally:
