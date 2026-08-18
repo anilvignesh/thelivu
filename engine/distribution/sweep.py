@@ -71,11 +71,40 @@ def _explicitly_legal_clear(review_text):
     return bool(m) and m.group(1).upper() == "NO"
 
 
+# A narrow, explicit exception to the anti-backlog rule below — added
+# 2026-08-18, Anil's go-ahead ("sure") on clearing the 26-reel pre-trial
+# backlog found that day. NOT a loosening of TRIAL_START itself (that stays
+# protecting against ever silently sweeping in unreviewed old backlog, per the
+# 2026-08-16 incident note) — this is a specific, individually-vetted allowlist,
+# each id actually read (throughline, legal_flag, legal_reason, and for two
+# with no parseable review_text — runs 111/112 — the full draft_text itself)
+# before being added. 11 of the 26 had explicit "requires legal read before
+# publication" reviewer notes (a named CM, a head of state, a sitting Chief
+# Justice, named CBI accused, Andrew Tate, among others) and were deliberately
+# NOT added — those stay with Anil. Two more (runs 145, 148) were already
+# claimed under the separate EK-desk backlog carve-out. One more (run 154) had
+# a clean legal check but its own reviewer verdict was "Fix-then-publish" with
+# two specific unresolved fixes (an unsourced "some called it a scam" line, and
+# a reader-facing process-narration leak) — checked the live draft_text: both
+# are STILL there, never fixed, despite the article already being published —
+# so this run is excluded here and flagged to Anil separately, not silently
+# posted with known unfixed issues.
+#
+# Bypasses BOTH checks below (not just TRIAL_START) for ids in this set: an id
+# only landed here after a full manual read stood in for what the automated
+# checks verify, so re-requiring the regex-parseable LEGAL-FLAG line on top
+# would just fail runs 111/112 (no review_text survives from their build) that
+# were already read in full and found clean.
+_BACKLOG_CLEARED_RUN_IDS = {53, 87, 111, 112, 113, 126, 127, 130, 142}
+
+
 def _autopublish_eligible(run):
-    """The ONE gate: legal-clear AND not backlog. Every call site uses this —
-    see the incident note for why that matters."""
+    """The ONE gate: legal-clear AND (not backlog OR explicitly vetted backlog).
+    Every call site uses this — see the incident note for why that matters."""
     if not run:
         return False
+    if run.get("id") in _BACKLOG_CLEARED_RUN_IDS:
+        return True
     created = run.get("created_at")
     if created is not None:
         if created.tzinfo is None:
