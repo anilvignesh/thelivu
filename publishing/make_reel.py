@@ -181,7 +181,8 @@ def hook_is_sharp(hook):
 
 
 def _gen_script_nvidia(draft, run_id=None):
-    """Generate the video-script via NVIDIA-hosted Gemma 4 (free) instead of Claude.
+    """Generate the video-script via a free NVIDIA-hosted model instead of Claude
+    (currently nemotron-3.5-lightning-30b-a3b — see _NVIDIA_SCRIPT_MODEL above).
 
     Charter-safe because the script is a POST-GATE step — it transforms an already
     verified + human-approved article, it does NOT touch the trust gate. So using a
@@ -495,7 +496,7 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
     # 1) Route the model step (the video-script — a POST-GATE step; the article is
     #    already verified + human-approved, so which model writes the script never
     #    touches the trust gate).
-    #  - nvidia mode: free hosted Gemma 4. Own key, no Anthropic/Gemini credit → the
+    #  - nvidia mode: free hosted model (currently Lightning). Own key, no Anthropic/Gemini credit → the
     #    quota breaker doesn't apply; runs anywhere (dashboard included). No gate.
     #  - api mode (inactive by default): the script hits Claude → the quota breaker
     #    guards it; if open, don't hammer a dead API.
@@ -567,7 +568,7 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
                      "narration (it is the verified spine); stored with the reel", run_id)
     else:
         _p(0.10, "Rewriting the reel script to your notes…" if notes
-                 else "Writing the reel script (free Gemma 4)…" if nvidia
+                 else "Writing the reel script (free NVIDIA model)…" if nvidia
                  else "Writing the reel script…" if not attended
                  else "Waiting for the script (attended handoff)…")
         # ONE prompt for both engines — the notes must not be able to reach Gemma but
