@@ -306,6 +306,22 @@ CREATE TABLE IF NOT EXISTS yt_video_metrics (
     captured_at TIMESTAMP DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_yt_metrics_video ON yt_video_metrics (video_id, captured_at);
+
+-- System-wide health snapshots — added 2026-08-18, the third piece of the
+-- self-improving-framework work (news-desk learning, EK-desk learning, this).
+-- Same "if we don't write it down the history doesn't exist" reasoning as
+-- ig/yt metrics above: a model going from 0.5s to 18s doesn't announce
+-- itself, and yesterday's stuck-reel incident was exactly that happening
+-- invisibly until a real render failed. See engine/agents/model_health.py.
+CREATE TABLE IF NOT EXISTS model_health_checks (
+    id          SERIAL PRIMARY KEY,
+    model       TEXT NOT NULL,
+    ok          BOOLEAN NOT NULL,
+    latency_s   REAL,
+    error       TEXT,
+    checked_at  TIMESTAMP DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_model_health_model ON model_health_checks (model, checked_at);
 """
 
 # SQLite fallback schema (same structure, SQLite syntax)
@@ -591,22 +607,6 @@ CREATE TABLE IF NOT EXISTS model_health_checks (
     latency_s   REAL,
     error       TEXT,
     checked_at  TEXT DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_model_health_model ON model_health_checks (model, checked_at);
-
--- System-wide health snapshots — added 2026-08-18, the third piece of the
--- self-improving-framework work (news-desk learning, EK-desk learning, this).
--- Same "if we don't write it down the history doesn't exist" reasoning as
--- ig/yt metrics above: a model going from 0.5s to 18s doesn't announce
--- itself, and yesterday's stuck-reel incident was exactly that happening
--- invisibly until a real render failed. See engine/agents/model_health.py.
-CREATE TABLE IF NOT EXISTS model_health_checks (
-    id          SERIAL PRIMARY KEY,
-    model       TEXT NOT NULL,
-    ok          BOOLEAN NOT NULL,
-    latency_s   REAL,
-    error       TEXT,
-    checked_at  TIMESTAMP DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_model_health_model ON model_health_checks (model, checked_at);
 """
