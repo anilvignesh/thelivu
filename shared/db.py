@@ -786,7 +786,15 @@ def init_db():
                               # needed to rate-limit the YouTube backfill by day
                               # (2026-08-16), which posted_at can't do since it's
                               # already the IG timestamp, often days earlier.
-                              ("youtube_posted_at", "TIMESTAMP")]:
+                              ("youtube_posted_at", "TIMESTAMP"),
+                              # Presentation-style bandit (2026-08-19) —
+                              # engine/agents/style_learning.py. Which renderer
+                              # drew this reel, so its later engagement can be
+                              # scored back to that choice. Defaults 'static'
+                              # (the only renderer that exists today) so every
+                              # already-posted reel backfills as a valid,
+                              # comparable data point rather than NULL.
+                              ("presentation_style", "TEXT DEFAULT 'static'")]:
                 try:
                     cur.execute(f"ALTER TABLE reels ADD COLUMN {col} {defn}")
                     conn.commit()
@@ -829,7 +837,8 @@ def init_db():
                     pass
             for col, defn in [("notes", "TEXT"),
                               ("youtube_video_id", "TEXT"), ("youtube_permalink", "TEXT"),
-                              ("youtube_posted_at", "TEXT")]:
+                              ("youtube_posted_at", "TEXT"),
+                              ("presentation_style", "TEXT DEFAULT 'static'")]:
                 try:
                     cur.execute(f"ALTER TABLE reels ADD COLUMN {col} {defn}")
                 except Exception:
@@ -2377,7 +2386,7 @@ def get_carousel_run(carousel_id):
         conn.close()
 
 
-def save_reel(run_id, mp4_bytes, caption, kind="narrated", notes=None):
+def save_reel(run_id, mp4_bytes, caption, kind="narrated", notes=None, presentation_style=None):
     """Store a locally-generated reel MP4 in the DB so the Railway fileserver can
     serve it at a public URL for Instagram to fetch (Piper/ffmpeg run on Anil's
     laptop; Railway can't regenerate it — so the bytes live in the DB, same
@@ -2385,7 +2394,12 @@ def save_reel(run_id, mp4_bytes, caption, kind="narrated", notes=None):
 
     `notes` is the owner's revision direction that shaped THIS cut (the remake
     suggestion box). Stored with the reel it produced, so the next remake can show
-    what was asked last time instead of re-rolling blind."""
+    what was asked last time instead of re-rolling blind.
+
+    `presentation_style` names which renderer drew this reel (see
+    engine/agents/style_learning.py) — defaults to 'static', the only one that
+    exists today, so callers that don't know about the bandit yet still get a
+    valid, comparable value rather than NULL."""
     ph = "%s" if _is_postgres() else "?"
     if _is_postgres():
         import psycopg2 as _pg
@@ -2397,9 +2411,9 @@ def save_reel(run_id, mp4_bytes, caption, kind="narrated", notes=None):
     try:
         cur = conn.cursor()
         cur.execute(
-            f"INSERT INTO reels (run_id, kind, caption, mp4, notes, status) "
-            f"VALUES ({ph},{ph},{ph},{ph},{ph},'ready')",
-            (run_id, kind, caption, blob, notes or None),
+            f"INSERT INTO reels (run_id, kind, caption, mp4, notes, status, presentation_style) "
+            f"VALUES ({ph},{ph},{ph},{ph},{ph},'ready',{ph})",
+            (run_id, kind, caption, blob, notes or None, presentation_style or "static"),
         )
         if _is_postgres():
             cur.execute("SELECT lastval()"); rid = cur.fetchone()[0]

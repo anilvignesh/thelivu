@@ -699,8 +699,19 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
                        if slug and SLIDE_SERVER_BASE_URL else "")
     # The silent sign-off beat is not narration — keep it out of the description.
     caption = _build_caption(dict(fields, narration=narration), article_url)
+    # Presentation-style bandit (2026-08-19) — picks the renderer for the NEXT
+    # reel from what's actually engaged so far, not this one (this one already
+    # rendered above with whatever the default look is). See
+    # engine/agents/style_learning.py; only 'static' exists today, so this is
+    # a no-op until a second renderer ships and starts entering rotation.
+    try:
+        from engine.agents.style_learning import choose_style
+        presentation_style = choose_style()
+    except Exception:
+        presentation_style = "static"
     reel_id = save_reel(run_id, mp4_bytes, caption, kind=kind,
-                        notes=(notes or "").strip() or None)
+                        notes=(notes or "").strip() or None,
+                        presentation_style=presentation_style)
 
     _p(1.0, "Reel ready ✓")
     return {"ok": True, "reel_id": reel_id, "caption": caption, "kind": kind,

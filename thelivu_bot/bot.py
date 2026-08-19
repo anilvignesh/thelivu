@@ -400,6 +400,15 @@ async def cmd_priors(update: Update, context: ContextTypes.DEFAULT_TYPE):
          "signal. This desk is newer and smaller — expect this to say so for a "
          "while.")
     )
+    try:
+        from engine.agents.style_learning import format_style_report
+        style_block = format_style_report()
+    except Exception as e:
+        log.warning("style report unavailable for /priors: %s", e)
+        style_block = None
+    await update.message.reply_text(
+        style_block or "Presentation style: no matured post data yet."
+    )
 
 
 async def cmd_track(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -545,7 +554,7 @@ KEY COMMANDS:
 /topic [text] — submit a story idea
 /remake <reel_id> <notes> — rebuild a reel with what to change
 /dig [theme] — targeted watchlist dig (no theme = scout picks the ripest)
-/priors — what the learning loop currently believes (news desk + belief desk)
+/priors — what the learning loop currently believes (news desk + belief desk + presentation style)
 /links /addlink /dellink /pinlink — manage the bio page
 /cost /stats — spend and lifetime numbers
 Full manual: MANUAL.md in the repo."""
