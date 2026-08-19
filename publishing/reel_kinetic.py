@@ -127,11 +127,32 @@ class Beat(Scene):
         self.add(bg)
         bg.add_updater(lambda m, dt: m.scale(1 + {zoom_rate} * dt))
 
-        # Top AND bottom scrims — content-agnostic legibility for the masthead
-        # and caption respectively, same job the static style's gradient scrim
-        # does (publishing/reel_illustrated.py _scrims). A first test render
-        # caught the masthead going nearly invisible with no top scrim at all.
-        bottom_scrim = Rectangle(width=config.frame_width, height=config.frame_height * 0.42,
+        mark = Text("THELIVU", font="DejaVu Sans Mono", weight=BOLD, font_size=34,
+                    color={accent_hex!r})
+        mark.set_z_index(2)
+        mark.to_corner(UL, buff=0.55)
+        dot = Text(" · reel", font="DejaVu Sans Mono", font_size=28, color={fg_hex!r})
+        dot.set_z_index(2)
+        dot.next_to(mark, RIGHT, buff=0.05)
+        dot.align_to(mark, DOWN)
+
+        # Built (not yet added/positioned) BEFORE the bottom scrim, so the
+        # scrim can be sized from the caption's own MEASURED height rather
+        # than a guessed fraction of frame_height. A second test render still
+        # overlapped the bar/footer after switching to a fixed-top anchor —
+        # the real cause: a 2-line caption at this font_size measures ~2.84
+        # frame-units tall, well past what a fixed-fraction scrim budgeted.
+        # Sizing from the actual mobject removes the guesswork entirely.
+        caption = Text({wrapped!r}, font={FONT_FAMILY!r}, weight=BOLD,
+                       font_size={font_size}, color={fg_hex!r}, line_spacing=1.15,
+                       t2c={t2c!r})
+        caption.width = min(caption.width, config.frame_width * 0.82)
+        caption.set_z_index(2)
+
+        top_pad, bottom_block = 0.45, 1.35  # bottom_block: room for bar + footer + margins
+        scrim_h = min(caption.height + top_pad + bottom_block, config.frame_height * 0.85)
+
+        bottom_scrim = Rectangle(width=config.frame_width, height=scrim_h,
                                  fill_color={scrim_hex!r}, fill_opacity={scrim_opacity},
                                  stroke_width=0)
         bottom_scrim.to_edge(DOWN, buff=0)
@@ -144,37 +165,18 @@ class Beat(Scene):
         top_scrim.to_edge(UP, buff=0)
         top_scrim.set_z_index(1)
         self.add(top_scrim)
+        self.add(mark, dot)
 
-        mark = Text("THELIVU", font="DejaVu Sans Mono", weight=BOLD, font_size=34,
-                    color={accent_hex!r})
-        mark.set_z_index(2)
-        mark.to_corner(UL, buff=0.55)
-        self.add(mark)
-        dot = Text(" · reel", font="DejaVu Sans Mono", font_size=28, color={fg_hex!r})
-        dot.set_z_index(2)
-        dot.next_to(mark, RIGHT, buff=0.05)
-        dot.align_to(mark, DOWN)
-        self.add(dot)
-
-        # Anchored to the TOP of the scrim band and growing downward — same
-        # fixed-top layout the static style uses — not centred. A first test
-        # render centred the caption and got a real overlap with the bar/
-        # footer below once the text ran to two lines.
-        caption = Text({wrapped!r}, font={FONT_FAMILY!r}, weight=BOLD,
-                       font_size={font_size}, color={fg_hex!r}, line_spacing=1.15,
-                       t2c={t2c!r})
-        caption.width = min(caption.width, config.frame_width * 0.82)
-        caption.move_to(bottom_scrim.get_center())
-        caption.align_to(bottom_scrim, UP)
-        caption.shift(DOWN * 0.55)
-        caption.set_z_index(2)
+        caption.move_to(bottom_scrim.get_top(), aligned_edge=UP)
+        caption.shift(DOWN * top_pad)
+        self.add(caption)
 
         # Progress bar + sources footer — reel_illustrated.py's own docstring
         # calls these "signature elements, not theme variables"; kinetic
         # carries them exactly like the static style does, not as an option.
-        # Relative to frame_height (not an absolute unit count) — matches the
-        # static style's bar_y = H - 300 (≈14% up from the bottom edge).
-        bar_y = -config.frame_height / 2 + config.frame_height * 0.14
+        # Anchored to the bottom EDGE (not the scrim, which now sizes itself
+        # from the caption) so their position never depends on caption length.
+        bar_y = -config.frame_height / 2 + config.frame_height * 0.095
         bar_w = config.frame_width * 0.80
         left_x = -bar_w / 2
         bar_track = Line([left_x, bar_y, 0], [left_x + bar_w, bar_y, 0],
@@ -187,7 +189,7 @@ class Beat(Scene):
         self.add(bar_fill)
         footer = Text("thelivu.reports · sources in bio", font="DejaVu Sans Mono",
                       font_size=24, color={muted_hex!r})
-        footer.move_to([left_x + footer.width / 2, bar_y - 0.45, 0])
+        footer.move_to([left_x + footer.width / 2, bar_y - 0.38, 0])
         footer.set_z_index(2)
         self.add(footer)
 
