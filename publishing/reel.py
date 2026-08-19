@@ -12,12 +12,15 @@ CLI:
   python -m publishing.reel --script path/to/script.md --out articles/reels/r.mp4 [--dark]
 """
 import argparse
+import logging
 import os
 import re
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 from PIL import Image, ImageDraw
 
@@ -610,7 +613,7 @@ def _zoom_expr(frames, zmax=ZOOM_MAX, start_zoom=1.0, total_frames=None):
     inc = (zmax - 1.0) / max(total_frames, 1)
     return f"min({start_zoom:.8f}+{inc:.8f}*on,{zmax})"
 def build_reel(fields, dark, out_mp4, kicker=None, backend=None, render_frame=None,
-               shots_per_beat=None, voiced=None, label="", voice=None):
+               shots_per_beat=None, voiced=None, label="", voice=None, music_track=None):
     """Render frames + VO for each beat, animate with a gentle zoom, mux to MP4.
     `fields` is parse_script() output. `backend` overrides the module TTS_BACKEND
     for the voice (see _synth). `render_frame` overrides the frame renderer —
@@ -636,6 +639,12 @@ def build_reel(fields, dark, out_mp4, kicker=None, backend=None, render_frame=No
     shape-B "A VIEW FROM THE RECORD". Empty for everything else, which is every
     news reel: a reported story is not an argued frame and must not wear the
     label that says it is.
+
+    `music_track` is a path from publishing.music.pick_track() — picked by the
+    caller (not here) so the caption's attribution line names the SAME track
+    that actually got mixed in, not a second independent random pick. None
+    (the default) picks one internally, for direct/test callers that don't
+    care about attribution.
     """
     draw_frame = render_frame or _render_frame
     beats = fields["beats"]
@@ -738,9 +747,28 @@ def build_reel(fields, dark, out_mp4, kicker=None, backend=None, render_frame=No
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
 
+        # Background music bed (2026-08-19) — mixed into the VO track before
+        # muxing so the video-generation path above is untouched. A failure
+        # here (missing ffmpeg filter support, bad track file, whatever) must
+        # not sink an otherwise-working reel, so it falls back to the plain
+        # VO track rather than raising.
+        audio_track = vo
+        try:
+            from publishing.music import pick_track, mix_bgm
+            track_path = music_track
+            if track_path is None:
+                chosen = pick_track()
+                track_path = chosen["path"] if chosen else None
+            if track_path:
+                mixed = work / "vo_music.wav"
+                mix_bgm(vo, mixed, track_path)
+                audio_track = mixed
+        except Exception as e:
+            log.warning("background music mix failed, posting narration-only: %s", e)
+
         # mux
         subprocess.run(
-            ["ffmpeg", "-y", "-i", str(video), "-i", str(vo),
+            ["ffmpeg", "-y", "-i", str(video), "-i", str(audio_track),
              "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
              "-shortest", "-movflags", "+faststart", str(out_mp4)],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,

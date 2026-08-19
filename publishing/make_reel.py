@@ -254,11 +254,15 @@ def _gen_script_nvidia(draft, run_id=None):
     return out
 
 
-def _build_caption(fields, article_url):
+def _build_caption(fields, article_url, music_credit=None):
     """The IG description for the reel = the FULL narration (whole story, for muted
     viewers), then the sources link, then hashtags. Hashtags reuse the orchestrator's
     _build_hashtags so the brand/geo evergreen set + story tags are normalised and
-    capped exactly as carousels do — no second implementation."""
+    capped exactly as carousels do — no second implementation.
+
+    `music_credit` satisfies the CC BY attribution requirement on the background
+    track actually mixed into THIS reel (publishing/music.py) — a caption line,
+    not an on-screen watermark, same reasoning as the font licenses."""
     from engine.agents.orchestrator import _build_hashtags, _FOLLOW_CTA
     story_tags = [t for t in (fields.get("hashtags") or "").replace(",", " ").split() if t]
     bits = [fields.get("narration") or ""]
@@ -268,6 +272,8 @@ def _build_caption(fields, article_url):
     tags = _build_hashtags(story_tags)
     if tags:
         bits.append(tags)
+    if music_credit:
+        bits.append(f"Music: {music_credit}")
     return "\n\n".join(b for b in bits if b)[:2200]
 
 
@@ -681,10 +687,18 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
         #    spoken text, which `_synth` turns into the deliberate silent hold.
         _p(0.55 if illustrated else 0.35, f"Rendering {n_frames} frames…")
         out_mp4 = tmpdir / f"reel_run{run_id}.mp4"
+        # Pick the music bed ONCE here (not inside build_reel) so the caption's
+        # attribution line below names the exact track that got mixed in.
+        try:
+            from publishing.music import pick_track
+            music_choice = pick_track()
+        except Exception:
+            music_choice = None
         try:
             build_reel(fields, bool(dark), out_mp4, backend="chatterbox",
                        render_frame=render_frame, shots_per_beat=shots_per_beat,
-                       voiced=voiced, label=view_label, voice=voice)
+                       voiced=voiced, label=view_label, voice=voice,
+                       music_track=(music_choice["path"] if music_choice else None))
         except Exception as e:
             log.error("build_reel failed for run #%s: %s", run_id, e)
             return {"ok": False, "error": f"reel render failed: {e}"}
@@ -698,7 +712,8 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
         article_url = (f"{SLIDE_SERVER_BASE_URL.rstrip('/')}/a/{slug}"
                        if slug and SLIDE_SERVER_BASE_URL else "")
     # The silent sign-off beat is not narration — keep it out of the description.
-    caption = _build_caption(dict(fields, narration=narration), article_url)
+    caption = _build_caption(dict(fields, narration=narration), article_url,
+                             music_credit=(music_choice["credit"] if music_choice else None))
     # Presentation-style bandit (2026-08-19) — picks the renderer for the NEXT
     # reel from what's actually engaged so far, not this one (this one already
     # rendered above with whatever the default look is). See
