@@ -67,10 +67,17 @@ def _wrapped_caption(caption, font_size, max_width_px):
     return "\n".join(lines)
 
 
-def render_kinetic_subshot_clip(image_path, caption, duration_s, out_mp4, dark=True):
+def render_kinetic_subshot_clip(image_path, caption, duration_s, out_mp4, dark=True,
+                                idx=0, n_total=1):
     """One sub-shot's silent clip. Returns out_mp4 on success, None on any
     failure — caller (build_reel) falls back to the static renderer for this
-    sub-shot when this returns None."""
+    sub-shot when this returns None.
+
+    `idx`/`n_total` drive the progress bar — same meaning as draw_illustrated_
+    frame's idx/n_illustrated (beat position, not sub-shot position: the
+    static style's own comment on this is "sub-shots are one idea seen from
+    two angles, so counting them would tell the viewer the story is longer
+    than it is" — kinetic keeps that same rule)."""
     work = None
     try:
         _ensure_font()
@@ -83,10 +90,20 @@ def render_kinetic_subshot_clip(image_path, caption, duration_s, out_mp4, dark=T
         accent_hex = "#D2AA6D" if dark else "#8C2A1B"
         fg_hex = "#E9E0C8" if dark else "#1B1710"
         bg_hex = "#171410" if dark else "#E8DCC3"
-        scrim_hex = "#0F0D09" if dark else "#EBE0C5"
+        # First test render (2026-08-19) caught this: a scrim close in hue to
+        # the art's OWN sky tone barely shows even at high opacity — a same-
+        # hue wash over a same-hue background is nearly a no-op. These are
+        # deliberately a clear step darker/more saturated than either
+        # STYLE's ground tone, at opacity high enough to guarantee contrast
+        # regardless of what's underneath — the one job a scrim has.
+        scrim_hex = "#0A0806" if dark else "#D9C79A"
+        scrim_opacity = 0.88
+        muted_hex = "#C8C0AF" if dark else "#5A4E38"
+        kraft_dim_hex = "#968A6E"
         # t2c: Manim colours by exact substring match, so build it from the
         # SAME per-word highlight test the static caption uses.
         t2c = {w: accent_hex for w in set(caption.split()) if _is_highlight_token(w)}
+        bar_frac = max(0.0, min((idx + 1) / max(n_total, 1), 1.0))
 
         work = Path(tempfile.mkdtemp(prefix="kinetic_"))
         scene_py = work / "scene.py"
@@ -110,24 +127,61 @@ class Beat(Scene):
         self.add(bg)
         bg.add_updater(lambda m, dt: m.scale(1 + {zoom_rate} * dt))
 
-        scrim = Rectangle(width=config.frame_width, height=config.frame_height * 0.40,
-                          fill_color={scrim_hex!r}, fill_opacity=0.78, stroke_width=0)
-        scrim.to_edge(DOWN, buff=0)
-        scrim.set_z_index(1)
-        self.add(scrim)
+        # Top AND bottom scrims — content-agnostic legibility for the masthead
+        # and caption respectively, same job the static style's gradient scrim
+        # does (publishing/reel_illustrated.py _scrims). A first test render
+        # caught the masthead going nearly invisible with no top scrim at all.
+        bottom_scrim = Rectangle(width=config.frame_width, height=config.frame_height * 0.42,
+                                 fill_color={scrim_hex!r}, fill_opacity={scrim_opacity},
+                                 stroke_width=0)
+        bottom_scrim.to_edge(DOWN, buff=0)
+        bottom_scrim.set_z_index(1)
+        self.add(bottom_scrim)
+
+        top_scrim = Rectangle(width=config.frame_width, height=config.frame_height * 0.16,
+                              fill_color={scrim_hex!r}, fill_opacity={scrim_opacity} * 0.8,
+                              stroke_width=0)
+        top_scrim.to_edge(UP, buff=0)
+        top_scrim.set_z_index(1)
+        self.add(top_scrim)
 
         mark = Text("THELIVU", font="DejaVu Sans Mono", weight=BOLD, font_size=34,
                     color={accent_hex!r})
         mark.set_z_index(2)
-        mark.to_corner(UL, buff=0.6)
+        mark.to_corner(UL, buff=0.55)
         self.add(mark)
+        dot = Text(" · reel", font="DejaVu Sans Mono", font_size=28, color={fg_hex!r})
+        dot.set_z_index(2)
+        dot.next_to(mark, RIGHT, buff=0.05)
+        dot.align_to(mark, DOWN)
+        self.add(dot)
 
         caption = Text({wrapped!r}, font={FONT_FAMILY!r}, weight=BOLD,
                        font_size={font_size}, color={fg_hex!r}, line_spacing=1.15,
                        t2c={t2c!r})
         caption.width = min(caption.width, config.frame_width * 0.82)
-        caption.to_edge(DOWN, buff=1.1)
+        caption.move_to(bottom_scrim.get_center() + UP * 0.35)
         caption.set_z_index(2)
+
+        # Progress bar + sources footer — reel_illustrated.py's own docstring
+        # calls these "signature elements, not theme variables"; kinetic
+        # carries them exactly like the static style does, not as an option.
+        bar_y = -config.frame_height / 2 + 1.55
+        bar_w = config.frame_width * 0.80
+        left_x = -bar_w / 2
+        bar_track = Line([left_x, bar_y, 0], [left_x + bar_w, bar_y, 0],
+                         stroke_color={kraft_dim_hex!r}, stroke_width=3)
+        bar_track.set_z_index(2)
+        self.add(bar_track)
+        bar_fill = Line([left_x, bar_y, 0], [left_x + bar_w * {bar_frac}, bar_y, 0],
+                        stroke_color={accent_hex!r}, stroke_width=6)
+        bar_fill.set_z_index(2)
+        self.add(bar_fill)
+        footer = Text("thelivu.reports · sources in bio", font="DejaVu Sans Mono",
+                      font_size=24, color={muted_hex!r})
+        footer.move_to([left_x + footer.width / 2, bar_y - 0.45, 0])
+        footer.set_z_index(2)
+        self.add(footer)
 
         self.play(Write(caption), run_time=0.7)
         self.play(Indicate(caption, scale_factor=1.04, color={accent_hex!r}), run_time=0.5)

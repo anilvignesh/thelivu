@@ -702,7 +702,8 @@ def build_reel(fields, dark, out_mp4, kicker=None, backend=None, render_frame=No
                     if img_path is not None:
                         from publishing.reel_kinetic import render_kinetic_subshot_clip
                         seg = work / f"s{i}_{j}.mp4"
-                        clip = render_kinetic_subshot_clip(img_path, caption, sub, seg, dark=dark)
+                        clip = render_kinetic_subshot_clip(img_path, caption, sub, seg,
+                                                           dark=dark, idx=i, n_total=n)
                         if clip is not None:
                             seg_paths.append(clip)
                             continue
