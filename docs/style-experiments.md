@@ -65,14 +65,39 @@ renderer branch on that tag doesn't exist yet beyond the default — see
   pan, progressive caption reveal. Everything posted so far backfills as this
   style (`DEFAULT 'static'` on the column), so existing data is a valid
   baseline, not thrown away.
-- `kinetic` (in progress) — motion-graphics layer on top of the same FLUX
-  stills (animated emphasis, stat count-ups, more expressive motion than a
-  static pan). Building on **Manim Community** (MIT, actively maintained,
-  CPU-only — no GPU/API spend, fits the budget cap) rather than hand-rolled
-  ffmpeg, including its `manim-voiceover` plugin for syncing motion to the
-  Chatterbox narration track that already exists. The moment this ships and
-  its name is added to `AVAILABLE_STYLES`, the bandit above starts routing
-  reels to it automatically — no other wiring needed.
+- `kinetic` (shipped 2026-08-19) — a different renderer, not a ground-tone
+  variant: `publishing/reel_kinetic.py`, built on **Manim Community** (MIT,
+  actively maintained, CPU-only — no GPU/API spend). Each spoken+illustrated
+  sub-shot becomes a self-contained Manim clip — continuous gentle Ken-Burns
+  zoom on the FLUX still, the caption written on in one motion (not the
+  static style's word-by-word progressive reveal — a deliberate v1 scope
+  cut, see the module docstring), and a brief emphasis pulse on highlighted
+  tokens (numbers, ₹-amounts, acronyms — reuses `_is_highlight_token` from
+  `publishing/reel.py`, not a second implementation). Registers the repo's
+  own NotoSerif-Bold via `manimpango` so the type matches the static style
+  exactly. Carries the same masthead/progress-bar/sources-footer brand
+  elements the static frame does — `reel_illustrated.py` calls those
+  "signature elements, not theme variables," so kinetic doesn't get to skip
+  them. Falls back to the static renderer per-cut on any failure.
+
+  Real, non-obvious bugs found and fixed via actual test renders before this
+  shipped (not caught by reading the code): a scrim colour too close to a
+  test image's own sky tone was nearly invisible even at high opacity (same
+  hue over same hue is close to a no-op); no top scrim at all meant the
+  masthead nearly disappeared over a bright/red part of one test image; and
+  the scrim's fixed-fraction sizing didn't budget enough room for a 2-line
+  caption, overlapping the progress bar — fixed by measuring the caption's
+  actual rendered height and sizing the scrim from that instead of a guess.
+
+  Real cost worth tracking: each kinetic clip takes roughly its own duration
+  ×8 in wall-clock render time (a 6.5s clip → ~52s to render) — no dollar
+  cost (CPU-only, free), but it's a real throughput hit if reel build cadence
+  ever becomes a bottleneck. Manim was ALMOST also added to Railway's shared
+  requirements.txt, which broke every Railway build for ~40 minutes on
+  2026-08-19 before being caught and fixed — manim's dependency manimpango
+  needs a system library Railway's build image doesn't have, and Railway
+  never renders reels anyway, so it's installed by hand into the Oracle VM's
+  venv only, same pattern as the Malayalam system fonts.
 - Character/stick-figure animation is a real future direction, not a fantasy
   build: `facebookresearch/AnimatedDrawings` (MIT, auto-rigs a single drawn
   figure — but archived, so it'd be vendored and maintained by us) and

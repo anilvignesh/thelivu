@@ -25,11 +25,18 @@ from datetime import datetime, timezone
 # same renderer with the FLUX ground-tone swapped to warm cream/kraft — see
 # publishing/illustrate.py's STYLE_BRIGHT and docs/style-experiments.md for
 # why (Anil's question: does the dark house style cost reach against feeds
-# that reward high-contrast bright first-frames). Add a name here the moment
-# a new renderer/variant ships — the bandit below treats a name it has never
-# seen as automatically cold-start, so nothing else needs to change to bring
-# it into rotation.
-AVAILABLE_STYLES = ["static", "bright"]
+# that reward high-contrast bright first-frames). 'kinetic' (2026-08-19) is
+# a different RENDERER entirely — publishing/reel_kinetic.py, built on Manim
+# Community — continuous Ken-Burns zoom, caption write-on, emphasis pulse,
+# per spoken+illustrated sub-shot; falls back to 'static' rendering per-cut on
+# any failure, so a Manim problem never fails a reel, just costs it some
+# motion. Real cost worth knowing: each kinetic clip takes roughly its own
+# duration ×8 in wall-clock render time (CPU-only, no $ cost, but slower
+# throughput) — monitor if reel build cadence becomes a bottleneck. Add a
+# name here the moment a new renderer/variant ships — the bandit below
+# treats a name it has never seen as automatically cold-start, so nothing
+# else needs to change to bring it into rotation.
+AVAILABLE_STYLES = ["static", "bright", "kinetic"]
 
 HALF_LIFE_DAYS = 21          # faster than editorial learning's 45 — a format
                               # effect should show up within a couple of weeks
