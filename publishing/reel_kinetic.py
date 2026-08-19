@@ -139,7 +139,7 @@ class Beat(Scene):
         self.add(bottom_scrim)
 
         top_scrim = Rectangle(width=config.frame_width, height=config.frame_height * 0.16,
-                              fill_color={scrim_hex!r}, fill_opacity={scrim_opacity} * 0.8,
+                              fill_color={scrim_hex!r}, fill_opacity={scrim_opacity},
                               stroke_width=0)
         top_scrim.to_edge(UP, buff=0)
         top_scrim.set_z_index(1)
@@ -156,17 +156,25 @@ class Beat(Scene):
         dot.align_to(mark, DOWN)
         self.add(dot)
 
+        # Anchored to the TOP of the scrim band and growing downward — same
+        # fixed-top layout the static style uses — not centred. A first test
+        # render centred the caption and got a real overlap with the bar/
+        # footer below once the text ran to two lines.
         caption = Text({wrapped!r}, font={FONT_FAMILY!r}, weight=BOLD,
                        font_size={font_size}, color={fg_hex!r}, line_spacing=1.15,
                        t2c={t2c!r})
         caption.width = min(caption.width, config.frame_width * 0.82)
-        caption.move_to(bottom_scrim.get_center() + UP * 0.35)
+        caption.move_to(bottom_scrim.get_center())
+        caption.align_to(bottom_scrim, UP)
+        caption.shift(DOWN * 0.55)
         caption.set_z_index(2)
 
         # Progress bar + sources footer — reel_illustrated.py's own docstring
         # calls these "signature elements, not theme variables"; kinetic
         # carries them exactly like the static style does, not as an option.
-        bar_y = -config.frame_height / 2 + 1.55
+        # Relative to frame_height (not an absolute unit count) — matches the
+        # static style's bar_y = H - 300 (≈14% up from the bottom edge).
+        bar_y = -config.frame_height / 2 + config.frame_height * 0.14
         bar_w = config.frame_width * 0.80
         left_x = -bar_w / 2
         bar_track = Line([left_x, bar_y, 0], [left_x + bar_w, bar_y, 0],
