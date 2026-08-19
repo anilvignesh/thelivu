@@ -714,7 +714,8 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
             build_reel(fields, bool(dark), out_mp4, backend="chatterbox",
                        render_frame=render_frame, shots_per_beat=shots_per_beat,
                        voiced=voiced, label=view_label, voice=voice,
-                       music_track=(music_choice["path"] if music_choice else None))
+                       music_track=(music_choice["path"] if music_choice else None),
+                       presentation_style=presentation_style)
         except Exception as e:
             log.error("build_reel failed for run #%s: %s", run_id, e)
             return {"ok": False, "error": f"reel render failed: {e}"}

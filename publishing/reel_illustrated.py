@@ -238,4 +238,17 @@ def make_renderer(image_paths):
         return draw_illustrated_frame(path, caption, idx, n_ill, out_png, label=label,
                                       reveal_words=reveal_words)
 
+    def image_for(idx, shot=0):
+        """Raw underlying illustration path for (idx, shot), or None past the
+        illustrated beats (the sign-off card has no photo). Used by
+        build_reel's kinetic style (publishing/reel_kinetic.py), which needs
+        the photo itself rather than a pre-composited PNG — same clamping as
+        render() above, so it holds the same picture render() would draw."""
+        if idx >= n_ill:
+            return None
+        entry = image_paths[idx]
+        shots = entry if isinstance(entry, (list, tuple)) else [entry]
+        return shots[min(shot, len(shots) - 1)]
+
+    render.image_for = image_for
     return render

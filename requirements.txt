@@ -12,3 +12,5 @@ ddgs>=0.1
 Pillow>=10.0
 pytrends>=4.9  # unofficial Google Trends read — engine/desks/ek/interest.py, informational only
 yt-dlp>=2025.1  # public-post reads: YouTube transcripts (social_desk.py) + Instagram captions (ingestion/fetch.py)
+manim>=0.19  # kinetic reel style — publishing/reel_kinetic.py. Oracle VM only (LAPTOP-ONLY-style
+             # note: needs libcairo2-dev/libpango1.0-dev system packages, not installed by pip)

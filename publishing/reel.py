@@ -613,7 +613,8 @@ def _zoom_expr(frames, zmax=ZOOM_MAX, start_zoom=1.0, total_frames=None):
     inc = (zmax - 1.0) / max(total_frames, 1)
     return f"min({start_zoom:.8f}+{inc:.8f}*on,{zmax})"
 def build_reel(fields, dark, out_mp4, kicker=None, backend=None, render_frame=None,
-               shots_per_beat=None, voiced=None, label="", voice=None, music_track=None):
+               shots_per_beat=None, voiced=None, label="", voice=None, music_track=None,
+               presentation_style="static"):
     """Render frames + VO for each beat, animate with a gentle zoom, mux to MP4.
     `fields` is parse_script() output. `backend` overrides the module TTS_BACKEND
     for the voice (see _synth). `render_frame` overrides the frame renderer —
@@ -645,6 +646,13 @@ def build_reel(fields, dark, out_mp4, kicker=None, backend=None, render_frame=No
     that actually got mixed in, not a second independent random pick. None
     (the default) picks one internally, for direct/test callers that don't
     care about attribution.
+
+    `presentation_style` — 'static' (default) is the original PNG+zoompan
+    path below. 'kinetic' routes each spoken, illustrated sub-shot through
+    publishing.reel_kinetic instead; anything that isn't spoken+illustrated
+    (the sign-off, a text-slide fallback) still uses the static path for that
+    cut regardless, and a kinetic render failure falls back to static rather
+    than failing the reel — see reel_kinetic's own docstring.
     """
     draw_frame = render_frame or _render_frame
     beats = fields["beats"]
@@ -679,6 +687,28 @@ def build_reel(fields, dark, out_mp4, kicker=None, backend=None, render_frame=No
 
             for j, sub in enumerate(cuts):
                 total_frames = max(int(round(sub * FPS)), 1)
+
+                # Kinetic style (2026-08-19) — one Manim clip covers this WHOLE
+                # sub-shot (its own zoom + write-on + emphasis pulse), so it
+                # replaces the entire reveal_cuts machinery below rather than
+                # plugging into it. Only for spoken beats with a real
+                # illustration behind them (the renderer must expose
+                # image_for — the text-slide default doesn't, and neither does
+                # the sign-off card past the last illustrated beat); anything
+                # else falls straight through to the static path untouched.
+                if presentation_style == "kinetic" and spoken and caption:
+                    image_for = getattr(draw_frame, "image_for", None)
+                    img_path = image_for(i, j) if image_for else None
+                    if img_path is not None:
+                        from publishing.reel_kinetic import render_kinetic_subshot_clip
+                        seg = work / f"s{i}_{j}.mp4"
+                        clip = render_kinetic_subshot_clip(img_path, caption, sub, seg, dark=dark)
+                        if clip is not None:
+                            seg_paths.append(clip)
+                            continue
+                        log.warning("kinetic clip failed for beat %d shot %d — "
+                                   "falling back to static for this cut", i, j)
+
                 # Reveal the caption progressively within this sub-shot — only when
                 # there's a real spoken line to sync against (never the silent
                 # sign-off, which has neither).
