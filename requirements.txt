@@ -12,5 +12,12 @@ ddgs>=0.1
 Pillow>=10.0
 pytrends>=4.9  # unofficial Google Trends read — engine/desks/ek/interest.py, informational only
 yt-dlp>=2025.1  # public-post reads: YouTube transcripts (social_desk.py) + Instagram captions (ingestion/fetch.py)
-manim>=0.19  # kinetic reel style — publishing/reel_kinetic.py. Oracle VM only (LAPTOP-ONLY-style
-             # note: needs libcairo2-dev/libpango1.0-dev system packages, not installed by pip)
+
+# manim>=0.19 (kinetic reel style, publishing/reel_kinetic.py) is DELIBERATELY NOT
+# listed here. Railway never renders reels (see reel_illustrated.py's own
+# LAPTOP-ONLY note on the Malayalam fonts, same reasoning) and manim's dependency
+# manimpango needs pangocairo via pkg-config — a system package Railway's Nixpacks
+# build image doesn't have, so listing it here breaks EVERY Railway deploy, not
+# just kinetic reels (found live, 2026-08-19: 3 straight failed deploys). Installed
+# by hand into the Oracle VM's venv instead: apt install libcairo2-dev
+# libpango1.0-dev pkg-config python3-dev, then pip install manim.
