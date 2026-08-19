@@ -20,12 +20,16 @@ import math
 import random
 from datetime import datetime, timezone
 
-# The variant registry. 'static' (FLUX illustration + Ken Burns + progressive
-# captions) is the only one built today. Add a name here the moment a new
-# renderer ships (publishing/reel.py picks by this string) — the bandit
-# below treats a name it has never seen as automatically cold-start, so
-# nothing else needs to change to bring a new style into rotation.
-AVAILABLE_STYLES = ["static"]
+# The variant registry. 'static' (FLUX illustration, locked dark ground, Ken
+# Burns + progressive captions) is the original. 'bright' (2026-08-19) is the
+# same renderer with the FLUX ground-tone swapped to warm cream/kraft — see
+# publishing/illustrate.py's STYLE_BRIGHT and docs/style-experiments.md for
+# why (Anil's question: does the dark house style cost reach against feeds
+# that reward high-contrast bright first-frames). Add a name here the moment
+# a new renderer/variant ships — the bandit below treats a name it has never
+# seen as automatically cold-start, so nothing else needs to change to bring
+# it into rotation.
+AVAILABLE_STYLES = ["static", "bright"]
 
 HALF_LIFE_DAYS = 21          # faster than editorial learning's 45 — a format
                               # effect should show up within a couple of weeks

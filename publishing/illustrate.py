@@ -34,6 +34,30 @@ STYLE = (
     "vertical 9:16."
 )
 
+# The 'bright' ground-tone experiment (2026-08-19) — a competing entry in
+# engine/agents/style_learning.py's AVAILABLE_STYLES, not a replacement for
+# STYLE. Anil's question: is the locked dark ground (owner's call 2026-07-26,
+# above) costing reach against feeds that reward high-contrast bright
+# first-frames? Same composition rules, same "symbolic not literal, no real
+# faces" seriousness — only the ground tone changes, so this is a genuine A/B
+# on one variable, not a different house style entirely.
+STYLE_BRIGHT = (
+    "Editorial conceptual illustration, textured screenprint / risograph style, "
+    "WARM cream and kraft-paper ground throughout, bold ink-black and deep-red "
+    "linework, high contrast, daylight-toned. Flat vector shapes, grainy paper "
+    "texture, strong simple symbolic composition, symbolic not literal, serious. "
+    "No text, no lettering, no numbers, no logos, no recognisable real faces. "
+    "Serious newspaper editorial art, vertical 9:16."
+)
+
+# presentation_style value -> which ground prompt it renders with. 'static' is
+# the default/fallback for any style not listed here (including 'kinetic',
+# once that exists — ground tone and motion are orthogonal, kinetic inherits
+# whichever ground its own AVAILABLE_STYLES entry maps to when it's added).
+STYLE_BY_PRESENTATION = {
+    "bright": STYLE_BRIGHT,
+}
+
 # The NIM safety filter returns an all-black frame (finishReason=CONTENT_FILTERED)
 # on this vocabulary, which is exactly the vocabulary journalism reaches for. We
 # soften the *prompt* — never the story — because the image is decoration and the
@@ -334,7 +358,8 @@ def scene_from_beat(caption, spoken=""):
             f"Use objects and simple figures, no words.")
 
 
-def generate_beat_images(scenes, out_dir, *, seed=7, progress=None, place=None):
+def generate_beat_images(scenes, out_dir, *, seed=7, progress=None, place=None,
+                         ground=STYLE):
     """Render one illustration per scene. Returns a list of Paths, or None in a
     slot that failed.
 
@@ -346,6 +371,11 @@ def generate_beat_images(scenes, out_dir, *, seed=7, progress=None, place=None):
     `place` is the story's setting (from the script's PLACE: line). It anchors the
     architecture and landscape so a Karnataka story does not close on the US
     Capitol. Omitted when the script names no place — see `_place_clause`.
+
+    `ground` is the STYLE prompt tail — defaults to the locked dark house style.
+    Callers pick STYLE_BRIGHT (or look it up via STYLE_BY_PRESENTATION) to run
+    the bright ground-tone experiment; nothing here decides which — that's
+    engine/agents/style_learning.py's job.
 
     Serial by design: the laptop has 14 GB and FLUX responses are large — holding
     six decoded images in memory at once is how the box starts swapping. Each
@@ -383,7 +413,7 @@ def generate_beat_images(scenes, out_dir, *, seed=7, progress=None, place=None):
             # of the prompt most, and both are assertions the tail-end STYLE string
             # has demonstrably failed to enforce as negations. No negative_prompt —
             # the endpoint 422s on it.
-            full = f"{_BLANK}{_place_clause(place)}{prompt} {STYLE}"
+            full = f"{_BLANK}{_place_clause(place)}{prompt} {ground}"
             r = requests.post(
                 FLUX_URL,
                 headers={"Authorization": f"Bearer {key}", "Accept": "application/json"},

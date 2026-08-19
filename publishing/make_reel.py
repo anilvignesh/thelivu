@@ -328,7 +328,7 @@ _SHOT_ANGLES = [
 MAX_HOUSE_CARDS = 1
 
 
-def _illustrate(fields, out_dir, _p, shots=None):
+def _illustrate(fields, out_dir, _p, shots=None, presentation_style=None):
     """Illustrations per beat, or None if too many beats went unillustrated.
 
     Returns a list parallel to `beats`, each entry a LIST of paths — the sub-shots for
@@ -340,8 +340,14 @@ def _illustrate(fields, out_dir, _p, shots=None):
         drawn in the same look rather than in the other one.
 
     Past that the caller falls back to text slides for the whole reel, unchanged.
+
+    `presentation_style` looks up the FLUX ground prompt via
+    STYLE_BY_PRESENTATION (publishing/illustrate.py) — the dark house style
+    unless the style-bandit chose the 'bright' ground-tone experiment.
     """
-    from publishing.illustrate import generate_beat_images, scene_from_beat
+    from publishing.illustrate import (generate_beat_images, scene_from_beat,
+                                       STYLE, STYLE_BY_PRESENTATION)
+    ground = STYLE_BY_PRESENTATION.get(presentation_style, STYLE)
     from publishing.reel_illustrated import (malayalam_fonts_available,
                                              render_house_ground)
 
@@ -373,7 +379,7 @@ def _illustrate(fields, out_dir, _p, shots=None):
         _p(0.15 + 0.35 * (k / max(total, 1)), f"Illustrating shot {k + 1}/{total}…")
 
     flat = generate_beat_images(scenes, out_dir, progress=_step,
-                                place=fields.get("place"))
+                                place=fields.get("place"), ground=ground)
 
     grouped = [[] for _ in beats]
     for k, p in enumerate(flat):
@@ -394,7 +400,7 @@ def _illustrate(fields, out_dir, _p, shots=None):
         return None
     for i in bare:
         card = out_dir / f"house_{i}.png"
-        render_house_ground(card, variant=i)
+        render_house_ground(card, variant=i, bright=(presentation_style == "bright"))
         grouped[i] = [card]
         log.warning("beat %d could not be illustrated — house ground, look kept", i)
     return grouped
@@ -447,6 +453,15 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
     from shared import quota
     from shared.config import REEL_MODE
     from engine.agents.skill_runner import attended_mode
+
+    # Presentation-style bandit (2026-08-19) — picked HERE, before illustration,
+    # so a 'bright' choice actually changes the FLUX ground tone rendered below,
+    # not just a label attached after the fact. See engine/agents/style_learning.py.
+    try:
+        from engine.agents.style_learning import choose_style
+        presentation_style = choose_style()
+    except Exception:
+        presentation_style = "static"
 
     def _p(frac, msg):
         if progress:
@@ -657,7 +672,8 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
                      [round(d, 1) for _w, d, _p2 in voiced], shots_per_beat, n_shots)
             _p(0.25, f"Illustrating {n_shots} shots across {len(shots_per_beat)} beats…")
             try:
-                images = _illustrate(fields, tmpdir / "ill", _p, shots=shots_per_beat)
+                images = _illustrate(fields, tmpdir / "ill", _p, shots=shots_per_beat,
+                                     presentation_style=presentation_style)
             except Exception as e:
                 log.warning("illustration step failed for run #%s: %s", run_id, e)
                 images = None
@@ -714,16 +730,9 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
     # The silent sign-off beat is not narration — keep it out of the description.
     caption = _build_caption(dict(fields, narration=narration), article_url,
                              music_credit=(music_choice["credit"] if music_choice else None))
-    # Presentation-style bandit (2026-08-19) — picks the renderer for the NEXT
-    # reel from what's actually engaged so far, not this one (this one already
-    # rendered above with whatever the default look is). See
-    # engine/agents/style_learning.py; only 'static' exists today, so this is
-    # a no-op until a second renderer ships and starts entering rotation.
-    try:
-        from engine.agents.style_learning import choose_style
-        presentation_style = choose_style()
-    except Exception:
-        presentation_style = "static"
+    # presentation_style was picked before illustration (top of this function) so
+    # it could actually drive the FLUX ground tone — reused here, not re-picked,
+    # so the tag on the reel always matches what it was actually rendered with.
     reel_id = save_reel(run_id, mp4_bytes, caption, kind=kind,
                         notes=(notes or "").strip() or None,
                         presentation_style=presentation_style)

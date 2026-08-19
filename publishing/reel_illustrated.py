@@ -101,7 +101,7 @@ def draw_illustrated_frame(image_path, caption, idx, n_illustrated, out_png, lab
     img.save(out_png)
 
 
-def render_house_ground(out_png, *, variant=0):
+def render_house_ground(out_png, *, variant=0, bright=False):
     """The inked field one beat falls back to when FLUX will not illustrate it.
 
     Why this exists: covert action, coups and violence are a whole class of subject
@@ -121,14 +121,27 @@ def render_house_ground(out_png, *, variant=0):
 
     Rendered locally, so a refusal costs no further FLUX call. Deterministic per
     `variant`: the same beat gets the same field every rebuild.
+
+    `bright` (2026-08-19) swaps the ink-dark gradient for the warm cream/kraft
+    ground of the STYLE_BRIGHT experiment (publishing/illustrate.py) — without
+    this, a beat FLUX refused on a bright-style reel would fall back to a dark
+    card and break that reel's own consistency, the exact failure this
+    function exists to prevent for the dark style.
     """
     rng = random.Random(9173 + variant)
     img = Image.new("RGB", (W, H))
     d = ImageDraw.Draw(img)
 
-    # Vertical ink gradient — near-black at the edges, a shade warmer through the
-    # middle, so the field has depth instead of reading as a black slug.
-    top, mid, bot = (14, 12, 9), (34, 29, 21), (12, 10, 8)
+    if bright:
+        # Warm cream at the edges, a shade deeper kraft through the middle —
+        # same depth idea as the dark gradient, lit the other way.
+        top, mid, bot = (232, 222, 197), (218, 202, 168), (226, 214, 186)
+        disc_fill = (140, 42, 27)  # deep-red accent, matches PALETTE['light']['accent']
+    else:
+        # Vertical ink gradient — near-black at the edges, a shade warmer through the
+        # middle, so the field has depth instead of reading as a black slug.
+        top, mid, bot = (14, 12, 9), (34, 29, 21), (12, 10, 8)
+        disc_fill = (74, 61, 40)
     for y in range(H):
         t = y / (H - 1)
         a, b, f = (top, mid, t / 0.55) if t < 0.55 else (mid, bot, (t - 0.55) / 0.45)
@@ -143,7 +156,7 @@ def render_house_ground(out_png, *, variant=0):
     disc = Image.new("L", (W, H), 0)
     ImageDraw.Draw(disc).ellipse([cx - r, cy - r, cx + r, cy + r], fill=140)
     disc = disc.filter(ImageFilter.GaussianBlur(int(W * 0.09)))
-    img = Image.composite(Image.new("RGB", (W, H), (74, 61, 40)), img, disc)
+    img = Image.composite(Image.new("RGB", (W, H), disc_fill), img, disc)
 
     # Paper grain, the one thing every FLUX frame in this style has. Drawn from the
     # seeded RNG rather than `Image.effect_noise`, which draws on PIL's own
