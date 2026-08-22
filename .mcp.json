@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "om": {
+      "command": "node",
+      "args": ["/home/jarvis/second-brain/.claude/scripts/om-mcp.mjs"]
+    }
+  }
+}
