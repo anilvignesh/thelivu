@@ -220,3 +220,58 @@ The lesson for next time: "runs before X" fixes are fragile against new code
 landing between the fix and the top of the loop. Pinning the ordering to a
 fixed anchor (top of tick, right after the budget gate) rather than to a named
 neighbour is the version that doesn't rot as the tick grows.
+
+---
+
+## 8. 2026-08-23 follow-up — the timing bug was fixed, throughput wasn't
+
+Anil: "the belief desk is not really producing content." Investigated directly
+against production (`belief_queue`, `pipeline_runs`, `token_usage`) rather than
+guessing from `last_belief_cycle_result` alone, since §7 already showed that
+value can look fine while the desk is still stuck.
+
+**§7's fix worked** — the belief block genuinely does run before every other
+spending sweep now, and `cycle_due()` has been firing roughly on cadence since:
+belief_queue row 5 (bootstraps) ran 08-16, row 6 (Iran hostage crisis, killed
+pre-draft — no `pipeline_runs` row at all, only visible via `belief_queue.result`)
+ran 08-20, row 7 (Chile/Allende) ran 08-22. So "the desk never runs" is no
+longer the problem.
+
+**The problem that's left: throughput, not timing.**
+
+- `pop_next_belief()` only ever looks at `status='queued'`, `ORDER BY id LIMIT 1`
+  — strict FIFO through whatever's been sitting there.
+- `_promote_a_proposal()` (the only path that turns a scout `'proposed'` into a
+  pursuable `'queued'` row) only fires when `pop_next_belief()` first returns
+  **nothing** — i.e. only when the queued bucket is completely empty.
+- At `cadence_days=2`, the desk processes roughly one belief every 2-4 days.
+  The weekly scout adds 6 new candidates every 7 days. Net production is
+  slower than net intake, so `queued` is *never* empty in practice — which
+  means `_promote_a_proposal()` structurally can't fire, which means this
+  week's 6 fresh proposals (ids 18-23, scouted 08-22) sit behind whatever's
+  already queued indefinitely, however good they are.
+- Confirmed stuck as of 08-23: belief_queue ids 10-16 (7 rows) — "humans use
+  10% of the brain," "carrots improve eyesight," the "eye for an eye" quote,
+  Korean War, Cuban Missile Crisis, antibiotics for colds, Kerala literacy —
+  created 2026-08-08 and 2026-08-15, still `status='queued'`, never attempted.
+- Separately, of the 3 items that *did* get a turn since 08-16, zero
+  published (1 HOLD, 1 killed pre-draft, 1 KILL) — nothing has actually shipped
+  from this desk since 2026-08-04 (run #148). That's the trust gate doing its
+  job on genuinely weak/contested candidates, not a bug — left untouched.
+
+**Fix applied 2026-08-23, via the Command Center's own `/api/beliefs/settings`
+endpoint (not a raw DB write, not a deploy):** `belief_cadence_days` 2 → 1.
+Budget headroom was never the constraint — §2's own cost math puts a belief
+piece at $0.10-0.20 against a $1.00 cap the desk gets first crack at, so
+running daily instead of every-other-day costs nothing the news desk would
+otherwise get. Daily cadence drains the current 7-item backlog in about a
+week instead of two-to-three, after which `queued` actually empties
+periodically, `_promote_a_proposal()` starts firing as designed, and fresh
+scout proposals stop being structurally locked out.
+
+**Not changed:** trust_gate, the scout's candidate-generation prompt, and the
+FIFO/promotion logic itself. If the backlog is still not draining a week or
+two out, the next lever is FIFO order itself — e.g. retiring a `queued` item
+that's sat past some age threshold without being reachable, or letting
+`_promote_a_proposal()` fire on a schedule rather than only-when-empty — not
+the cadence number again.
