@@ -255,6 +255,33 @@ def t_auto_pursue():
     check_that("it stops at pending_human", "pending_human" in r, r)
 
 
+def t_auto_pursue_does_not_starve_on_backlog():
+    print("\nauto-pursue — a backlog tops up instead of locking proposals out (2026-08-23):")
+    # The bug this guards: the old gate only promoted when 'queued' was
+    # completely empty. With intake faster than throughput, 'queued' was
+    # never empty, so a fresh proposal could sit forever no matter how good
+    # it was (docs/alternating-desks.md §8). MAX_AUTO_QUEUE_DEPTH replaces
+    # that all-or-nothing gate with a rolling buffer.
+    _reset()
+    kv_set(scout.AUTO_PURSUE_KEY, "1")
+    for i in range(scout.MAX_AUTO_QUEUE_DEPTH):
+        add_belief_candidate(f"Owner-queued backlog item {i}.", source="owner")
+    pid = add_belief_candidate("Everyone knows this fresh proposal exists.", source="scout")
+
+    check_that("at the cap, nothing is promoted", scout._promote_a_proposal() is None, "")
+    check("the proposal is still waiting", list_belief_queue(status="proposed")[0]["id"], pid)
+
+    # One backlog item finishes (as pop_next_belief + set_belief_status would
+    # do mid-cycle) and frees a slot under the cap.
+    set_belief_status(list_belief_queue(status="queued")[0]["id"], "done", result="test")
+    promoted = scout._promote_a_proposal()
+    check_that("under the cap, the fresh proposal gets promoted",
+              promoted is not None and promoted["id"] == pid, promoted)
+    check("it is queued now, not proposed",
+          [r["status"] for r in list_belief_queue(status=None, limit=50) if r["id"] == pid][0],
+          "queued")
+
+
 def t_failure_is_bounded():
     print("\na belief that fails goes back — up to a point:")
     _reset()
@@ -484,7 +511,8 @@ def main():
     init_db()
     for t in (t_parse_utc, t_cadence_days, t_cycle_due, t_turn_boundary,
               t_next_turn, t_quiet_window,
-              t_empty_queue_reasons, t_auto_pursue, t_failure_is_bounded,
+              t_empty_queue_reasons, t_auto_pursue,
+              t_auto_pursue_does_not_starve_on_backlog, t_failure_is_bounded,
               t_restart_reclaims, t_budget_headroom, t_scout_always_speaks,
               t_parse, t_validate):
         t()

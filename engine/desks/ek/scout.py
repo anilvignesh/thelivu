@@ -6,13 +6,22 @@ Two entry points, both called from the engine tick (run.py):
     run_belief_scout()   weekly — proposes candidates into belief_queue
     run_belief_cycle()   on cadence — takes ONE approved belief through the desk
 
-The split matters. The scout proposes and stops; a proposal waits for the owner
-(docs/everyone-knows-desk.md §6). The cycle only ever picks up what the owner
-approved, so the desk cannot decide by itself what belief is worth a research
-pass. The one exception is deliberate and off by default — `belief_auto_pursue`
-lets the cycle promote the top proposal when the approved queue is empty, for
-when Anil is away and would rather come back to drafts than to an idle desk.
-Either way nothing publishes: the cycle's last act is `status='pending_human'`.
+The split matters. The scout proposes and stops; a proposal waits for either
+the owner's approval or auto-pursue (docs/everyone-knows-desk.md §6). Either
+way nothing publishes: the cycle's last act is `status='pending_human'`.
+
+**`belief_auto_pursue` (2026-08-23, supersedes the original "idle-desk
+fallback" framing)**: Anil's 2026-08-17 grant gave the desk full authority to
+decide new content is good enough without asking — "autopursue if you think
+they are good enough... no need to ask me for permission" (this vault's
+Autonomy & Editorial Rules). So promotion is no longer gated on the approved
+queue being completely empty — with weekly scout batches (6/week) and a
+throughput slower than that, "completely empty" never actually happened, which
+silently locked every fresh proposal out behind whatever was already queued
+(docs/alternating-desks.md §8). `_promote_a_proposal()` now tops the queue up
+to `MAX_AUTO_QUEUE_DEPTH` every cycle instead — keeps a small rolling buffer
+flowing rather than an all-or-nothing gate, without letting `queued` balloon
+past what the cadence can realistically work through soon.
 
 Everything below the entry points is there because this runs UNATTENDED on
 Railway, where nobody is watching the return value:
@@ -81,6 +90,14 @@ DEFAULT_CADENCE_DAYS = 2
 # cadence of `inf` parses fine and means "never run again".
 MIN_CADENCE_DAYS = 0.5
 MAX_CADENCE_DAYS = 30
+
+# How many 'queued' items auto-pursue keeps in flight at once. Small on
+# purpose: a rolling buffer that stays fresh, not a second unbounded queue
+# sitting behind the first one. At the current cadence (see DEFAULT_CADENCE_
+# DAYS) this is a few days' worth of work — enough that a slow week doesn't
+# starve the desk, not so much that a stale proposal sits for weeks before a
+# fresher one from the same scout run even gets considered.
+MAX_AUTO_QUEUE_DEPTH = 3
 
 # How long the cycle waits before re-asking a question it just answered with
 # "nothing to do". Nothing is lost by waiting: an owner who wants it sooner
@@ -488,16 +505,25 @@ def _reclaim_stale_runs():
 
 
 def _promote_a_proposal():
-    """Only when belief_auto_pursue is on. Returns the promoted row or None."""
+    """Only when belief_auto_pursue is on. Tops the queue up toward
+    MAX_AUTO_QUEUE_DEPTH rather than only firing when it is completely empty —
+    see the module docstring's 2026-08-23 note for why the old empty-only gate
+    silently locked every fresh proposal out once a backlog existed. Returns
+    the promoted row, or None if auto-pursue is off, there is nothing to
+    promote, or the queue already has enough in flight."""
     from shared.db import kv_get, list_belief_queue, set_belief_status
     if not _truthy(kv_get(AUTO_PURSUE_KEY)):
+        return None
+    queued = list_belief_queue(status="queued", limit=MAX_AUTO_QUEUE_DEPTH + 1)
+    if len(queued) >= MAX_AUTO_QUEUE_DEPTH:
         return None
     props = list_belief_queue(status="proposed", limit=50)
     if not props:
         return None
     row = props[-1]  # the list comes back newest-first; take the oldest proposal
     set_belief_status(row["id"], "queued", result="auto-pursued (belief_auto_pursue)")
-    log.info("belief cycle: auto-pursuing proposal #%s", row["id"])
+    log.info("belief cycle: auto-pursuing proposal #%s (queue depth was %d)",
+              row["id"], len(queued))
     return row
 
 
@@ -578,9 +604,11 @@ def run_belief_cycle():
             return _record(f"skipped: ${spent:.2f} of the ${cap:.2f} cap already spent — the "
                            f"news desk has the prior claim on it", quiet=True)
 
+    # Top the queue up toward MAX_AUTO_QUEUE_DEPTH before popping — not only
+    # when it's empty. A no-op when auto-pursue is off, there's nothing to
+    # promote, or the queue already has enough in flight (see the function).
+    _promote_a_proposal()
     row = pop_next_belief()
-    if not row and _promote_a_proposal():
-        row = pop_next_belief()   # claim it properly, with the same lock
     if not row:
         return _record(_nothing_to_run(), quiet=True)
 
