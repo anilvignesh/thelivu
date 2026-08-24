@@ -196,6 +196,39 @@ if service == "thelivu-agent":
             log.error("Model health check failed: %s", e, exc_info=True)
             _sweep_failed("Model health check", e)
 
+        # Autonomy grant, 2026-08-16 (one-week trial, Saturday review): publish +
+        # post without a human tap ONLY for runs the reviewer explicitly cleared
+        # of legal/defamation risk (LEGAL-FLAG: NO). Anything else — including a
+        # missing verdict — still waits for the human gate exactly as before. See
+        # engine/distribution/sweep.py docstring before touching this — it also
+        # carries the incident note for the duplicate-post bug caught same-day.
+        #
+        # ABOVE the breaker and budget governor (moved 2026-08-24 — was below
+        # both, so the whole sweep silently stopped firing for hours every day
+        # the moment the budget cap tripped, contradicting this very section's
+        # own "publishing must stay alive" premise). Verified model-free:
+        # publish_run / post_carousel_run / post_reel_run / recommend_now are
+        # all DB writes + Graph/YouTube HTTP, no LLM call anywhere in the path
+        # — same class of thing as the IG/YouTube sync blocks above.
+        try:
+            from engine.distribution.sweep import run_autopublish_sweep
+            run_autopublish_sweep()
+        except Exception as e:
+            log.error("Autopublish sweep failed: %s", e, exc_info=True)
+            _sweep_failed("Autopublish sweep", e)
+
+        # YouTube backfill (2026-08-16): catch up the reels that were already
+        # posted to Instagram before YouTube existed as a target, 2/day, oldest
+        # first — a pure distribution catch-up, not a new editorial decision (see
+        # engine/distribution/sweep.py). Separate from the block above on purpose.
+        # Same "no model" reasoning — moved up alongside it 2026-08-24.
+        try:
+            from engine.distribution.sweep import run_youtube_backfill_sweep
+            run_youtube_backfill_sweep()
+        except Exception as e:
+            log.error("YouTube backfill sweep failed: %s", e, exc_info=True)
+            _sweep_failed("YouTube backfill sweep", e)
+
         # ── Quota breaker ─────────────────────────────────────────────────────
         # Both providers ran dry on 2026-07-21 and the tick spent 22 hours
         # crashing on a 429 every 2 minutes. While the breaker is open we skip
@@ -367,28 +400,6 @@ if service == "thelivu-agent":
             process_queued_carousels()
         except Exception as e:
             log.error("Carousel processing failed: %s", e, exc_info=True)
-
-        # Autonomy grant, 2026-08-16 (one-week trial, Saturday review): publish +
-        # post without a human tap ONLY for runs the reviewer explicitly cleared
-        # of legal/defamation risk (LEGAL-FLAG: NO). Anything else — including a
-        # missing verdict — still waits for the human gate exactly as before. See
-        # engine/distribution/sweep.py docstring before touching this — it also
-        # carries the incident note for the duplicate-post bug caught same-day.
-        try:
-            from engine.distribution.sweep import run_autopublish_sweep
-            run_autopublish_sweep()
-        except Exception as e:
-            log.error("Autopublish sweep failed: %s", e, exc_info=True)
-
-        # YouTube backfill (2026-08-16): catch up the reels that were already
-        # posted to Instagram before YouTube existed as a target, 2/day, oldest
-        # first — a pure distribution catch-up, not a new editorial decision (see
-        # engine/distribution/sweep.py). Separate from the block above on purpose.
-        try:
-            from engine.distribution.sweep import run_youtube_backfill_sweep
-            run_youtube_backfill_sweep()
-        except Exception as e:
-            log.error("YouTube backfill sweep failed: %s", e, exc_info=True)
 
         # Manual source scout signal (/scoutnow)
         try:
