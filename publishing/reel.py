@@ -560,12 +560,22 @@ def _reveal_word_count(caption, step, steps):
     repeat). Returns a word COUNT, not truncated text — see _draw_emph_block's
     reveal_words: the caption passed to the renderer must stay the FULL string
     every step so line-wrap is computed once and words never reflow as more
-    are revealed (found by watching an actual render, not caught in review)."""
+    are revealed (found by watching an actual render, not caught in review).
+
+    Floor is 2 words, not 1 (2026-08-24): even apportionment rounds step 0 down
+    to a single word whenever the caption is long enough relative to `steps`
+    (e.g. 7 words / 6 steps -> 1 word first). If that lone word is a short
+    connector ("A", "The", "In") it reads as a broken frame — an isolated
+    fragment floating in otherwise-empty frame space, not a deliberate beat.
+    Caught on reel #69/#70 (Anil, deleted from Instagram: "not pleasant").
+    A 2-word opener still reveals progressively for anything longer; a
+    caption of exactly 1 word never reaches here (handled above)."""
     words = (caption or "").split()
     if steps <= 1 or len(words) <= 1:
         return len(words)
     per = len(words) / steps
-    return max(1, min(round(per * (step + 1)), len(words)))
+    floor = min(2, len(words))
+    return max(floor, min(round(per * (step + 1)), len(words)))
 
 
 def _split_duration(total, k):
