@@ -46,6 +46,39 @@ GAP_SECS = 0.35          # silence between beats; also the caption hold padding
 FPS = 30
 
 
+# A caption that leaked the model's own word-count self-correction onto the
+# CAPTION line — e.g. `"Revenue pressure" (2 words). Need 3-6. I'll do
+# "Revenue growth slow" (3 words). Or "Salaries consume spending" (3 words).` —
+# instead of just the final short phrase (run #203, live on Instagram, Anil:
+# "not pleasant" -> took it down by hand). SKILL.md asks for 3-6 words; nothing
+# after generation ever checked that a beat's CAPTION actually held one. Unlike
+# belief_reel.py's caption_ok()/MAX_CAPTION_WORDS for the belief desks, the
+# regular news-desk script path (parse_script, below) had no equivalent guard —
+# `one()`/the per-beat regexes are single-line by design (see their own
+# comments) and faithfully captured whatever the model put on that line,
+# reasoning included. This is the backstop, not a smarter parse: a caption this
+# shape almost never occurs in real deliberate writing, so false positives on
+# genuine captions are the acceptable-cost side of this trade-off.
+_CAPTION_SELF_TALK = re.compile(r"\(\d+\s*words?\)", re.IGNORECASE)
+MAX_NEWS_CAPTION_WORDS = 14  # SKILL.md asks for 3-6; this is a generous ceiling,
+                             # not the target — it only exists to catch a caption
+                             # that clearly isn't one anymore.
+
+
+def _sane_caption(caption, spoken):
+    """A beat's caption if it looks like an actual caption, else the spoken line
+    it fell back to before (same fallback already used for an EMPTY caption —
+    this just widens the trigger to a CONTAMINATED one)."""
+    cap = (caption or "").strip()
+    if not cap:
+        return spoken
+    if _CAPTION_SELF_TALK.search(cap) or len(cap.split()) > MAX_NEWS_CAPTION_WORDS:
+        log.warning("caption looked like leaked model reasoning, not on-screen "
+                    "text — falling back to the spoken line: %r", cap[:120])
+        return spoken
+    return cap
+
+
 # ── script parsing ────────────────────────────────────────────────────────────
 def parse_script(text):
     """Parse the video-script skill output into ordered (spoken, caption) beats.
@@ -77,7 +110,7 @@ def parse_script(text):
 
     hook, hook_cap = one("HOOK"), one("HOOK_CAPTION")
     if hook:
-        beats.append((hook, hook_cap or hook))
+        beats.append((hook, _sane_caption(hook_cap, hook)))
         images.append(one("HOOK_IMAGE"))
 
     # BEAT 1 / BEAT 1 CAPTION / BEAT 1 IMAGE, BEAT 2 / ... in order
@@ -90,12 +123,12 @@ def parse_script(text):
     imgs = {int(m.group(1)): m.group(2).strip()
             for m in re.finditer(r"^BEAT[ \t]+(\d+)[ \t]+IMAGE:[ \t]*(.+)$", text, re.IGNORECASE | re.MULTILINE)}
     for i in sorted(spoken):
-        beats.append((spoken[i], caps.get(i, spoken[i])))
+        beats.append((spoken[i], _sane_caption(caps.get(i, ""), spoken[i])))
         images.append(imgs.get(i, ""))
 
     close, close_cap = one("CLOSE"), one("CLOSE_CAPTION")
     if close:
-        beats.append((close, close_cap or close))
+        beats.append((close, _sane_caption(close_cap, close)))
         images.append(one("CLOSE_IMAGE"))
 
     hashtags = one("HASHTAGS")
