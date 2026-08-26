@@ -101,6 +101,9 @@ Tier 3 until the open web verifies it.
 - `watchlist.yaml` — the investigative agenda: themes/actors to DIG into.
 - `DRY-RUN-PLAYBOOK.md` — the validation-week routine and the gate to automate.
 - `dry-run-log.md` — fill one row each morning.
+- `docs/mistakes.md` — production bugs/bad-publishes log: what a viewer/reader
+  actually saw, root cause, fix. Add an entry every time something ships
+  broken or nearly does — don't rediscover the same failure class twice.
 - `examples/` — the same story done two ways (`...-original-op-ed-BEFORE.md` vs
   `...-ENGINE-output.md`): the clearest proof of what the engine is for.
 - `skills/` — the twelve skills, by function:
