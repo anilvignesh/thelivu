@@ -113,9 +113,13 @@ scroll, a list." Rebuilt the feed's structure, not just its styling:
 - **Run #207 has no heading in its draft at all** (surfaced by the first
   deploy — `parse_article`'s own fallback promotes the first heading of any
   level to title, but #207 has none, so `article.title` comes back empty).
-  Pre-existing in the draft/pipeline, not caused by this feature; the feed
-  and `/a/207` both handle it gracefully (blank title, link still works) but
-  the draft itself is worth a separate look.
+  Pre-existing in the draft/pipeline, not caused by this feature. It landed as
+  the hero on the second deploy (newest-first ordering, blank headline in the
+  most prominent slot on the page) — fixed at the display layer:
+  `_first_titled_index()` skips a title-less item for hero placement, demoting
+  it into the tiered list instead (still shown, still links, just not blank
+  in the hero). The draft itself is still worth a separate look — this only
+  papers over the symptom on the homepage.
 - Still no visual QA against the live deploy for this revision either — same
   caveat as above, now also covering the hero scroll-scrub feel and whether
   the confidence tiers read right against real story mix (a run of all-

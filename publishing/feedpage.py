@@ -280,9 +280,25 @@ def _story_html(item, contact_handle):
     return f'<a class="story {tier}" href="/a/{slug}">{media}{meta}{heading}{hook}</a>'
 
 
+def _first_titled_index(items, contact_handle):
+    """Index of the first item whose draft parses to a non-empty title, or 0.
+    A blank title is easy to shrug off in a dense compact row but not as the
+    single full-bleed hero headline on the page — a draft with no heading at
+    all (parse_article's own fallback has nothing to promote, e.g. run #207,
+    see docs/homepage-feed.md) should drop to a lower tier instead, not sit in
+    the hero blank. Falls back to 0 if nothing in the batch has a title —
+    still shows a hero (with an empty headline) rather than none at all."""
+    for i, it in enumerate(items):
+        parsed = _parsed(it, contact_handle)
+        if parsed and parsed[0].title:
+            return i
+    return 0
+
+
 def render_feed(items, contact_handle, channel_url=""):
     """items: rows from shared.db.get_feed_items(), newest first. The first
-    renders as the hero; the rest are tiered by confidence below it."""
+    item with a usable title renders as the hero; everything else (including
+    any title-less item skipped over) is tiered by confidence below it."""
     channel_line = ""
     if channel_url:
         channel_line = (
@@ -292,8 +308,10 @@ def render_feed(items, contact_handle, channel_url=""):
     if not items:
         return _PAGE.format(body='<p class="empty">First stories coming soon.</p>', channel_line=channel_line)
 
-    hero_html = _hero_html(items[0], contact_handle)
-    rest = [s for s in (_story_html(i, contact_handle) for i in items[1:]) if s]
+    hero_idx = _first_titled_index(items, contact_handle)
+    hero_html = _hero_html(items[hero_idx], contact_handle)
+    rest_items = items[:hero_idx] + items[hero_idx + 1:]
+    rest = [s for s in (_story_html(i, contact_handle) for i in rest_items) if s]
 
     parts = []
     if hero_html:
