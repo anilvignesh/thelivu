@@ -74,6 +74,8 @@ import logging
 import re
 from datetime import datetime, timezone
 
+from shared import content_safety
+
 log = logging.getLogger("autopublish")
 
 # Nothing with a parent run created before this is autopublish-eligible, ever —
@@ -268,10 +270,25 @@ def _autopublish_pending_runs():
                 legal_flag, legal_reason = _parse_legal_flag(full.get("review_text"))
                 flag_note = (f"⚠️ reviewer flagged LEGAL-FLAG: YES ({legal_reason})"
                              if legal_flag else "reviewer: LEGAL-FLAG clear or unparsed")
-                log.info("Autopublished run #%s (desk=%s, legal_flag=%s)",
-                         run_id, desk, legal_flag)
-                _notify_safe(f"🤖 Auto-published run #{run_id} ({desk}) — {flag_note}. "
-                             f"{result.get('article_url', '')}")
+                # Content-safety guardrail (shared/content_safety.py, added
+                # 2026-08-29) — a DIFFERENT, narrower check than legal_flag:
+                # policy-violation content (hate/violence/self-harm framing),
+                # not defamation. Advisory only, same as the legal banner
+                # above and for the same reason — a hard gate here would be a
+                # step MORE restrictive than what Anil just explicitly chose
+                # for the more serious defamation risk the same day, and a
+                # generic safety classifier flags real crime/violence
+                # journalism as a false positive often enough that blocking
+                # on it would silently stall legitimate stories. None (check
+                # unavailable — no key, network error) says nothing, quietly.
+                safety_verdict = content_safety.check(full.get("draft_text"))
+                safety_note = ("" if safety_verdict is None else
+                               "" if safety_verdict else
+                               " ⚠️ content-safety guardrail flagged this UNSAFE — read it")
+                log.info("Autopublished run #%s (desk=%s, legal_flag=%s, content_safety=%s)",
+                         run_id, desk, legal_flag, safety_verdict)
+                _notify_safe(f"🤖 Auto-published run #{run_id} ({desk}) — {flag_note}."
+                             f"{safety_note} {result.get('article_url', '')}")
             else:
                 log.warning("Autopublish for run #%s (desk=%s) returned not-ok: %s",
                            run_id, desk, result)
