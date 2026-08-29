@@ -13,6 +13,36 @@ catch or undo by hand. Newest first. Use the template at the bottom.
 
 ---
 
+## 2026-08-29 — Caption reveal crawled for the whole beat on a short caption (live on Instagram)
+
+**What happened:** Reel #73 (run #194), posted and live, third caption-timing
+issue caught the same day. Not leaked text this time — a real 4-word caption
+("₹28L spent, 409 temples") on a 10.5s beat revealed one word every ~2.6s.
+Anil, watching it: "the words come very slow, like appears... looks broken."
+
+**Root cause:** `_caption_reveal_steps()` picks a step COUNT from word count
+(capped at 6), but `reveal_cuts` always divided the FULL beat duration `sub`
+among those steps regardless of how few words there were. Counter-intuitively
+this means FEWER words made each one lingerLONGER, not shorter — duration-
+per-step is `sub / steps`, and `steps` shrinks with word count while `sub`
+does not. A short caption on a long beat crawled; the design was fine for the
+6-12s beats it was tuned against, this beat just happened to be long relative
+to a short caption.
+
+**Fix:** reveal at a natural per-word pace (~0.42s/word, floored, capped at
+the beat's length), then hold the finished caption for whatever beat time
+remains — same total duration, so the sum-to-`sub` invariant AV sync depends
+on still holds exactly. Falls back to the original full-span split when the
+natural pace wouldn't leave room to hold (a long caption on a short beat,
+unaffected — already fine). Did not touch the neighboring even-split-vs-
+plan_cuts decision (a separate, already-reasoned call — plan_cuts crashes
+ffmpeg with up to 6 reveal steps). Commit `aa17c4e`.
+
+**Not yet done:** the post is still live — Anil hasn't said whether to pull
+it. Flagged separately, not assumed.
+
+---
+
 ## 2026-08-29 — Same leak, different shape: the first fix didn't generalize
 
 **What happened:** Reel #72 (run #186), same class of bug as 2026-08-26 below
