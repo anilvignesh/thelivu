@@ -151,15 +151,55 @@ def _autopublish_eligible(run):
 
 def run_autopublish_sweep():
     """One pass: auto-publish eligible pending_human runs, then auto-post any
-    pending_review carousel / ready reel for the SAME eligible runs whose posting
-    timing looks right (engine.distribution.timing), capped by MAX_DELAY_HOURS so
-    news freshness always wins over chasing a marginally better hour.
+    pending_review carousel / ready reel for the SAME eligible runs.
+
+    Carousels still use engine.distribution.timing's learned posting-time
+    priors (capped by MAX_DELAY_HOURS so freshness wins over chasing a
+    marginally better hour). Reels/shorts do NOT — see REEL_POST_SLOTS_IST
+    above — they post only inside the fixed 10:00/18:00 IST windows, at most
+    once per window, and only if something eligible is actually ready.
 
     Cheap no-op when nothing's eligible. Call once per orchestrator tick, same as
     process_queued_carousels()."""
     _autopublish_pending_runs()
     _autopost_ready_carousels()
     _autopost_ready_reels()
+
+
+# Fixed reel/short posting schedule (Anil, 2026-08-30) — replaces the learned
+# posting-time priors / freshness-cap approach (engine.distribution.timing)
+# FOR REELS ONLY. Reasoning, verbatim: "we are not trying to be a breaking
+# news channel... so for us, time is fine" — the 6h MAX_DELAY_HOURS freshness
+# cap in timing.py existed specifically to avoid holding "stale" news, which
+# Anil says isn't a real cost here. Two fixed daily windows instead: 10:00 and
+# 18:00 IST. Carousels are UNCHANGED — still on timing.recommend_now — because
+# Anil said "reels and shorts" specifically; revisit if he wants carousels on
+# the same fixed schedule.
+#
+# Also NOT mandatory (Anil, explicit): a window firing with nothing eligible
+# ready posts nothing — no forced/filler content just to hit the slot. Desk
+# priority when something IS ready: news desk first, EK/GK belief desk as
+# fallback — "if we don't have anything as news, we will publish the other
+# desk." Belief-desk QUALITY is a separate follow-up Anil flagged for later,
+# not addressed by this scheduling change.
+REEL_POST_SLOTS_IST = [(10, 0), (18, 0)]
+REEL_SLOT_WINDOW_MINUTES = 10  # comfortably >1 tick (ticks are every 2 min)
+LAST_REEL_SLOT_KEY = "last_reel_post_slot"
+
+
+def _current_reel_slot(now_utc=None):
+    """The IST slot key ('YYYY-MM-DD:HHMM') if `now_utc` falls inside one of
+    REEL_POST_SLOTS_IST's windows, else None. A window, not an instant, so a
+    tick landing a few minutes after the mark still catches it."""
+    from datetime import timedelta
+    from engine.distribution.timing import IST_OFFSET
+    now_utc = now_utc or datetime.now(timezone.utc)
+    ist_now = now_utc + IST_OFFSET
+    for hour, minute in REEL_POST_SLOTS_IST:
+        start = ist_now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if start <= ist_now < start + timedelta(minutes=REEL_SLOT_WINDOW_MINUTES):
+            return f"{ist_now.date()}:{hour:02d}{minute:02d}"
+    return None
 
 
 # Minimum spacing between two autoposted pieces, across reels AND carousels —
@@ -272,39 +312,60 @@ def _autopost_ready_carousels():
 
 
 def _autopost_ready_reels():
-    from shared.db import get_ready_reels, get_run
+    """Fixed-schedule version (2026-08-30) — see REEL_POST_SLOTS_IST's comment
+    above for why this no longer uses timing.recommend_now. One post per
+    window, news desk preferred, EK/GK belief desk as fallback, nothing posted
+    if nothing eligible is ready — not mandatory."""
+    from shared.db import get_ready_reels, get_run, kv_get, kv_set
     from publishing.publish import post_reel_run
-    from engine.distribution.timing import recommend_now
+
+    now = datetime.now(timezone.utc)
+    slot = _current_reel_slot(now)
+    if not slot:
+        return  # outside the 10:00/18:00 IST windows — wait, don't force a post
+    if kv_get(LAST_REEL_SLOT_KEY) == slot:
+        return  # already handled this window (posted, or confirmed nothing ready)
 
     ready = get_ready_reels()
-    if not ready:
-        return
     # One query for every ready reel (get_ready_reels), not one query per published
     # run (get_runs_by_status + get_reel_for_run per row) — the latter is an N+1
     # that took 40s+ scanning 100 runs over Railway's Postgres link. See db.py's
-    # get_ready_reels() docstring. recommend_now() hoisted out of the loop for the
-    # same reason as the carousel sweep above.
-    rec = recommend_now("REELS")
+    # get_ready_reels() docstring.
+    candidates = []
     for reel in ready:
         run = get_run(reel.get("run_id")) if reel.get("run_id") else None
         if not _autopublish_eligible(run):
             continue
-        if not rec["post_now"]:
-            continue
-        if _autopost_cooldown_active():
-            log.info("Autopost cooldown active — holding remaining reels this tick")
-            return  # something posted recently (this run or carousels); space it out
-        try:
-            result = post_reel_run(reel["id"])
-        except Exception as e:
-            log.error("Autopost failed for reel #%s: %s", reel["id"], e, exc_info=True)
-            continue
-        if result.get("ok"):
-            log.info("Autoposted reel #%s (%s)", reel["id"], rec["reason"])
-            _notify_safe(f"🤖 Auto-posted reel for run #{run['id']} — {rec['reason']}. "
-                         f"{result.get('permalink', '')}")
-            return  # one post per tick — let the cooldown space out the rest
-        # YouTube cross-post now happens inside post_reel_run itself (same beat,
+        candidates.append((run, reel))
+
+    if not candidates:
+        kv_set(LAST_REEL_SLOT_KEY, slot)  # nothing ready this window — skip, not an error
+        log.info("Reel slot %s: nothing eligible ready, posting nothing", slot)
+        return
+
+    # News desk first; EK/GK belief desk only as a fallback when news has
+    # nothing — "if we don't have anything as news, we will publish the other
+    # desk" (Anil). Stable tie-break within a desk: lowest reel id (oldest first).
+    def _rank(pair):
+        run, reel = pair
+        desk = (run or {}).get("desk") or "news"
+        return (0 if desk == "news" else 1, reel["id"])
+
+    candidates.sort(key=_rank)
+    run, reel = candidates[0]
+
+    try:
+        result = post_reel_run(reel["id"])
+    except Exception as e:
+        log.error("Autopost failed for reel #%s: %s", reel["id"], e, exc_info=True)
+        return  # don't stamp the slot as handled — worth another try later this window
+    if result.get("ok"):
+        kv_set(LAST_REEL_SLOT_KEY, slot)
+        desk = (run or {}).get("desk") or "news"
+        log.info("Autoposted reel #%s (desk=%s, slot=%s)", reel["id"], desk, slot)
+        _notify_safe(f"🤖 Auto-posted reel for run #{run['id']} ({desk} desk) — "
+                     f"{slot} slot. {result.get('permalink', '')}")
+        # YouTube cross-post happens inside post_reel_run itself (same beat,
         # covers the dashboard tap too) — no separate call needed here.
 
 
