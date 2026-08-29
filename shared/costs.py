@@ -16,7 +16,18 @@ are whatever the provider was called with, so matching is substring-based.
 RATES = {
     # tier          (input, output)  USD per MTok
     "claude-opus":   (5.00, 25.00),
-    "claude":        (3.00, 15.00),   # sonnet-class, the default
+    # Sonnet 5's intro price ($2/$10) was made PERMANENT rather than stepping
+    # up after 2026-08-31 as originally priced (see Cost Control.md's
+    # "revisit 2026-09-01" note — this is that revisit, found by the
+    # tech-steward's 2026-08-29 sweep, confirmed against the live Anthropic
+    # pricing page before switching). tier_for()'s substring match doesn't
+    # distinguish sonnet-4-6 from sonnet-5 (neither contains "haiku"/"opus"),
+    # so THIS row is whatever sonnet build THELIVU_CLAUDE_MODEL is actually
+    # pointed at — update it again if that ever changes model FAMILY, not
+    # just version. Caveat carried over from the prior note: Sonnet 5's
+    # tokenizer runs ~30% heavier, so the real saving is smaller than the
+    # headline $/MTok drop suggests — still net positive, just not 1:1.
+    "claude":        (2.00, 10.00),   # sonnet-class, the default (sonnet-5, 2026-08-29)
     "claude-haiku":  (1.00,  5.00),
     "gemini-pro":    (1.25, 10.00),
     # Flash OUTPUT was raised to $2.50 (it is $1.00 in plenty of older
