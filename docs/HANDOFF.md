@@ -25,16 +25,20 @@ pointed to.*
    reality and the traps.
 
 The owner is **Anil** (Telegram: the draft chat the bot posts to). He is
-technical, direct, and reviews publishes that carry real legal exposure. **The
-human gate on defamation-risk content is absolute — enforced in code, fails
-closed.** Per the 2026-07-15 autonomy grant, publishing was the ONLY action
-gated on Anil; **as of 2026-08-16 (one-week trial, Saturday review)** that
-narrowed further — a run the editorial reviewer *explicitly* clears of naming
-a real person alongside an allegation (`LEGAL-FLAG: NO`) now publishes AND
-posts without a human tap, timed by `engine/distribution/timing.py`'s learned
-priors. Anything else — a YES, or a missing/unparseable verdict — still needs
-the tap, same as always; see `engine/distribution/sweep.py`'s docstring before
-touching this. Act autonomously on everything else and report.
+technical and direct. Per the 2026-07-15 autonomy grant, publishing was the
+ONLY action gated on him; the 2026-08-16 grant narrowed that gate to
+named-person/allegation content only; **as of 2026-08-29 (Anil, explicit) the
+gate is removed entirely** — every run that clears normal editorial review
+publishes AND posts without a human tap, timed by
+`engine/distribution/timing.py`'s learned priors, including stories naming a
+real person alongside an allegation. **There is no human gate on
+defamation-risk content anymore.** Telegram still gets a per-run heads-up
+(with a ⚠️ LEGAL banner when `LEGAL-FLAG: YES` parses); Anil's own stated
+fallback is watching that and deleting anything he judges unnecessary after
+the fact, not reviewing before. See `engine/distribution/sweep.py`'s
+docstring ("Made permanent AND extended, 2026-08-29") before touching this —
+it also carries the incident note for the duplicate-post bug caught the same
+day as the original grant. Act autonomously on everything and report.
 
 ---
 

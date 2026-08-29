@@ -58,10 +58,10 @@ Every lead — whatever its source — is **Tier 3 until the open web verifies i
 
 Separation is the safeguard. The investigator is allowed to be enthusiastic; the verifier is built to distrust it and may fail the whole story on its own authority; the pattern-synthesizer is held to a *higher* bar than single-story reporting because connected narratives are more persuasive when wrong; the reviewer ignores whether the facts are true and asks only whether the *writing* is fair, clean, and legally safe. No single stage can push a story to readers — and only the publisher can post, and only on an explicit human action. That's the structural reason this stays a newsroom and doesn't drift into a propaganda feed.
 
-## The two hard guarantees
+## One hard guarantee, and one that used to be
 
-1. **The human gate stops every story that carries real legal exposure.** The `publisher` is the only stage that can post. As of 2026-08-16 (one-week trial, Anil) a story the reviewer explicitly clears of naming a real person alongside an allegation (`LEGAL-FLAG: NO`) publishes without a human tap — see `engine/distribution/sweep.py`. Anything else — a YES, or a missing/unparseable verdict — still requires explicit human action, same as before. The split is enforced in code and fails CLOSED: only an explicit NO clears the autonomous path.
-2. **Under-coverage selects, it never confirms.** Obscurity tells the engine what to *look at*, never what to *believe*. Obscure claims clear a *higher* bar, not a lower one.
+1. **Under-coverage selects, it never confirms.** Obscurity tells the engine what to *look at*, never what to *believe*. Obscure claims clear a *higher* bar, not a lower one.
+2. **There is no longer a human publish gate — this WAS the other hard guarantee, until 2026-08-29.** The `publisher` is the only stage that can post, but as of that date (Anil, explicit) it posts autonomously for every story that clears editorial review — including one naming a real person alongside an allegation — see `engine/distribution/sweep.py`. Telegram still gets a per-run heads-up; Anil's own fallback is deleting anything he judges unnecessary after the fact. Read this as a removed safeguard, not a preserved one, if you're relying on this doc for what still holds.
 
 ## Running it
 

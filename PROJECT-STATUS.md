@@ -643,13 +643,17 @@ historical — this is current.
 - **Owner autonomy grant (2026-07-15):** the assistant acts autonomously on
   everything — features, story work, backend, digs — and the **only** action gated on
   the owner is the **final publish/post**. Enforced in code.
-- **Autonomy narrowed further (2026-08-16, one-week trial, Saturday review):** the
-  publish gate now applies only to runs carrying real legal exposure. A run the
-  editorial reviewer explicitly clears (`LEGAL-FLAG: NO`) publishes AND posts
-  without a human tap, timed by learned posting-time priors (`engine/agents/
-  posting_time.py`), capped at 6h delay so freshness always wins. Anything else —
-  an explicit YES, or a missing/unparseable verdict — still needs the tap; the
-  gate fails CLOSED on purpose. See `engine/distribution/sweep.py`.
+- **Autonomy narrowed further, then the gate removed entirely:** 2026-08-16
+  narrowed the publish gate to runs carrying real legal exposure (a one-week
+  trial). **2026-08-29 (Anil, explicit): made permanent, and the legal-exposure
+  carve-out removed too.** Every run that clears editorial review now publishes
+  AND posts without a human tap — including one naming a real person alongside
+  an allegation — timed by learned posting-time priors (`engine/agents/
+  posting_time.py`), capped at 6h delay so freshness always wins. There is no
+  human publish gate left; Telegram still gets a per-run heads-up (with a ⚠️
+  LEGAL banner when it parses), and Anil's own stated fallback is deleting
+  anything he judges unnecessary after the fact. See
+  `engine/distribution/sweep.py`.
 
 ### Capabilities added this era (all deployed, all end at the human gate)
 1. **Persistent digs** — a thread investigated over multiple days. Tables `digs` +

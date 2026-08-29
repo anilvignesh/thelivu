@@ -1,37 +1,57 @@
-"""Autonomous publish sweep — the human gate, narrowed to where it matters.
+"""Autonomous publish sweep — full autonomy, notify-only.
 
 Autonomy grant, 2026-08-16 (Anil): the standing human-gate rule ("only publish
 is gated, everything else runs free" — 2026-07-15 grant) is refined further.
-Publish itself now splits by what the story is ABOUT:
+For one week, publish split by what the story was ABOUT — no-named-person
+stories autopublished, named-person-plus-allegation stories still needed a
+Telegram tap — pending a Saturday review.
 
-  - No real person named in connection with an allegation → publishes AND posts
-    autonomously, no tap. This is most of the institutional/systemic-story volume.
-  - Names a real person alongside an allegation → still requires the human tap in
-    Telegram, exactly as before. This is the one category where a week without
-    review doesn't reduce the actual exposure (defamation liability isn't
-    proportional to trial length), and the media-lawyer read this project has
-    always meant to get (PROJECT-STATUS.md, pre-launch, never done) still hasn't
-    happened. NOT covered by this autonomy grant. Do not extend it here without
-    Anil explicitly revisiting this file.
+## Made permanent AND extended, 2026-08-29 (Anil, explicit)
 
-One-week trial, review scheduled for the following Saturday. This file is where
-that trial's mechanics live — read this docstring before loosening anything.
+Two changes, both deliberate, both confirmed after Anil was told exactly what
+they mean:
 
-## The fail-closed rule (the one thing that must never invert)
+1. **The 2026-08-16 trial is over — it's the permanent policy, not provisional.**
+   No further "Saturday review" checkpoint.
+2. **The named-person/allegation carve-out is REMOVED.** Every run that clears
+   normal editorial review (draft → verify → review) autopublishes and posts,
+   full stop — including stories naming a real person alongside an allegation.
+   There is no legal/defamation human gate left in this pipeline. Anil was
+   told, in these terms, before confirming: this exposes him personally to
+   defamation liability on content no lawyer has ever reviewed (the
+   media-lawyer read this project always meant to get, PROJECT-STATUS.md
+   pre-launch, still never happened), and a bad post can't be un-published
+   once it's out — his call was "yes, remove it fully," with the explicit
+   fallback being he watches Telegram and deletes anything he judges
+   unnecessary after the fact, not before.
+
+`send_for_approval` / `_send_via_telegram` (orchestrator.py) still fires for
+every run and still shows the ⚠️ LEGAL banner when `LEGAL-FLAG: YES` parses —
+that stays as a heads-up Anil reads after the fact, per his own framing. It is
+no longer a gate anything waits on.
+
+## History below, kept for context — do not use it to re-derive today's gate
+
+The subsections below (fail-closed rule, first incident) describe the
+2026-08-16–29 design, where `_explicitly_legal_clear` genuinely gated
+publish. It no longer does — see above. Left in place so the reasoning that
+produced `_BACKLOG_CLEARED_RUN_IDS` and `TRIAL_START` (both still real, both
+still enforced) is still legible.
+
+### The fail-closed rule (historical — no longer wired to a gate)
 
 `pipeline_runs.legal_flag` (the DB column) is fail-OPEN by construction: it is
 only ever set to `True` (see `orchestrator._send_via_telegram`) — a run whose
 review_text never got a parseable LEGAL-FLAG line at all also reads as
-`legal_flag=False`. That's fine for its original purpose (a banner on top of
-review a human does regardless). It is NOT fine as the gate for "skip human
-review entirely" — a parsing miss must not silently mean "no review needed."
+`legal_flag=False`. That was fine for its original purpose (a banner on top of
+review a human does regardless) and NOT fine as a gate for "skip human review
+entirely" — which is exactly why, while it was still a gate, this module never
+trusted the stored column and re-derived eligibility straight from
+`review_text` via `_explicitly_legal_clear`. That helper is unused by
+`_autopublish_eligible` now; kept only in case a future gate needs the same
+strict parse.
 
-So this module does NOT trust the stored column for its own decision. It
-re-derives eligibility straight from `review_text`, and only an EXPLICIT
-`LEGAL-FLAG: NO` counts as clear — anything else (YES, missing, unparseable)
-routes to the normal human-gated path, unchanged.
-
-## Incident, 2026-08-16, minutes after first deploy (read before touching this file)
+### Incident, 2026-08-16, minutes after first deploy (read before touching this file)
 
 First live sweep posted run #120's Assam-floods reel to Instagram THREE TIMES
 (reels #18/19/20 — three separate /remake versions, all left at status='ready'
@@ -107,7 +127,14 @@ _BACKLOG_CLEARED_RUN_IDS = {53, 87, 112, 113, 126, 127, 130, 142}
 
 
 def _autopublish_eligible(run):
-    """The ONE gate: legal-clear AND (not backlog OR explicitly vetted backlog).
+    """The ONE gate: not backlog OR explicitly vetted backlog.
+
+    2026-08-29: the legal/defamation carve-out that used to sit here
+    (`_explicitly_legal_clear(run.get("review_text"))`) is gone — see the
+    module docstring's "Made permanent AND extended" section for the explicit
+    decision behind that. Every editorially-reviewed run is eligible now;
+    `TRIAL_START` and the backlog allowlist are the only remaining checks, and
+    both predate and are independent of the legal gate that was removed.
     Every call site uses this — see the incident note for why that matters."""
     if not run:
         return False
@@ -119,7 +146,7 @@ def _autopublish_eligible(run):
             created = created.replace(tzinfo=timezone.utc)
         if created < TRIAL_START:
             return False
-    return _explicitly_legal_clear(run.get("review_text"))
+    return True
 
 
 def run_autopublish_sweep():
@@ -172,6 +199,7 @@ def _autopost_cooldown_active():
 def _autopublish_pending_runs():
     from shared.db import get_runs_by_status, get_run
     from publishing.publish import publish_run
+    from engine.agents.orchestrator import _parse_legal_flag
 
     # get_runs_by_status defaults to desk='news' — calling it bare here silently
     # excluded the belief desks (ek, gk) from autopublish entirely since the
@@ -191,9 +219,18 @@ def _autopublish_pending_runs():
                 _notify_safe(f"⚠️ Autopublish failed for run #{run_id}: {e}")
                 continue
             if result.get("ok"):
-                log.info("Autopublished run #%s (desk=%s, legal-clear)", run_id, desk)
-                _notify_safe(f"🤖 Auto-published run #{run_id} ({desk}) — no named-person "
-                             f"allegation, reviewer said LEGAL-FLAG: NO. "
+                # 2026-08-29: legal_flag no longer gates anything (see module
+                # docstring), but it still says something true about the run,
+                # and Anil's own stated fallback is watching this notification
+                # and deleting anything he judges unnecessary — so the heads-up
+                # says plainly when a run carries a legal flag instead of
+                # implying every autopublish was legal-clear.
+                legal_flag, legal_reason = _parse_legal_flag(full.get("review_text"))
+                flag_note = (f"⚠️ reviewer flagged LEGAL-FLAG: YES ({legal_reason})"
+                             if legal_flag else "reviewer: LEGAL-FLAG clear or unparsed")
+                log.info("Autopublished run #%s (desk=%s, legal_flag=%s)",
+                         run_id, desk, legal_flag)
+                _notify_safe(f"🤖 Auto-published run #{run_id} ({desk}) — {flag_note}. "
                              f"{result.get('article_url', '')}")
             else:
                 log.warning("Autopublish for run #%s (desk=%s) returned not-ok: %s",

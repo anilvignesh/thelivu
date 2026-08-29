@@ -9,10 +9,9 @@ center** with four new capabilities, plus a proactive follow-up brain.
 
 ## Autonomy context
 Per Anil (2026-07-15): full autonomy on Thelivu — build features, work stories,
-change backend — **the only gate is the final publish/post**. So the command
-center may do everything *up to* posting freely; posting stays behind the human
-gate for anything with real legal exposure (already enforced in code). As of
-2026-08-16 (trial) an explicitly legal-clear story posts autonomously — see
+change backend — **the only gate is the final publish/post**. As of 2026-08-29
+(Anil, explicit) that gate is removed too: every story that clears editorial
+review posts autonomously, including ones with real legal exposure — see
 `engine/distribution/sweep.py`. See memory `thelivu-autonomy`.
 
 ---

@@ -6,9 +6,9 @@ _Your AI-powered investigative journalism engine. Built by Anil Vignesh + Jarvis
 
 ## What is Thelivu?
 
-Thelivu is an autonomous investigative pipeline. It watches YouTube channels and RSS feeds for newsworthy signals, investigates the strongest leads using Gemini + Google Search, verifies claims, writes drafts, and sends them to you on Telegram for a single human decision: **Approve**, **Hold**, or **Kill**.
+Thelivu is an autonomous investigative pipeline. It watches YouTube channels and RSS feeds for newsworthy signals, investigates the strongest leads using Gemini + Google Search, verifies claims, and writes drafts.
 
-Nothing publishes without your tap.
+**This doc's original framing — "sends drafts to you for Approve/Hold/Kill, nothing publishes without your tap" — is no longer how it works.** As of 2026-08-29 (Anil, explicit; narrowed once already on 2026-08-16), every story that clears editorial review publishes and posts on its own. Telegram still sends the draft card below as a **heads-up**, and Approve/Hold/Kill still work as manual overrides if you act before the sweep does — but no tap is required, ever, including for stories naming a real person alongside an allegation. See `engine/distribution/sweep.py`.
 
 ---
 
@@ -50,7 +50,7 @@ Both auto-deploy when you push to GitHub `main`.
 
 ---
 
-## The human gate
+## The Telegram card (heads-up, not a gate)
 
 Every story that clears the trust gate lands in your Telegram draft chat as a card:
 
@@ -64,11 +64,11 @@ Every story that clears the trust gate lands in your Telegram draft chat as a ca
 [✓ Approve]  [✗ Kill]  [⏸ Hold]
 ```
 
-- **Approve** → posts to @thelivu channel immediately (Telegraph + teaser)
-- **Kill** → discards the story permanently
+- **Approve** → posts to @thelivu channel immediately (Telegraph + teaser) — same as what happens automatically if you don't act
+- **Kill** → discards the story permanently — use this to stop the autopublish sweep from posting it
 - **Hold** → pauses it; the agent will auto-recheck after 3 days, or you can tap Re-check
 
-If the draft has a legal flag (LEGAL-FLAG: YES in the reviewer's output), the card shows a red ⚠️ warning and tells you NOT to approve until a legal read is done.
+If the draft has a legal flag (LEGAL-FLAG: YES in the reviewer's output), the card still shows a red ⚠️ warning — but it no longer blocks anything. It publishes on the same autopublish sweep as everything else; the warning is informational only, so you know to check it after the fact if you want to.
 
 ---
 

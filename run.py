@@ -196,12 +196,14 @@ if service == "thelivu-agent":
             log.error("Model health check failed: %s", e, exc_info=True)
             _sweep_failed("Model health check", e)
 
-        # Autonomy grant, 2026-08-16 (one-week trial, Saturday review): publish +
-        # post without a human tap ONLY for runs the reviewer explicitly cleared
-        # of legal/defamation risk (LEGAL-FLAG: NO). Anything else — including a
-        # missing verdict — still waits for the human gate exactly as before. See
-        # engine/distribution/sweep.py docstring before touching this — it also
-        # carries the incident note for the duplicate-post bug caught same-day.
+        # Autonomy grant, 2026-08-16, made permanent AND extended 2026-08-29
+        # (Anil, explicit): publish + post without a human tap for every run
+        # that clears normal editorial review — no legal/defamation carve-out
+        # left. Telegram still gets a heads-up per run; Anil's own stated
+        # fallback is deleting anything he judges unnecessary after the fact.
+        # See engine/distribution/sweep.py docstring before touching this — it
+        # also carries the incident note for the duplicate-post bug caught
+        # same-day as the original grant.
         #
         # ABOVE the breaker and budget governor (moved 2026-08-24 — was below
         # both, so the whole sweep silently stopped firing for hours every day

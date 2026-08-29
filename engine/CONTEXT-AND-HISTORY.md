@@ -53,10 +53,12 @@ It moved through three positions before settling:
   problem. Rebuild from the record; credit the tip.
 - **Oversimplification is the explainer's failure mode.** The clean, satisfying arc
   is the dangerous one. Keep the complication.
-- **The human gate is non-negotiable for anything carrying real legal exposure** —
-  enforced in code in the publisher. As of 2026-08-16 (trial) a story explicitly
-  cleared of naming a real person with an allegation publishes autonomously; see
-  `engine/distribution/sweep.py`. Everything else still requires the human tap.
+- **The human publish gate is gone (2026-08-29, Anil, explicit).** Every story
+  that clears editorial review publishes and posts autonomously, including
+  ones naming a real person alongside an allegation — see
+  `engine/distribution/sweep.py`. Telegram still gets a per-run heads-up;
+  Anil's stated fallback is deleting anything he judges unnecessary after
+  the fact, not reviewing before.
 
 ## The character of the project
 
