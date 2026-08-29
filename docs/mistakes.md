@@ -13,6 +13,37 @@ catch or undo by hand. Newest first. Use the template at the bottom.
 
 ---
 
+## 2026-08-29 — FLUX outage degraded every reel to text-only for 5-6 days, silently
+
+**What happened:** Anil: "why are there no images being generated? jus text
+and audio doesn't cut it." Checked reel history: every reel from #70 through
+#79 (2026-08-24 through today, 10 reels) rendered `kind='narrated'`
+(text-slide) instead of `'illustrated'`. Last illustrated reel was #69,
+2026-08-19.
+
+**Root cause:** Confirmed live, not inferred — FLUX.1-dev on the free NVIDIA
+key (`ai.api.nvidia.com/v1/genai/black-forest-labs/flux.1-dev`) is returning
+`500 Internal Server Error` on every call right now (tested twice directly,
+~75s each, both failed). An external provider outage, not a Thelivu bug.
+`make_reel.py` already handles this correctly — illustration failure falls
+back to text-slide rather than crashing the reel — but the fallback path was
+`log.warning`/`log.info` only, no alert. Five to six days of every single
+reel quietly downgrading with no signal anywhere Anil would see it.
+
+**Fix:** Added a Telegram alert (kv-throttled to once/day, same pattern as
+the budget alert) when the text-slide fallback fires, naming the actual
+cause so it reads as "FLUX is down" rather than "something's broken in
+Thelivu." Commit `e6b6e52`. Did not attempt to fix FLUX itself (external) or
+add a fallback image provider (a real option, but a bigger decision — new
+dependency, possible cost — flagged to Anil rather than done unprompted).
+
+**Also done same session:** held the 6 reels then sitting `ready`/unposted
+(#74-#79) as a precaution — all rendered before this session's caption-leak
+and reveal-pacing fixes, not individually re-verified, held rather than
+risking a pre-fix render going out. Re-render once ready.
+
+---
+
 ## 2026-08-29 — Caption reveal crawled for the whole beat on a short caption (live on Instagram)
 
 **What happened:** Reel #73 (run #194), posted and live, third caption-timing
