@@ -100,6 +100,28 @@ it is genuinely widely held in India too.
    the record that would complicate it. Two different searches.
 3. Keep only what survives both.
 
+## Where to look for the record half, by claim type
+
+A category is not a record — "widely noted" or "various historical accounts"
+in your RECORD field will be rejected before it ever reaches premise-check
+(`validate_candidate()` checks for this now). When you're stuck finding a
+named document rather than a vague sense that something's documented, these
+go straight to it:
+
+- **Phrase/word origin** — etymonline.com.
+- **What was actually reported at the time** — elephind.com (searchable
+  historical newspaper archive) — also useful for the CURRENCY half, to prove
+  a belief genuinely circulated rather than assuming it did.
+- **A specific paper or its citation record** — jstor.org, semanticscholar.org,
+  openalex.org, crossref.org.
+- **A statistical/trend claim** — ourworldindata.org.
+- **A leaked or primary investigative document** — documentcloud.org.
+
+Full list and reasoning: `engine/desks/ek/skills/record-builder/SKILL.md`'s
+"Primary-source shortcuts" section — record-builder does the deep version of
+this same search, so don't duplicate its effort here, just don't propose a
+candidate whose record you could have found in thirty seconds and didn't try.
+
 ## Output (exactly this, nothing else)
 
 For each candidate, in this format, separated by a blank line. Between three and

@@ -124,6 +124,42 @@ If you look and it genuinely is not findable, that is a real result — say so i
 COULD NOT ESTABLISH, and name what you searched for. The verifier needs to know
 the difference between "no such document" and "nobody looked".
 
+## Primary-source shortcuts, by claim type
+
+General web search finds *that* a source exists; these go straight to the kind
+of document this desk actually needs (Rule: "a category is not a source" above
+— these are how you skip past the category and land the work itself). Not a
+restriction — normal search still applies to everything else — just don't miss
+these when the claim fits:
+
+- **A word or phrase's origin, or a false etymology** — etymonline.com. Gives a
+  dated first-use and the actual derivation, which is exactly what settles a
+  `phrases-and-origins` piece.
+- **What was actually reported at the time** (a claim about period coverage,
+  contemporaneous reaction, or "nobody covered this then") — elephind.com,
+  a searchable historical newspaper archive. Directly answers "did this
+  circulate, and how was it framed, at the time" — the HOW IT CIRCULATES
+  section's own evidence bar.
+- **A specific academic paper or its citation record** — jstor.org,
+  semanticscholar.org, openalex.org, crossref.org (DOI metadata — use to
+  confirm a citation is real and get its exact venue/date, not just to find
+  new papers).
+- **A statistical or global-trend claim** (poverty, disease, crime, economic
+  trend lines) — ourworldindata.org. Sourced, dated, chartable — far better
+  than a remembered statistic.
+- **A leaked or primary investigative document** — documentcloud.org.
+- **An economics-specific paper or working-paper record** — repec.org.
+- **A patent priority date** (who actually filed an invention first) —
+  lens.org.
+- **A historical map or territorial-claim boundary at a point in time** —
+  oldmapsonline.org.
+- **A public-domain primary text** (the original work itself, not a summary
+  of it) — standardebooks.org.
+
+Added 2026-08-30, from a source list Anil flagged; picked for actually
+matching this desk's themes (`themes.yaml`) over general-purpose research
+tools that don't.
+
 ## Output (exactly this, nothing else)
 
 ```
