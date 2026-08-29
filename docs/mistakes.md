@@ -13,6 +13,46 @@ catch or undo by hand. Newest first. Use the template at the bottom.
 
 ---
 
+## 2026-08-29 — Same leak, different shape: the first fix didn't generalize
+
+**What happened:** Reel #72 (run #186), same class of bug as 2026-08-26 below
+— caught this time BEFORE posting (Anil: "check reel 72" -> "what is
+happening to this. all the reasoning and internal things are bleeding into
+the reel"). Two of six cards were broken: the HOOK_CAPTION read `"3-6 word
+text. Maybe:"` — a near-verbatim echo of SKILL.md's own `<3–6 word on-screen
+text>` template placeholder — and the CLOSE_CAPTION read the bare word
+`"Question"`, echoing the Close section's own prose description of itself
+("the question left hanging") as a category label rather than real text.
+
+**Root cause:** The 2026-08-26 fix (`_sane_caption()`) only checked for a
+`(N words)` parenthetical and a 14-word ceiling — a pattern matched to the
+ONE leaked string seen at the time, not the general class of problem. Neither
+signal fired here: no parentheses, and both leaks were short (5 words, 1
+word). The underlying issue is prompt ambiguity in `video-script/SKILL.md` —
+the model was confusing the format template's instructional placeholders and
+category descriptions for literal desired output, in two different spots in
+the same skill.
+
+**Fix:** Two layers, not one this time. (1) Source fix in `SKILL.md` itself —
+an explicit anti-pattern note naming both failures and what to write instead,
+matching how this codebase already prefers to fix generation problems over
+patching downstream. (2) Broadened `_sane_caption()`: a template-echo phrase
+check (no real caption says "on-screen text" or "word text") and an
+exact-match check against bare meta words (question/hook/close/caption/beat/
+title) a real caption never consists of alone. Verified against both leaked
+strings AND every caption in SKILL.md's own worked example (no false
+positives). Commit `54b5e69`.
+
+**Honest caveat:** this is the second regex-shaped patch for what is
+ultimately a semantic problem (the model narrating its own process instead of
+producing content) — the SKILL.md fix is the one actually addressing the
+cause; `_sane_caption()` is still pattern-matching known shapes and will keep
+being incomplete against a shape nobody's seen yet. If a third instance shows
+up with neither signal, the right move is probably a cheap LLM sanity check
+per caption (Haiku, one short classification call), not a third regex.
+
+---
+
 ## 2026-08-26 — Model's own word-count reasoning leaked onto a reel's on-screen caption
 
 **What happened:** Reel #71 (run #203, "Kerala's Disappearing Deficit")
