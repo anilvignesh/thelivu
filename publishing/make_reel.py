@@ -693,6 +693,27 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
                 n_frames = len(fields["beats"])
             else:
                 log.info("run #%s: falling back to text-slide frames", run_id)
+                # Silent until 2026-08-29: this was a log.warning/log.info only,
+                # no alert, so FLUX being down (500s, confirmed live -- not a
+                # Thelivu bug) degraded every reel to text-only for 5-6 days
+                # (reels #70-79, 2026-08-24 through today) before Anil noticed
+                # by watching them ("why are there no images being generated?
+                # jus text and audio doesn't cut it"). One Telegram ping per
+                # day, not per reel -- illustration can fail for a while in a
+                # row and this should say so once, not spam.
+                try:
+                    from shared.db import kv_get, kv_set
+                    from datetime import date
+                    today = date.today().isoformat()
+                    if kv_get("last_illustration_fail_alert") != today:
+                        kv_set("last_illustration_fail_alert", today)
+                        from engine.agents.orchestrator import _notify
+                        _notify("⚠️ Reel illustration has been failing (FLUX.1-dev "
+                                "on the free NVIDIA key) -- reels are rendering "
+                                "text-only until this clears. Not a Thelivu bug; "
+                                "check ai.api.nvidia.com's status if this persists.")
+                except Exception as e:
+                    log.warning("illustration-failure alert itself failed: %s", e)
                 # The text-slide look has nothing to vary per sub-shot, so a split
                 # would just restart the zoom on an identical frame — a visible
                 # stutter. Fall back to one shot per beat along with the look.
