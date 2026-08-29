@@ -10,7 +10,7 @@ Deliberately simple: no state of its own beyond one kv key, and it self-expires
 at midnight UTC because `daily_spend_usd()` only ever counts today.
 """
 
-DEFAULT_CAP_USD = 0.75
+DEFAULT_CAP_USD = 1.00
 CAP_KEY = "daily_budget_usd"
 MAX_CAP_USD = 20.0
 
