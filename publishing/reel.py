@@ -787,10 +787,39 @@ def build_reel(fields, dark, out_mp4, kicker=None, backend=None, render_frame=No
                 # glitch); landing a WORD reveal on one doesn't nearly as much, so
                 # the guaranteed-safe even split is the right tradeoff here, not a
                 # downgrade to fix around a bug worth debugging further.
-                reveal_cuts = [sub] if steps <= 1 else _split_duration(sub, steps)
+                # Reveal SPAN capped independently of the beat's own length
+                # (2026-08-29): even-split above only decided how many steps —
+                # it still divided the FULL beat duration `sub` among them, so
+                # a short caption (few steps) on a long beat stretched each
+                # word over several seconds regardless of word count. A
+                # 4-word caption on a 10.5s beat revealed one word every 2.6s
+                # — read as stalled, not synced (Anil: "the words come very
+                # slow, like appears... looks broken", reel #73/run #194).
+                # Fix: reveal at a natural per-word pace (floored/ceilinged),
+                # then hold the completed caption for whatever beat time is
+                # left — same total duration either way (still sums to `sub`
+                # exactly, VO stays in sync), the caption just stops crawling
+                # once it's said its piece instead of pacing itself to fill
+                # the whole beat. Falls back to the old full-span behavior
+                # when the natural pace wouldn't leave room to hold anyway
+                # (a long caption on a short beat — the case this was always
+                # fine for).
+                if steps <= 1:
+                    reveal_cuts = [sub]
+                    reveal_ns = [_reveal_word_count(caption, 0, 1)]
+                else:
+                    words_total = len((caption or "").split())
+                    target_span = min(sub, max(1.2, 0.42 * words_total))
+                    durs = _split_duration(target_span, steps)
+                    reveal_ns = [_reveal_word_count(caption, r, steps) for r in range(steps)]
+                    if sub - target_span >= MIN_REVEAL_SECS:
+                        reveal_cuts = durs + [sub - target_span]
+                        reveal_ns = reveal_ns + [words_total]  # hold, fully revealed
+                    else:
+                        reveal_cuts = _split_duration(sub, steps)  # no room to hold
                 frame_off = 0
                 for r, rsub in enumerate(reveal_cuts):
-                    reveal_n = _reveal_word_count(caption, r, len(reveal_cuts))
+                    reveal_n = reveal_ns[r]
                     png = work / f"f{i}_{j}_{r}.png"
                     # `caption` stays the FULL text every step — draw_frame's
                     # renderers wrap it once and reveal_words only toggles which
