@@ -1976,6 +1976,7 @@ def run_chief_of_staff():
     """Proactive follow-up sweep: work held/stale/dropped threads, check what moved
     on the open web, recommend recheck/requeue/kill/revive, and open new digs from
     patterns. Recommends and opens threads — never publishes."""
+    from shared.db import get_run
     log.info("Running chief-of-staff backlog sweep...")
     snapshot, counts = _build_cos_snapshot()
     if not any(counts.values()):
@@ -2035,8 +2036,29 @@ def run_chief_of_staff():
                     update_run(rid, status="recheck_requested")
                     actions_taken.append(f"🔬 rechecked run #{rid}")
                 elif action in ("requeue", "nudge"):
-                    update_run(rid, status="pending_human")
-                    actions_taken.append(f"📬 requeued run #{rid} to the gate")
+                    # get_all_runs_summary (runs_by_id, above) never selects
+                    # draft_text -- it's a lean query for meta-synthesis, so
+                    # `run.get("draft_text")` here was always None regardless
+                    # of the real DB state. Blindly setting pending_human
+                    # produced a broken row on any run that reached here
+                    # WITHOUT a draft (a HELD run, by design -- _run_spine's
+                    # KILL/HOLD branch never writes draft_text): status says
+                    # "ready for your review", the gate shows nothing to
+                    # review. Found 2026-08-29 -- 6 runs stuck this way back
+                    # to 2026-08-17, autopublish sweep silently retrying and
+                    # failing on all of them every tick ("no draft text").
+                    # A run reaching chief-of-staff CAN legitimately have a
+                    # draft already (e.g. a killed run -- draft_text is
+                    # retained on kill), so this isn't "always recheck" --
+                    # check the real row, not the summary's None.
+                    full = get_run(rid) or {}
+                    if (full.get("draft_text") or "").strip():
+                        update_run(rid, status="pending_human")
+                        actions_taken.append(f"📬 requeued run #{rid} to the gate")
+                    else:
+                        update_run(rid, status="recheck_requested")
+                        actions_taken.append(
+                            f"🔬 run #{rid} had no draft to requeue -- routed to recheck instead")
                 elif action == "kill":
                     update_run(rid, status="killed")
                     actions_taken.append(f"❌ killed run #{rid}")
