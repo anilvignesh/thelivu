@@ -150,15 +150,32 @@ these when the claim fits:
 - **A leaked or primary investigative document** — documentcloud.org.
 - **An economics-specific paper or working-paper record** — repec.org.
 - **A patent priority date** (who actually filed an invention first) —
-  lens.org.
+  lens.org, or the actual patent office directly for the priority filing
+  itself: USPTO (uspto.gov), EPO (worldwide.espacenet.com), WIPO
+  (patentscope.wipo.int).
 - **A historical map or territorial-claim boundary at a point in time** —
   oldmapsonline.org.
 - **A public-domain primary text** (the original work itself, not a summary
   of it) — standardebooks.org.
+- **The primary document is a scanned PDF/image with no extractable text**
+  (common for older gazette notifications, court orders, archival scans) —
+  run it through OCR.Space (ocr.space/ocrapi) and read the actual text
+  yourself, rather than trusting a secondary description of what it says.
+- **A primary URL is load-bearing for the piece** (a government page, a
+  court filing host, anything without a guaranteed mirror) — snapshot it at
+  retrieval time via the Wayback Machine's Save Page Now or archive.today,
+  and carry that archive URL alongside the live one. This is the direct fix
+  for a documented past failure: this desk's first piece cited six sources
+  and three were 404s by the time anyone checked (see the URL rule above) —
+  archiving at retrieval time is what stops that recurring.
 
 Added 2026-08-30, from a source list Anil flagged; picked for actually
 matching this desk's themes (`themes.yaml`) over general-purpose research
-tools that don't.
+tools that don't. Deliberately excludes news-aggregator/media-house APIs
+(Guardian, NYT, etc.) that were also in the source list — this desk's job is
+citing the primary record, not reprocessing another outlet's coverage of it;
+elephind.com stays because it's used to prove circulation, not as the
+evidence itself.
 
 ## Output (exactly this, nothing else)
 

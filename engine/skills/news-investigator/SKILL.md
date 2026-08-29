@@ -28,6 +28,27 @@ Before reading any news coverage, go to the primary records directly. Use web_se
 
 If the story came from a beat-monitor "join the dots" lead, explicitly cross-reference all databases the lead mentioned.
 
+### When the primary record is a scan, or the URL might not survive
+
+Two failure modes specific to primary-source work, not media coverage — added
+2026-08-30, Anil: this desk should be publishing from primary records, not
+referencing existing media houses, and both of these are exactly what breaks
+that when skipped:
+
+- **The document is a scanned PDF with no extractable text** — common for
+  older CAG reports, RTI disclosures, and court orders. Don't fall back to
+  secondary reporting *about* what the document says because you can't read
+  it directly. Run it through **OCR.Space** (ocr.space/ocrapi) first and read
+  the actual text yourself.
+- **A government/RTI/court URL is exactly the kind of link that disappears
+  or gets taken down later** — worse than an ordinary dead link, because
+  there's often no republish elsewhere. When a primary record is
+  load-bearing for the story, snapshot it at retrieval time (Wayback
+  Machine's Save Page Now, or archive.today) and carry the archive URL
+  alongside the live one in your citation. A citation to a page that no
+  longer exists when the verifier or a reader checks it is the same failure
+  as never having retrieved it.
+
 ## What to do
 
 1. **Pull the primary records first.** Court filings, FIRs, government/RBI/ECI data, regulatory and company disclosures, official transcripts, datasets, peer-reviewed work. Secondary reporting is a pointer to these, not a substitute.
