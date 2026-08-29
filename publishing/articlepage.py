@@ -131,7 +131,11 @@ _PAGE = """<!DOCTYPE html>
     font-size: 1rem; letter-spacing: .35em; text-indent: .35em;
     text-transform: uppercase; color: var(--fg); text-decoration: none;
   }}
-  h1 {{ font-size: 1.7rem; line-height: 1.25; margin-bottom: .9rem; }}
+  h1 {{
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+    font-weight: 700; letter-spacing: -.02em;
+    font-size: clamp(1.5rem, 5vw, 2rem); line-height: 1.18; margin-bottom: .9rem;
+  }}
   .meta {{
     font-family: 'DejaVu Sans Mono', ui-monospace, monospace;
     font-size: .8rem; opacity: .75; margin-bottom: 1.6rem;

@@ -73,6 +73,33 @@ sites.
   ever linked to from a public page — anything else has no file behind it yet.
 - No third-party CDN or asset host anywhere on `/`, `/bio`, or `/a/<slug>`.
 
+## Revision — hero + confidence-tiered hierarchy (2026-08-29, same day)
+
+First version was a uniform card grid — every story boxed identically, scroll-
+reveal was a generic one-shot fade. Anil's call: still read as "a generic
+scroll, a list." Rebuilt the feed's structure, not just its styling:
+
+- **The newest story runs as a full-bleed hero**, breaking out of the reading
+  column (`width: 100vw` / negative-margin trick), with **scroll-scrubbed**
+  media — GSAP `scrub: true` ties a slow zoom-settle to scroll position as the
+  hero passes under the viewport, not a one-shot animation. Degrades to a
+  static (slightly over-scaled but fully visible, `object-fit: cover` handles
+  the crop) image with no JS.
+- **Everything after the hero is tiered by confidence, not identical.**
+  `_CONF_TIER = {{confirmed: feature, developing: standard, contested: compact}}`
+  — Confirmed stories get wide media and prominent type; Developing stories run
+  a smaller side-by-side card; Contested stories drop media entirely and run
+  as a dense, text-only row. This is Thelivu's own editorial signal made
+  visible as layout, not a template's arbitrary visual rhythm.
+- **Typography**: display headlines (hero, feature, standard, compact) switched
+  to the system sans stack, bold, tight tracking (`letter-spacing: -.02em`) —
+  serif (Georgia) stays for hook/body copy. No new font asset to self-host;
+  this is the same pairing `articlepage.py`'s `<h1>` now uses too, for
+  consistency across `/` and `/a/<slug>`.
+- Confirmed against the same no-heading edge case that surfaced in prod on run
+  #207 (see below) — falls back to the "standard" tier with a blank title,
+  still links, does not crash the page.
+
 ## Not done here
 
 - No visual QA against the live Railway deploy yet (no way to browser-test
@@ -83,3 +110,13 @@ sites.
   calling this done.
 - No change to the Telegram bot, `MANUAL.md`, or the publish pipeline —
   this only touches how already-published stories are displayed.
+- **Run #207 has no heading in its draft at all** (surfaced by the first
+  deploy — `parse_article`'s own fallback promotes the first heading of any
+  level to title, but #207 has none, so `article.title` comes back empty).
+  Pre-existing in the draft/pipeline, not caused by this feature; the feed
+  and `/a/207` both handle it gracefully (blank title, link still works) but
+  the draft itself is worth a separate look.
+- Still no visual QA against the live deploy for this revision either — same
+  caveat as above, now also covering the hero scroll-scrub feel and whether
+  the confidence tiers read right against real story mix (a run of all-
+  Confirmed stories would show no visual hierarchy at all, for instance).

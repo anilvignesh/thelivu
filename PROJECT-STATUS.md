@@ -31,11 +31,28 @@ stay the lightest page on the site). Full design/decisions in
   slides). Full HTTP-level smoke test run locally (`fileserver.start()` +
   curl against `/`, `/bio`, `/static/*`, `/a/<bad-slug>`) — all correct.
 
-**Not yet done:** no visual QA against the live Railway deploy — local DB has
-zero published runs, so the feed/article changes have never been exercised
-against a real story with real reels/carousels. Worth a look on a phone once
-this deploys, especially the autoplay-in-view feel and slide spacing on a long
-piece.
+**Revised same day** after Anil's call that the first version still read as
+"a generic scroll, a list": rebuilt the feed's structure, not just styling.
+Newest story now runs as a full-bleed hero with GSAP scroll-scrubbed media
+(scrub tied to scroll position, degrades to a static image with no JS).
+Everything after it is tiered by confidence — Confirmed runs wide/prominent,
+Developing runs standard, Contested drops media and runs compact/dense —
+Thelivu's own editorial signal made visible as layout. Display headlines
+(hero/feature/standard/compact + articlepage.py's `<h1>`) switched to system
+sans, bold, tight tracking; body copy stays Georgia serif. Full detail in
+`docs/homepage-feed.md`.
+
+First deploy surfaced a real pre-existing data issue: **run #207 has no
+heading in its draft at all**, so its title comes back empty (parse_article's
+own any-level-heading fallback has nothing to promote). Not caused by this
+feature — `/a/207` already rendered a blank `<h1>` before it — but worth a
+separate look at that draft.
+
+**Not yet done:** no visual QA against the live Railway deploy for either
+revision — local DB has zero published runs, so this has never been exercised
+against a real story with real reels/carousels on a phone. Worth checking the
+hero scroll-scrub feel and whether the confidence tiers read right against
+the actual story mix once this deploys.
 
 ---
 
