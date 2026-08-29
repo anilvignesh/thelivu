@@ -6,6 +6,39 @@ state of the work — update it as you go. For how the engine runs, see
 
 ---
 
+## Homepage feed — the "just a list" bio page split into a real news feed (2026-08-29)
+
+Anil: the homepage read as "just a list." Built a real scroll feed at `/`, kept
+`/bio` unchanged (Instagram's in-app browser opens it from the bio tap — has to
+stay the lightest page on the site). Full design/decisions in
+`docs/homepage-feed.md`; summary:
+
+- `/` now shows published stories as cards — most recent posted reel plays
+  inline (autoplay-muted while in view via IntersectionObserver, pauses
+  otherwise), falling back to the carousel thumbnail, falling back to text-only.
+  Nothing new generated — this surfaces reels/carousels that already existed
+  but only ever reached Instagram/Telegram.
+- Article pages (`/a/<slug>`) now weave the story's illustrated carousel slides
+  inline as scroll-reveal figures, spaced through the piece, plus a reading-
+  progress bar.
+- GSAP + ScrollTrigger (v3.12.5) self-hosted in `publishing/static/`, served via
+  a new allowlisted `/static/<file>` route — no third-party CDN, same reasoning
+  as dropping Telegraph. Progressive enhancement throughout: every card/figure
+  is fully visible with zero JS.
+- New DB queries: `get_feed_items()`, `get_carousel_slides_for_run()` in
+  `shared/db.py` — both tested against fixture/in-memory SQLite data (a run
+  with two carousels correctly resolves to only the newest posted one's
+  slides). Full HTTP-level smoke test run locally (`fileserver.start()` +
+  curl against `/`, `/bio`, `/static/*`, `/a/<bad-slug>`) — all correct.
+
+**Not yet done:** no visual QA against the live Railway deploy — local DB has
+zero published runs, so the feed/article changes have never been exercised
+against a real story with real reels/carousels. Worth a look on a phone once
+this deploys, especially the autoplay-in-view feel and slide spacing on a long
+piece.
+
+---
+
 ## Kerala/CAG duplication fixed at the root — dig-creation blindness + paraphrase-proof dedup (2026-08-15)
 
 Anil flagged the pipeline as "obsessed with Kerala and CAG reports, so many similar

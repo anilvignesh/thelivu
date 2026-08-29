@@ -25,10 +25,34 @@ def _make_handler(slides_dir):
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
             name = self.path.lstrip("/").split("?")[0]
-            # The bio page lives at the root so the Instagram bio can point at
-            # the bare base URL. Rendered per request — the bot process writes
-            # bio_links and this process reads them, so there's nothing to cache.
-            if name in ("", "bio"):
+            # The real homepage: a scroll feed of published stories with their
+            # reel/carousel media. Rendered per request from the DB, same
+            # no-cache reasoning as everything else self-hosted here.
+            if name == "":
+                try:
+                    from publishing.feedpage import render_feed
+                    from shared.config import CHANNEL_PUBLIC_URL, CONTACT_HANDLE
+                    from shared.db import get_feed_items
+                    page = render_feed(get_feed_items(), CONTACT_HANDLE, CHANNEL_PUBLIC_URL).encode("utf-8")
+                except Exception as e:
+                    log.error("Feed page render failed: %s", e)
+                    self.send_response(500)
+                    self.end_headers()
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(page)))
+                self.send_header("Cache-Control", "no-cache")
+                self.end_headers()
+                self.wfile.write(page)
+                return
+            # The minimal "link in bio" page — kept deliberately separate from
+            # the feed above. Every slide footer says "Thelivu · link in bio"
+            # and Instagram's in-app browser opens it from the bio tap, so it
+            # stays the lightest, most self-contained page on the site.
+            # Rendered per request — the bot process writes bio_links and this
+            # process reads them, so there's nothing to cache.
+            if name == "bio":
                 try:
                     from publishing.biopage import render
                     from shared.config import CHANNEL_PUBLIC_URL
@@ -48,6 +72,29 @@ def _make_handler(slides_dir):
                 self.end_headers()
                 self.wfile.write(page)
                 return
+            # Self-hosted JS for the feed and article pages (GSAP + ScrollTrigger,
+            # see publishing/static/) — allowlisted by exact filename, same
+            # no-path-traversal posture as the slide serving below.
+            if name.startswith("static/"):
+                fname = name[len("static/"):]
+                if fname not in ("gsap.min.js", "ScrollTrigger.min.js"):
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                path = Path(__file__).parent / "static" / fname
+                if not path.is_file():
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                data = path.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/javascript; charset=utf-8")
+                self.send_header("Content-Length", str(len(data)))
+                # These files only change when we bump the GSAP version by hand.
+                self.send_header("Cache-Control", "public, max-age=86400")
+                self.end_headers()
+                self.wfile.write(data)
+                return
             # Self-hosted article pages: /a/<run_id>-<kebab-headline>. Rendered
             # per request from the approved draft in the DB — the human gate
             # holds because anything not status='published' 404s.
@@ -56,11 +103,12 @@ def _make_handler(slides_dir):
                     from publishing.articlepage import render_article, render_not_found
                     from publishing.parser import parse_article, prepare_for_publish
                     from shared.config import CONTACT_HANDLE
-                    from shared.db import get_run_by_slug
+                    from shared.db import get_run_by_slug, get_carousel_slides_for_run
                     run = get_run_by_slug(name[2:])
                     if run and run.get("status") == "published" and run.get("draft_text"):
                         article = parse_article(prepare_for_publish(run["draft_text"], CONTACT_HANDLE))
-                        page, code = render_article(article, run.get("updated_at")).encode("utf-8"), 200
+                        slides = get_carousel_slides_for_run(run["id"])
+                        page, code = render_article(article, run.get("updated_at"), slides).encode("utf-8"), 200
                     else:
                         page, code = render_not_found().encode("utf-8"), 404
                 except Exception as e:

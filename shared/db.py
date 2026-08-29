@@ -2744,6 +2744,72 @@ def get_run_by_slug(slug):
         conn.close()
 
 
+def get_feed_items(limit=30):
+    """Published stories for the public homepage feed (see publishing/feedpage.py):
+    id, slug, draft_text (parsed client-side via publishing.parser for title/hook/
+    confidence), updated_at, plus each story's most recent posted carousel (for a
+    thumbnail) and most recent ready/posted reel (for an inline video card).
+
+    'posted'/'approved_manual' and 'ready'/'posted' are deliberately the only
+    statuses shown — a queued or failed carousel/reel has no real file behind it
+    yet, so surfacing it would 404 the image/video for a reader."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(f"""
+            SELECT r.id, r.slug, r.draft_text, r.updated_at,
+                   (SELECT cr.id FROM carousel_runs cr
+                    WHERE cr.run_id = r.id AND cr.status IN ('posted', 'approved_manual')
+                    ORDER BY cr.id DESC LIMIT 1) AS carousel_id,
+                   (SELECT rl.id FROM reels rl
+                    WHERE rl.run_id = r.id AND rl.status IN ('ready', 'posted')
+                    ORDER BY rl.id DESC LIMIT 1) AS reel_id
+            FROM pipeline_runs r
+            JOIN publications p ON p.run_id = r.id
+            WHERE r.status = 'published' AND r.draft_text IS NOT NULL
+            ORDER BY r.updated_at DESC
+            LIMIT {ph}
+        """, (limit,))
+        return _fetchall(cur)
+    finally:
+        conn.close()
+
+
+def get_carousel_slides_for_run(run_id):
+    """Illustrated slides for a run's most recent posted carousel, or [] if none —
+    the article page (publishing/articlepage.py) weaves these into the story as
+    scroll-reveal figures. Same posted/approved_manual filter as get_feed_items,
+    for the same reason (no file behind a queued/failed carousel)."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(f"""
+            SELECT cs.position, cs.headline, cs.image_url
+            FROM carousel_slides cs
+            JOIN carousel_runs cr ON cr.id = cs.carousel_id
+            WHERE cr.run_id = {ph} AND cr.status IN ('posted', 'approved_manual')
+            ORDER BY cr.id DESC, cs.position ASC
+        """, (run_id,))
+        rows = _fetchall(cur)
+        if not rows:
+            return []
+        # Only the most recent carousel's slides — a run can have more than one
+        # carousel_runs row (retries), so keep whichever carousel_id the first
+        # (highest cr.id, per ORDER BY) row belongs to and drop the rest.
+        first_id_slides = []
+        seen_positions = set()
+        for row in rows:
+            if row["position"] in seen_positions:
+                break
+            seen_positions.add(row["position"])
+            first_id_slides.append(row)
+        return first_id_slides
+    finally:
+        conn.close()
+
+
 def add_bio_link(title, url, pinned=False):
     """Add a link to the public bio page. Deduped by URL: re-adding an existing
     URL updates its title instead of creating a second row (republishing a run

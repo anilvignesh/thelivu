@@ -8,7 +8,12 @@ pipeline_runs — see docs/article-hosting.md.
 
 Consumes the same neutral blocks as every other renderer (publishing.parser);
 palette mirrors the bio page and the slides. Self-contained HTML, mobile-first,
-readable inside Instagram's in-app browser.
+readable inside Instagram's in-app browser, except two same-origin self-hosted
+GSAP files (see publishing/static/, served by the /static/ route in
+fileserver.py) that add a reading-progress bar and scroll-reveal on the
+illustrated slide figures interleaved through the piece — see render_article's
+`slides` param. No third-party CDN. Progressive enhancement: every block and
+figure is fully visible with no JS at all.
 """
 import html
 import re
@@ -47,9 +52,29 @@ def _inline(s):
 _CALLOUT_TITLE = {"VIEW": "A view from the record — "}
 
 
-def _blocks_to_html(blocks):
+def _slide_figure(slide):
+    """One illustrated-carousel slide, interleaved into the article body as a
+    scroll-reveal figure. `slide`: a row from
+    shared.db.get_carousel_slides_for_run() — position, headline, image_url."""
+    headline = slide.get("headline") or ""
+    caption = f"<figcaption>{_inline(headline)}</figcaption>" if headline else ""
+    return (
+        f'<figure class="slide-figure" data-reveal>'
+        f'<img src="{html.escape(slide["image_url"], quote=True)}" loading="lazy" '
+        f'alt="{html.escape(headline, quote=True)}">{caption}</figure>'
+    )
+
+
+def _blocks_to_html(blocks, slides=None):
     out = []
-    for b in blocks:
+    # Slides space out evenly through the piece rather than clumping at the
+    # top — position 1 is the carousel's cover/hook slide, skipped here as
+    # redundant with the article's own H1. Whatever's left over (a piece
+    # shorter than expected) lands at the end rather than being dropped.
+    remaining = [s for s in (slides or []) if s.get("position", 1) != 1]
+    step = max(2, len(blocks) // (len(remaining) + 1)) if remaining else 0
+    next_slide_at = step
+    for i, b in enumerate(blocks):
         if b.type == "heading":
             lvl = min(max(b.level, 2), 4)  # the H1 slot belongs to the title
             out.append(f"<h{lvl}>{_inline(b.text)}</h{lvl}>")
@@ -68,6 +93,11 @@ def _blocks_to_html(blocks):
             out.append("<hr>")
         else:
             out.append(f"<p>{_inline(b.text)}</p>")
+        if remaining and i + 1 == next_slide_at:
+            out.append(_slide_figure(remaining.pop(0)))
+            next_slide_at += step
+    for s in remaining:  # piece was shorter than the step math assumed
+        out.append(_slide_figure(s))
     return "\n".join(out)
 
 
@@ -131,6 +161,16 @@ _PAGE = """<!DOCTYPE html>
   hr {{ border: none; border-top: 2px dashed var(--line); margin: 1.6rem auto; width: 6rem; }}
   a {{ color: var(--accent); }}
   em {{ opacity: .92; }}
+  #reading-progress {{
+    position: fixed; top: 0; left: 0; height: 3px; width: 0%;
+    background: var(--accent); z-index: 10;
+  }}
+  figure.slide-figure {{ margin: 1.8rem 0; }}
+  figure.slide-figure img {{ display: block; width: 100%; }}
+  figure.slide-figure figcaption {{
+    font-family: 'DejaVu Sans Mono', ui-monospace, monospace;
+    font-size: .78rem; opacity: .7; margin-top: .5rem; text-align: center;
+  }}
   footer {{ margin-top: 2.5rem; text-align: center; }}
   footer a {{
     font-family: 'DejaVu Sans Mono', ui-monospace, monospace;
@@ -140,6 +180,7 @@ _PAGE = """<!DOCTYPE html>
 </style>
 </head>
 <body>
+<div id="reading-progress"></div>
 <a class="brand" href="/">Thelivu</a>
 <article>
 <h1>{title}</h1>
@@ -147,6 +188,32 @@ _PAGE = """<!DOCTYPE html>
 {body}
 </article>
 <footer><a href="/">&larr; all Thelivu stories</a></footer>
+<script>
+(function() {{
+  var bar = document.getElementById('reading-progress');
+  function update() {{
+    var h = document.documentElement, height = h.scrollHeight - h.clientHeight;
+    bar.style.width = (height > 0 ? Math.min(100, (h.scrollTop / height) * 100) : 0) + '%';
+  }}
+  document.addEventListener('scroll', update, {{passive: true}});
+  update();
+}})();
+</script>
+<script src="/static/gsap.min.js"></script>
+<script src="/static/ScrollTrigger.min.js"></script>
+<script>
+(function() {{
+  if (!window.gsap || !window.ScrollTrigger) return;
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  gsap.registerPlugin(ScrollTrigger);
+  gsap.utils.toArray('[data-reveal]').forEach(function(el) {{
+    gsap.fromTo(el, {{opacity: 0, y: 24}}, {{
+      opacity: 1, y: 0, duration: .6, ease: 'power2.out',
+      scrollTrigger: {{trigger: el, start: 'top 90%'}}
+    }});
+  }});
+}})();
+</script>
 </body>
 </html>
 """
@@ -172,8 +239,10 @@ _NOT_FOUND = """<!DOCTYPE html>
 """
 
 
-def render_article(article, published_at=None):
-    """article: a publishing.parser.Article from the prepared draft."""
+def render_article(article, published_at=None, slides=None):
+    """article: a publishing.parser.Article from the prepared draft.
+    slides: rows from shared.db.get_carousel_slides_for_run(), or None/[] —
+    woven into the body as scroll-reveal figures, see _blocks_to_html."""
     date = ""
     if published_at:
         # both TIMESTAMP (postgres) and TEXT (sqlite) arrive stringifiable
@@ -185,7 +254,7 @@ def render_article(article, published_at=None):
         confidence=html.escape(article.confidence_label),
         confidence_emoji=article.confidence_emoji,
         date=date or "recently",
-        body=_blocks_to_html(article.blocks),
+        body=_blocks_to_html(article.blocks, slides),
     )
 
 
