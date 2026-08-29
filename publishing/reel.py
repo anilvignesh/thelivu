@@ -64,6 +64,24 @@ MAX_NEWS_CAPTION_WORDS = 14  # SKILL.md asks for 3-6; this is a generous ceiling
                              # not the target — it only exists to catch a caption
                              # that clearly isn't one anymore.
 
+# Second incident, same day (run #186/reel #72, caught before posting this
+# time): the self-talk regex above didn't fire because this leak had a
+# DIFFERENT shape — no parenthetical, only 5 words. The HOOK_CAPTION came back
+# as `"3-6 word text. Maybe:"`, a near-verbatim echo of SKILL.md's own
+# `<3–6 word on-screen text>` placeholder, and the CLOSE_CAPTION came back as
+# the bare word `"Question"`, echoing the Close section's prose description of
+# itself. Real fix is in the skill prompt (SKILL.md, same date) — this is the
+# backstop for whatever still slips through. Two independent, low-false-
+# positive signals: a literal echo of the skill's own instructional phrasing
+# (no real caption about a news story says "on-screen text" or "word text"),
+# and an EXACT match against a small set of bare meta/category words a real
+# caption would never consist of standing alone (contains-match would false-
+# positive on legitimate content like "Court questions ruling").
+_CAPTION_TEMPLATE_ECHO = re.compile(
+    r"\bon-?screen text\b|\bword text\b|\bconceptual illustration\b|\bspoken (?:line|opening|closing)\b",
+    re.IGNORECASE)
+_CAPTION_BARE_META_WORDS = {"question", "hook", "close", "caption", "beat", "title"}
+
 
 def _sane_caption(caption, spoken):
     """A beat's caption if it looks like an actual caption, else the spoken line
@@ -72,7 +90,10 @@ def _sane_caption(caption, spoken):
     cap = (caption or "").strip()
     if not cap:
         return spoken
-    if _CAPTION_SELF_TALK.search(cap) or len(cap.split()) > MAX_NEWS_CAPTION_WORDS:
+    bare = cap.strip(" .!?\"'").lower()
+    if (_CAPTION_SELF_TALK.search(cap) or _CAPTION_TEMPLATE_ECHO.search(cap)
+            or len(cap.split()) > MAX_NEWS_CAPTION_WORDS
+            or bare in _CAPTION_BARE_META_WORDS):
         log.warning("caption looked like leaked model reasoning, not on-screen "
                     "text — falling back to the spoken line: %r", cap[:120])
         return spoken

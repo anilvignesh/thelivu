@@ -118,6 +118,18 @@ Before final output, self-check spoken lines and captions against
   bait.
 - Every spoken line has a paired **CAPTION** beat: a tight on-screen version (most
   viewers watch muted) — not a transcript, the 3–6 word gist that reinforces the VO.
+  **A CAPTION line is the literal words a reader sees on screen, never a
+  description of what those words should be.** Caught live, twice (2026-08-29,
+  runs #203 and #186): a CAPTION came back as `"3-6 word text. Maybe:"` — an
+  echo of this very instruction's `<3–6 word on-screen text>` placeholder — and
+  separately as the bare word `"Question"`, echoing the Close section's own
+  description of itself ("the question left hanging") as if labeling the
+  beat's TYPE rather than writing its actual text. Both shipped to Instagram
+  before being caught. If you notice yourself about to write something that
+  describes the caption instead of being it — a word count, "Maybe:", a
+  category name — stop and write the real short phrase instead. `HOOK_CAPTION:
+  Do we have the water to burn?` is correct; `HOOK_CAPTION: 3-6 word text` and
+  `CLOSE_CAPTION: Question` are exactly the failure this note exists to name.
 - Every beat also gets an **IMAGE** line: a one-sentence description of a
   *conceptual illustration* for that beat. Rules, and they are brand rules, not
   taste: **symbolic, never literal or photographic.** Objects, diagrams, simple
