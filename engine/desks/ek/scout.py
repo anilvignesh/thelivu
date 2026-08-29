@@ -117,6 +117,25 @@ MAX_CANDIDATES_PER_RUN = 12
 MIN_BELIEF_CHARS = 20
 MAX_BELIEF_CHARS = 400   # pipeline.py truncates throughline at 400; reject rather than truncate
 
+# Diagnosed 2026-08-30 (Anil: "we are not creating enough good content from
+# the desk"): validate_candidate() checked CURRENCY/RECORD were non-empty but
+# not that they said anything. A candidate whose RECORD field reads "widely
+# noted" or "various historical accounts" passed unchanged, then burned a
+# premise-check call and, if pursued, a full paid research pass before dying
+# at record-verifier — for a defect visible right here for free. The scout's
+# own skill already states the rule ("'NASA material' is not a record") as a
+# late-stage instruction; this is the first place it's actually enforced.
+# A blocklist, not a parser — cheap, auditable, extend the phrase list as new
+# vague shapes turn up rather than building a real classifier for this.
+_VAGUE_EVIDENCE_PHRASES = (
+    "widely noted", "widely reported", "widely believed", "widely held",
+    "various accounts", "various sources", "various reports",
+    "numerous accounts", "many accounts", "several accounts",
+    "reports suggest", "it is said", "it is often said", "commonly cited",
+    "commonly believed", "well known", "well-known", "generally accepted",
+    "historical accounts", "historical record shows",
+)
+
 # In-process only, and deliberately so: this is a back-off, not state. A restart
 # losing it costs one extra queue check, which is the right way round — the
 # cadence itself lives in kv where a restart cannot touch it.
@@ -214,6 +233,16 @@ def parse_candidates(text):
     return out
 
 
+def _vague_evidence_phrase(text):
+    """The first blocklisted vague-evidence phrase found in `text`, or None.
+    See _VAGUE_EVIDENCE_PHRASES above for what this catches and why."""
+    low = (text or "").lower()
+    for phrase in _VAGUE_EVIDENCE_PHRASES:
+        if phrase in low:
+            return phrase
+    return None
+
+
 def validate_candidate(c):
     """Empty string if this candidate is worth a gate call, else why not.
 
@@ -223,6 +252,12 @@ def validate_candidate(c):
     drops the trailing fields first, so the block that survives a truncated
     response is exactly the one that has neither — and that is the shape of
     candidate that burns a whole research pass for nothing.
+
+    Also rejects a CURRENCY/RECORD that's present but category-shaped rather
+    than a real citation (2026-08-30) — presence alone let "widely noted" or
+    "various historical accounts" through unchanged, which the scout's own
+    skill already calls disqualifying ("'NASA material' is not a record") but
+    nothing mechanically enforced before now.
     """
     b = (c.get("belief") or "").strip()
     if len(b) < MIN_BELIEF_CHARS:
@@ -231,10 +266,18 @@ def validate_candidate(c):
         return f"longer than {MAX_BELIEF_CHARS} chars — a belief is one sentence"
     if "<" in b and ">" in b:
         return "looks like the output template, not a filled-in belief"
-    if not (c.get("currency") or "").strip():
+    currency = (c.get("currency") or "").strip()
+    if not currency:
         return "no CURRENCY — nothing showing the belief is actually held (the strawman risk)"
-    if not (c.get("record") or "").strip():
+    vague = _vague_evidence_phrase(currency)
+    if vague:
+        return f"CURRENCY reads as a category, not evidence (found {vague!r}) — the strawman risk"
+    record = (c.get("record") or "").strip()
+    if not record:
         return "no RECORD — names no document a reader could open"
+    vague = _vague_evidence_phrase(record)
+    if vague:
+        return f"RECORD reads as a category, not a named document (found {vague!r})"
     return ""
 
 
@@ -504,6 +547,52 @@ def _reclaim_stale_runs():
     return len(stale)
 
 
+# Diagnosed 2026-08-30 (Anil: "we are not creating enough good content from
+# the desk"): promotion was pure FIFO with zero quality signal, even though
+# engine/desks/ek/learning.py has tracked which THEMES actually survive to
+# publication since 2026-08-18 — that data sat unused for ordering. Fixed as
+# a BOUNDED nudge, not a filter, per learning.py's own explicit rule ("must
+# never suppress a theme... because it scored low"): among proposals still
+# within this window, prefer the strongest-scoring theme; anything older than
+# the window promotes regardless of theme, no exceptions, so a proposal can
+# be passed over for a better-themed sibling but never starved indefinitely.
+PROPOSAL_AGE_CAP_DAYS = 7
+
+
+def _pick_next_proposal(props):
+    """Which `proposed` row to promote next. `props` comes back newest-first
+    from list_belief_queue (props[-1] is the oldest) — plain FIFO unless the
+    learned theme priors clearly favor a fresher sibling; see
+    PROPOSAL_AGE_CAP_DAYS above for the bound on how long that can matter."""
+    from datetime import datetime, timezone, timedelta
+
+    oldest = props[-1]
+    created = oldest.get("created_at")
+    if created is not None:
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) - created >= timedelta(days=PROPOSAL_AGE_CAP_DAYS):
+            return oldest  # aged past the nudge window — FIFO wins, full stop
+
+    try:
+        from engine.desks.ek.learning import compute_learned_priors, MIN_EFFECTIVE_N
+        priors = compute_learned_priors()
+    except Exception as e:
+        log.warning("EK learned priors unavailable for promotion, using plain FIFO: %s", e)
+        return oldest
+
+    def _theme_score(row):
+        theme = (row.get("theme") or "").strip().lower()
+        if not theme:
+            return 0.5  # no theme recorded — neutral, not a penalty
+        score, n = priors.get(f"theme:{theme}", (0.5, 0.0))
+        return score if n >= MIN_EFFECTIVE_N else 0.5  # not enough data yet — neutral
+
+    # Oldest-first iteration so a tie (the common case while data is thin)
+    # resolves to the oldest proposal — same tie-break plain FIFO would give.
+    return max(reversed(props), key=_theme_score)
+
+
 def _promote_a_proposal():
     """Only when belief_auto_pursue is on. Tops the queue up toward
     MAX_AUTO_QUEUE_DEPTH rather than only firing when it is completely empty —
@@ -520,7 +609,7 @@ def _promote_a_proposal():
     props = list_belief_queue(status="proposed", limit=50)
     if not props:
         return None
-    row = props[-1]  # the list comes back newest-first; take the oldest proposal
+    row = _pick_next_proposal(props)
     set_belief_status(row["id"], "queued", result="auto-pursued (belief_auto_pursue)")
     log.info("belief cycle: auto-pursuing proposal #%s (queue depth was %d)",
               row["id"], len(queued))
