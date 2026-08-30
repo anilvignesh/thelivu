@@ -37,6 +37,8 @@ export CONTACT_HANDLE="$(getv CONTACT_HANDLE)"
 export IG_USER_ID="$(getv IG_USER_ID)"
 export IG_ACCESS_TOKEN="$(getv IG_ACCESS_TOKEN)"
 export NVIDIA_API_KEY="$(getv NVIDIA_API_KEY)"
+export CLOUDFLARE_API_TOKEN="$(getv CLOUDFLARE_API_TOKEN)"
+export CLOUDFLARE_ACCOUNT_ID="$(getv CLOUDFLARE_ACCOUNT_ID)"
 export DASHBOARD_PASSWORD="thelivu"
 
 # Don't double-launch if one is already serving 8600.

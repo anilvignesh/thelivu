@@ -49,10 +49,17 @@ NVIDIA transport itself fails (not a content refusal — those still walk
 `prompt_ladder` against NVIDIA, since a second host of the same weights earns
 the same refusal). No-op with `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID`
 unset — Anil holds the actual credentials (his Cloudflare account, this
-session can't log in as him), needs to set both in the laptop's `.env`
-(see `.env.example`) before this path does anything. Verified with mocked
-requests: NVIDIA-down-Cloudflare-rescues, no-creds-configured-unchanged, and
-both-down-still-falls-through-cleanly all behave as designed.
+session can't log in as him). First pass of this note told him to set them in
+"the laptop's `.env`" — wrong: this repo has no real `.env` loader anywhere
+(`.env.example` is only ever a copy-into-Railway checklist, see SETUP.md
+step 3); `command_center/run.sh` pulls every one of these vars, including
+`NVIDIA_API_KEY`, from Railway's "thelivu" service at boot and exports them
+into the local process that actually renders reels. Corrected: both need to
+go into Railway → Variables (same place as `NVIDIA_API_KEY`), and
+`command_center/run.sh` now pulls+exports the two new ones alongside it.
+Verified with mocked requests: NVIDIA-down-Cloudflare-rescues,
+no-creds-configured-unchanged, and both-down-still-falls-through-cleanly all
+behave as designed.
 
 ---
 
