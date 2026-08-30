@@ -952,6 +952,28 @@ async def cmd_setbudget(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else f"Daily budget cap set to ${cap:.2f}. Model stages park at the cap "
              f"and resume at midnight UTC."
     )
+
+
+async def cmd_pauseposting(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Stop autoposting reels/carousels to Instagram/YouTube (2026-08-30) —
+    Anil, after a no-illustration reel and a caption-pacing issue: "I would
+    rather stop posting rather than posting this shit." Drafting, review, and
+    rendering keep running underneath; only the final post step pauses, so
+    nothing already in flight is lost. See engine/distribution/sweep.py's
+    AUTOPOST_PAUSE_KEY."""
+    from shared.db import kv_set
+    kv_set("autopost_paused", "1")
+    await update.message.reply_text(
+        "⏸ Autoposting paused — reels/carousels will build and queue as usual "
+        "but won't post to Instagram/YouTube. /resumeposting to turn back on."
+    )
+
+
+async def cmd_resumeposting(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Undo /pauseposting."""
+    from shared.db import kv_set
+    kv_set("autopost_paused", "")
+    await update.message.reply_text("▶️ Autoposting resumed.")
     log.info("Daily budget cap set to %s", cap)
 
 
@@ -1613,6 +1635,8 @@ def main():
     app.add_handler(CommandHandler("sources", cmd_sources))
     app.add_handler(CommandHandler("setcost", cmd_setcost))
     app.add_handler(CommandHandler("setbudget", cmd_setbudget))
+    app.add_handler(CommandHandler("pauseposting", cmd_pauseposting))
+    app.add_handler(CommandHandler("resumeposting", cmd_resumeposting))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("search", cmd_search))
     app.add_handler(CommandHandler("watchlist", cmd_watchlist))

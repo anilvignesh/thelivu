@@ -291,13 +291,30 @@ def _autopublish_pending_runs():
                            run_id, desk, result)
 
 
+AUTOPOST_PAUSE_KEY = "autopost_paused"
+
+
 def _autopost_ready_slot():
     """Fixed-schedule poster for BOTH reels and carousels (2026-08-30) — see
     POST_SLOTS_IST's comment above. One post per window, reel preferred over
     carousel (empirically ~10x the reach), news desk preferred over EK/GK
     within whichever format wins, nothing posted if nothing eligible is
-    ready in either format — not mandatory."""
+    ready in either format — not mandatory.
+
+    Manual kill switch (AUTOPOST_PAUSE_KEY, 2026-08-30): Anil, after a reel
+    posted with no illustrations (FLUX outage, fell back to text-slides) and
+    another with a caption-reveal pacing problem — "I would rather stop
+    posting rather than posting this shit." This only pauses POSTING to
+    Instagram/YouTube; drafting, editorial review, and reel rendering keep
+    running underneath so nothing is lost, and whatever's ready is still
+    there once resumed. Toggle via the Telegram bot: /pauseposting,
+    /resumeposting. Does NOT touch _autopublish_pending_runs (publishing the
+    article to the website) — that's text, unaffected by either bug."""
     from shared.db import get_ready_reels, get_pending_carousels, get_run, kv_get, kv_set
+
+    if kv_get(AUTOPOST_PAUSE_KEY):
+        return  # posting paused — see docstring above
+
     from publishing.publish import post_reel_run, post_carousel_run
 
     now = datetime.now(timezone.utc)
