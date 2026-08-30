@@ -13,6 +13,56 @@ catch or undo by hand. Newest first. Use the template at the bottom.
 
 ---
 
+## 2026-08-30 — Text-slide fallback reels were flat and dull, on top of the FLUX outage
+
+**What happened:** Follow-up to the FLUX outage below (still ongoing). Anil,
+after that explanation: "its fine if we fallback to text, but it should be
+engaging, right now its not." Correct — every beat of a text-slide reel wore
+`_render_frame`'s plain solid-colour plate: same flat background, every beat,
+every reel, no depth or texture at all.
+
+**Root cause:** Not a bug, a gap — `make_reel.py` never had a reason to make
+the text-slide fallback look good, because it was meant to be rare. The
+codebase already builds exactly this kind of textured background: 
+`render_house_ground()` (`publishing/reel_illustrated.py`) draws a local,
+FLUX-free ink gradient + soft glow + paper grain, deterministic per beat, and
+has been used since the Guatemala-1954 refusal incident for the ONE beat a
+reel's illustration step refuses — just never for the case where every beat
+falls back at once.
+
+**Fix:** When illustration fails for the whole reel, every beat now gets its
+own `render_house_ground` field (seeded per beat index, so they differ) and
+renders through the same `draw_illustrated_frame`/`make_renderer` path a real
+illustrated reel uses — same masthead, caption treatment and progress bar, a
+texture standing in for a scene instead of a flat plate. Costs no FLUX call,
+so it holds up for as long as the outage lasts. `kind` stays `"narrated"` —
+no beat's actual content is depicted, so calling it "illustrated" would be
+dishonest. Commit pending on `claude/reels-image-text-issues-kk5z2h`.
+
+**Same session, follow-up:** Anil asked whether a better/more reliable image
+model than FLUX.1-dev exists. Researched and proposed: the actual failure was
+NVIDIA's endpoint, not FLUX the model, so provider redundancy for the same
+model beats a full model switch (which is a bigger call on cost/licensing,
+flagged not done). Implemented: `publishing/illustrate.py` now tries
+FLUX.1-schnell on Cloudflare Workers AI (free tier) once, only when the
+NVIDIA transport itself fails (not a content refusal — those still walk
+`prompt_ladder` against NVIDIA, since a second host of the same weights earns
+the same refusal). No-op with `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID`
+unset — Anil holds the actual credentials (his Cloudflare account, this
+session can't log in as him). First pass of this note told him to set them in
+"the laptop's `.env`" — wrong: this repo has no real `.env` loader anywhere
+(`.env.example` is only ever a copy-into-Railway checklist, see SETUP.md
+step 3); `command_center/run.sh` pulls every one of these vars, including
+`NVIDIA_API_KEY`, from Railway's "thelivu" service at boot and exports them
+into the local process that actually renders reels. Corrected: both need to
+go into Railway → Variables (same place as `NVIDIA_API_KEY`), and
+`command_center/run.sh` now pulls+exports the two new ones alongside it.
+Verified with mocked requests: NVIDIA-down-Cloudflare-rescues,
+no-creds-configured-unchanged, and both-down-still-falls-through-cleanly all
+behave as designed.
+
+---
+
 ## 2026-08-29 — FLUX outage degraded every reel to text-only for 5-6 days, silently
 
 **What happened:** Anil: "why are there no images being generated? jus text
