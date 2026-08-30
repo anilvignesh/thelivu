@@ -13,6 +13,40 @@ catch or undo by hand. Newest first. Use the template at the bottom.
 
 ---
 
+## 2026-08-30 — Text-slide fallback reels were flat and dull, on top of the FLUX outage
+
+**What happened:** Follow-up to the FLUX outage below (still ongoing). Anil,
+after that explanation: "its fine if we fallback to text, but it should be
+engaging, right now its not." Correct — every beat of a text-slide reel wore
+`_render_frame`'s plain solid-colour plate: same flat background, every beat,
+every reel, no depth or texture at all.
+
+**Root cause:** Not a bug, a gap — `make_reel.py` never had a reason to make
+the text-slide fallback look good, because it was meant to be rare. The
+codebase already builds exactly this kind of textured background: 
+`render_house_ground()` (`publishing/reel_illustrated.py`) draws a local,
+FLUX-free ink gradient + soft glow + paper grain, deterministic per beat, and
+has been used since the Guatemala-1954 refusal incident for the ONE beat a
+reel's illustration step refuses — just never for the case where every beat
+falls back at once.
+
+**Fix:** When illustration fails for the whole reel, every beat now gets its
+own `render_house_ground` field (seeded per beat index, so they differ) and
+renders through the same `draw_illustrated_frame`/`make_renderer` path a real
+illustrated reel uses — same masthead, caption treatment and progress bar, a
+texture standing in for a scene instead of a flat plate. Costs no FLUX call,
+so it holds up for as long as the outage lasts. `kind` stays `"narrated"` —
+no beat's actual content is depicted, so calling it "illustrated" would be
+dishonest. Commit pending on `claude/reels-image-text-issues-kk5z2h`.
+
+**Not yet done:** Anil separately asked whether a better/more reliable image
+model than FLUX.1-dev exists for this job — researched and proposed
+(provider redundancy for the same model looks like the actual fix for the
+outage itself; a full model switch is a bigger call on cost/licensing), not
+implemented pending his say-so.
+
+---
+
 ## 2026-08-29 — FLUX outage degraded every reel to text-only for 5-6 days, silently
 
 **What happened:** Anil: "why are there no images being generated? jus text

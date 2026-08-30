@@ -646,7 +646,9 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
     #    reads as broken, so that mix is never shipped: a refused beat gets a frame
     #    drawn in the illustrated look instead (the house ground), and only when more
     #    than MAX_HOUSE_CARDS beats go unillustrated does the WHOLE reel drop back to
-    #    text slides. See `_illustrate`.
+    #    text slides — which themselves now wear the house-ground look on every beat
+    #    (2026-08-30) rather than a flat plate, so a FLUX outage no longer means a
+    #    plain reel, just a texture-not-a-scene one. See `_illustrate`.
     with tempfile.TemporaryDirectory(prefix="mkreel_") as tmp:
         tmpdir = Path(tmp)
         render_frame, kind, n_frames = None, "narrated", len(fields["beats"])
@@ -718,6 +720,35 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
                 # would just restart the zoom on an identical frame — a visible
                 # stutter. Fall back to one shot per beat along with the look.
                 shots_per_beat = None
+                # Anil (2026-08-30), on the flat-plate look this used to fall back
+                # to: "its fine if we fallback to text, but it should be engaging,
+                # right now its not." The flat solid-colour `_render_frame` plate
+                # was the whole problem — every beat of every text-only reel wore
+                # the identical background. `render_house_ground` already exists
+                # for exactly this look (the single-refused-beat case just above)
+                # and needs no FLUX call at all: a locally-rendered ink gradient +
+                # soft glow + grain, seeded per beat so each one differs. Reusing
+                # it for every beat here, through the SAME illustrated-look
+                # renderer (`draw_illustrated_frame`) real illustrations use, buys
+                # the full-reel fallback the same masthead/caption/progress-bar
+                # polish an art-backed reel gets — the honest difference from a
+                # real illustrated reel is a texture instead of a scene, not a
+                # flat card. `kind` stays "narrated": no beat's actual content is
+                # depicted, so it would be dishonest to call this "illustrated".
+                try:
+                    from publishing.reel_illustrated import (render_house_ground,
+                                                              make_renderer)
+                    grounds = []
+                    for i in range(len(fields["beats"])):
+                        g = tmpdir / f"ground_{i}.png"
+                        render_house_ground(g, variant=i,
+                                            bright=(presentation_style == "bright"))
+                        grounds.append(g)
+                    render_frame = make_renderer(grounds)
+                except Exception as e:
+                    log.warning("run #%s: house-ground fallback failed (%s) — "
+                                "using the flat text-slide plate instead",
+                                run_id, e)
 
         # 5) Render — ffmpeg over the already-voiced beats. The backend is still passed
         #    because the appended sign-off beat has no pre-voiced wav: it is empty
