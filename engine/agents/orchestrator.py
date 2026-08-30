@@ -87,6 +87,21 @@ _M_VERDICT  = MARK("VERDICT", "PURSUE|DROP")
 _M_DOSSIER  = r"^#{1,3}\s+(Evidence Dossier|Claims|Handoff note)"
 _M_CAROUSEL = r"^[*_`]*SLIDE\s+1:\s*.+"
 
+# Diagnosed 2026-08-30 (run #209, Anil: "run 209 failed, why?"): news-investigator
+# never passed max_tokens, so run_structured_skill's 4096 default floored to
+# Gemini's own 8192 minimum (skill_runner.run_skill) -- and Gemini's "thinking"
+# tokens draw from that SAME output budget, so a genuinely information-dense
+# story (this one: named individuals, an exact form count, multiple agencies)
+# truncated mid-dossier with finish_reason=MAX_TOKENS, never produced a usable
+# result, and the run was correctly dropped to needs_attention after repeated
+# failures rather than proceeding on broken output. Same root cause, same fix
+# already applied to belief-scout (engine/desks/ek/scout.py's SCOUT_MAX_TOKENS,
+# "16k rather than 8k... a grounded search... at 8192 came close enough to the
+# ceiling") -- news-investigator's own multi-database primary-source search
+# (myneta, zaubacorp/tofler, CAG, courts, RBI/SEBI, sansad, RTI, PFMS) is at
+# least as demanding, and had never gotten the same headroom.
+_INVESTIGATOR_MAX_TOKENS = 16384
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -744,7 +759,8 @@ def _revision_loop(brief, dossier, verification, pattern, draft, run_id, topic_l
         )
         dossier = run_structured_skill(
             "news-investigator", _with_brief(brief, revision_prompt),
-            marker=_M_DOSSIER, run_id=run_id, topic=topic_label)
+            marker=_M_DOSSIER, max_tokens=_INVESTIGATOR_MAX_TOKENS,
+            run_id=run_id, topic=topic_label)
 
     if wri_tasks:
         log.info("Re-running writer with revision tasks...")
@@ -992,7 +1008,8 @@ def _run_spine(brief, investigate_input, run_id, topic_label, display_label,
     try:
         dossier = run_structured_skill(
             "news-investigator", _with_brief(brief, investigate_input),
-            marker=_M_DOSSIER, run_id=run_id, topic=topic_label)
+            marker=_M_DOSSIER, max_tokens=_INVESTIGATOR_MAX_TOKENS,
+            run_id=run_id, topic=topic_label)
         verification = run_structured_skill(
             "source-verifier", _with_brief(brief, f"EVIDENCE DOSSIER TO VERIFY:\n\n{dossier}"),
             marker=_M_GATE, run_id=run_id, topic=topic_label)
