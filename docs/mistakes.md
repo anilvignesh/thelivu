@@ -39,11 +39,20 @@ so it holds up for as long as the outage lasts. `kind` stays `"narrated"` —
 no beat's actual content is depicted, so calling it "illustrated" would be
 dishonest. Commit pending on `claude/reels-image-text-issues-kk5z2h`.
 
-**Not yet done:** Anil separately asked whether a better/more reliable image
-model than FLUX.1-dev exists for this job — researched and proposed
-(provider redundancy for the same model looks like the actual fix for the
-outage itself; a full model switch is a bigger call on cost/licensing), not
-implemented pending his say-so.
+**Same session, follow-up:** Anil asked whether a better/more reliable image
+model than FLUX.1-dev exists. Researched and proposed: the actual failure was
+NVIDIA's endpoint, not FLUX the model, so provider redundancy for the same
+model beats a full model switch (which is a bigger call on cost/licensing,
+flagged not done). Implemented: `publishing/illustrate.py` now tries
+FLUX.1-schnell on Cloudflare Workers AI (free tier) once, only when the
+NVIDIA transport itself fails (not a content refusal — those still walk
+`prompt_ladder` against NVIDIA, since a second host of the same weights earns
+the same refusal). No-op with `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID`
+unset — Anil holds the actual credentials (his Cloudflare account, this
+session can't log in as him), needs to set both in the laptop's `.env`
+(see `.env.example`) before this path does anything. Verified with mocked
+requests: NVIDIA-down-Cloudflare-rescues, no-creds-configured-unchanged, and
+both-down-still-falls-through-cleanly all behave as designed.
 
 ---
 

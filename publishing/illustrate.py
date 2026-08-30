@@ -1,4 +1,5 @@
-"""Conceptual illustrations for reel beats — FLUX.1-dev on the free NVIDIA key.
+"""Conceptual illustrations for reel beats — FLUX.1-dev on the free NVIDIA key,
+with FLUX.1-schnell on Cloudflare Workers AI as a secondary provider.
 
 The lane is **conceptual illustration**: symbolic, non-photoreal, no text and no
 recognisable real faces. That is a brand rule, not an aesthetic preference — an
@@ -8,6 +9,19 @@ the one thing Thelivu sells. Symbols are honest; fake evidence is not.
 Local-only by nature: Railway never renders reels (no GPU, no voice server), so
 this runs on the laptop as part of the make-reel job. Free — FLUX.1-dev is on
 the same NVIDIA key as the Gemma script model.
+
+**Second provider (2026-08-30):** the 2026-08-24 to -29 outage (docs/mistakes.md)
+was NVIDIA's hosted endpoint 500ing for 5-6 days straight, not FLUX the model
+being bad — so the fix for THAT failure mode is a second, independently-hosted
+copy of the same model family, not a different model. Cloudflare Workers AI
+serves FLUX.1-schnell (`@cf/black-forest-labs/flux-1-schnell`) free on its
+10,000-Neurons/day allowance, on infra that shares nothing with NVIDIA's — when
+one is down the other usually isn't. It only fires when the NVIDIA call itself
+fails to transport (connection error, exhausted 5xx retries) — a content
+refusal still walks `prompt_ladder` against NVIDIA as before, since a second
+host of the same weights mostly earns the same refusal. Optional: with no
+CLOUDFLARE_API_TOKEN/CLOUDFLARE_ACCOUNT_ID set, this path is simply skipped and
+behaviour is unchanged from before it existed.
 """
 
 import base64
@@ -18,6 +32,10 @@ import re
 log = logging.getLogger("illustrate")
 
 FLUX_URL = "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.1-dev"
+CF_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
+CF_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN", "")
+CF_FLUX_URL = ("https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/"
+              "@cf/black-forest-labs/flux-1-schnell")
 # 9:16-ish at a size the endpoint accepts; frames are resized to 1080x1920.
 GEN_W, GEN_H = 768, 1344
 
@@ -432,6 +450,47 @@ def generate_beat_images(scenes, out_dir, *, seed=7, progress=None, place=None,
         data = base64.b64decode(art["base64"])
         return data if len(data) >= MIN_IMAGE_BYTES else None
 
+    def _try_cloudflare(prompt, img_seed):
+        """Secondary provider, only reached when the NVIDIA transport itself failed
+        (see the `except` below) — same model family, independent infra. Cloudflare's
+        flux-1-schnell takes no width/height (fixed native size); `draw_illustrated_frame`
+        already resizes whatever it gets to 1080x1920, same as it does for FLUX.1-dev's
+        768x1344, so this costs a slightly different crop, not a broken frame.
+
+        Returns None (not raise) on any failure — this is already the fallback path,
+        so its own failure should read as "no secondary either", not blow up the beat
+        loop with a second traceback.
+        """
+        if not (CF_ACCOUNT_ID and CF_API_TOKEN):
+            return None
+
+        def _once():
+            full = f"{_BLANK}{_place_clause(place)}{prompt} {ground}"
+            r = requests.post(
+                CF_FLUX_URL.format(account=CF_ACCOUNT_ID),
+                headers={"Authorization": f"Bearer {CF_API_TOKEN}"},
+                json={"prompt": full, "seed": img_seed, "steps": 8},
+                timeout=60,
+            )
+            r.raise_for_status()
+            return r.json()
+
+        try:
+            # Cloudflare's own free tier has the same cold-start/overload shape the
+            # NVIDIA retry was written for, but this is the fallback of a fallback —
+            # a tight bound keeps a doubly-down day from doubling the render time.
+            body = call_with_retry(_once, what=f"Cloudflare FLUX seed={img_seed}",
+                                   tries=2, backoff=5)
+        except Exception as e:
+            log.warning("Cloudflare fallback also failed: %s", e)
+            return None
+        # REST API wraps the binding's `{image}` shape in `{"result": {...}}`.
+        b64 = (body.get("result") or {}).get("image") or body.get("image")
+        if not b64:
+            return None
+        data = base64.b64decode(b64)
+        return data if len(data) >= MIN_IMAGE_BYTES else None
+
     paths = []
     for i, scene in enumerate(scenes):
         if progress:
@@ -458,8 +517,15 @@ def generate_beat_images(scenes, out_dir, *, seed=7, progress=None, place=None,
             except Exception as e:
                 # Transport, not judgment — `call_with_retry` already exhausted the
                 # transient case, and a further rung is a different prompt, not a
-                # better connection. Stop asking.
+                # better connection. Stop asking NVIDIA — but try the independently
+                # hosted secondary once before giving up on this beat entirely (a
+                # no-op when CLOUDFLARE_* isn't configured). This is exactly the
+                # 2026-08-24..29 outage's failure shape: NVIDIA's endpoint down for
+                # days, not this one prompt refused.
                 log.warning("beat %d illustration failed: %s", i, e)
+                data = _try_cloudflare(prompt, img_seed)
+                if data is not None:
+                    log.info("beat %d: illustrated via Cloudflare fallback", i)
                 break
             if data is not None:
                 if rung:
