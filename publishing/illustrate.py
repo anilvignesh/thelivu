@@ -466,10 +466,19 @@ def generate_beat_images(scenes, out_dir, *, seed=7, progress=None, place=None,
 
         def _once():
             full = f"{_BLANK}{_place_clause(place)}{prompt} {ground}"
+            # Diagnosed 2026-09-02 (had been failing on EVERY call since this
+            # fallback was added, silently, until Anil noticed no illustrated
+            # reels were shipping): Cloudflare's REST endpoint rejects `seed`
+            # outright — "Additional or unevaluated properties '/seed' at '/'
+            # not allowed" (confirmed with a real call, not inferred from
+            # docs, which claim seed is supported). No seed control on this
+            # provider means retries against it can't target a different
+            # image the way NVIDIA's seed bump does; accepted, since this is
+            # already the fallback of a fallback.
             r = requests.post(
                 CF_FLUX_URL.format(account=CF_ACCOUNT_ID),
                 headers={"Authorization": f"Bearer {CF_API_TOKEN}"},
-                json={"prompt": full, "seed": img_seed, "steps": 8},
+                json={"prompt": full, "steps": 8},
                 timeout=60,
             )
             r.raise_for_status()
