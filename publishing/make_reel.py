@@ -550,7 +550,8 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
     # 3) Script — video-script skill. run_structured_skill routes to the attended
     #    handoff automatically when THELIVU_ATTENDED=1 (the ./attend process), or to
     #    Claude in api mode. Either way the parsing/marker check is identical.
-    from publishing.reel import parse_script, build_reel, synth_beats
+    from publishing.reel import (parse_script, build_reel, synth_beats,
+                                  _CAPTION_SELF_TALK, _CAPTION_TEMPLATE_ECHO)
     # One hook check for every path: the same predicate the nvidia generator enforces is
     # handed to run_structured_skill as its marker (it accepts a callable), so api and
     # attended modes cannot drift to a weaker rule than the default mode.
@@ -615,6 +616,26 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
     if not fields.get("hook"):
         return {"ok": False, "error": "the script's HOOK line did not parse — a reel has "
                                       "to open on a hook, so nothing was rendered"}
+    # Diagnosed 2026-09-02 (run #212, live on Instagram — Anil: "a lot of bugs
+    # are getting posted... pause all posting"): the HOOK came back as the
+    # literal unfilled placeholder '<the spoken opening line>' and shipped
+    # anyway. hook_is_sharp() below caught it ("the hook carries no stake")
+    # but is deliberately advisory-only — it's built for a genuinely weak-but-
+    # real hook, not a broken template artifact, and never should have been
+    # the only check standing between this and posting. The actual leak-
+    # detection for exactly this shape already exists (_sane_caption's regexes,
+    # 2026-08-26/29) but was only ever wired to CAPTION fields, never the
+    # SPOKEN line — same detection, just never pointed here. Checked against
+    # every beat's spoken text (hook, numbered beats, and close all live in
+    # fields["beats"] per parse_script's docstring), not just the hook, so
+    # this doesn't need a fourth incident when the same leak turns up in a
+    # different field next. Hard block, same severity as an unparseable hook
+    # above, not advisory.
+    for spoken, _caption in fields["beats"]:
+        if _CAPTION_SELF_TALK.search(spoken) or _CAPTION_TEMPLATE_ECHO.search(spoken):
+            return {"ok": False, "error": f"a spoken line is leaked model "
+                    f"reasoning/template text, not real narration: {spoken!r} — "
+                    f"nothing was rendered"}
     # The belief desks' one hard rule at this stage: what the voice says must still
     # be the spine the verifier passed. Checked AFTER parsing, so it covers a spine
     # mangled by the script format and a hand-corrected script whose words drifted.
