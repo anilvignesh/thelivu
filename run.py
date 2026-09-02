@@ -207,6 +207,25 @@ if service == "thelivu-agent":
             log.error("Model health check failed: %s", e, exc_info=True)
             _sweep_failed("Model health check", e)
 
+        # Same placement, same reasoning as model_health.py above — free HTTP
+        # checks, not paid model calls. Added 2026-09-02 after the Cloudflare
+        # illustration fallback was found to have been silently 100% broken
+        # since it shipped: it's only ever invoked when FLUX has ALREADY
+        # failed, so nothing surfaced its own failure until both providers
+        # were down at once. This tests each provider independently, on its
+        # own schedule, so a broken fallback is caught within hours, not
+        # discovered days later when it was actually needed.
+        try:
+            from engine.agents.illustration_health import run_health_check as run_illustration_check, sync_due as illustration_sync_due
+            forced_illustration = kv_get("force_illustration_health_check")
+            if forced_illustration:
+                kv_set("force_illustration_health_check", "")
+            if forced_illustration or illustration_sync_due(now_utc):
+                log.info("Illustration health: %s", run_illustration_check())
+        except Exception as e:
+            log.error("Illustration health check failed: %s", e, exc_info=True)
+            _sweep_failed("Illustration health check", e)
+
         # Autonomy grant, 2026-08-16, made permanent AND extended 2026-08-29
         # (Anil, explicit): publish + post without a human tap for every run
         # that clears normal editorial review — no legal/defamation carve-out
