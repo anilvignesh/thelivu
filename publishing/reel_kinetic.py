@@ -102,7 +102,26 @@ def render_kinetic_subshot_clip(image_path, caption, duration_s, out_mp4, dark=T
         kraft_dim_hex = "#968A6E"
         # t2c: Manim colours by exact substring match, so build it from the
         # SAME per-word highlight test the static caption uses.
-        t2c = {w: accent_hex for w in set(caption.split()) if _is_highlight_token(w)}
+        #
+        # Diagnosed 2026-09-02: Manim raises ValueError("Ambiguous style...")
+        # whenever two t2c keys' substring matches overlap in the rendered
+        # text, EVEN when both map to the identical colour — e.g. a caption
+        # highlighting both "4" and "409" (or "2024") as separate tokens
+        # means the standalone "4" is also found inside "409", so Manim sees
+        # two conflicting style spans for that character. Every highlight
+        # token here uses the same accent_hex anyway (there's only one
+        # highlight colour), so the actual picture never depended on treating
+        # these as separate spans — drop any token that's a substring of a
+        # LONGER token already kept, so no two keys can overlap in the first
+        # place. Longest-first so "409" is kept and the shorter "4" it
+        # contains is the one dropped, not the other way round.
+        candidates = sorted({w for w in caption.split() if _is_highlight_token(w)},
+                            key=len, reverse=True)
+        kept = []
+        for w in candidates:
+            if not any(w in longer for longer in kept):
+                kept.append(w)
+        t2c = {w: accent_hex for w in kept}
         bar_frac = max(0.0, min((idx + 1) / max(n_total, 1), 1.0))
 
         work = Path(tempfile.mkdtemp(prefix="kinetic_"))
