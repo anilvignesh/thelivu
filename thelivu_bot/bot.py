@@ -952,6 +952,7 @@ async def cmd_setbudget(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else f"Daily budget cap set to ${cap:.2f}. Model stages park at the cap "
              f"and resume at midnight UTC."
     )
+    log.info("Daily budget cap set to %s", cap)
 
 
 async def cmd_pauseposting(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -974,7 +975,28 @@ async def cmd_resumeposting(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from shared.db import kv_set
     kv_set("autopost_paused", "")
     await update.message.reply_text("▶️ Autoposting resumed.")
-    log.info("Daily budget cap set to %s", cap)
+
+
+async def cmd_pause(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Full engine pause (2026-08-30) — broader than /pauseposting. Anil:
+    "pause thelivu". Skips the ENTIRE orchestrator tick body (run.py) — no
+    news cycles, no belief desk, no autopost, no scouts, nothing runs until
+    /resume. The web server and this bot are separate processes and stay up,
+    so the site stays live and this command itself still works to undo it."""
+    from shared.db import kv_set
+    kv_set("engine_paused", "1")
+    await update.message.reply_text(
+        "⏸ Thelivu fully paused — no new cycles, no belief desk, no autopost, "
+        "nothing runs. The site stays up and this bot stays responsive. "
+        "/resume to turn everything back on."
+    )
+
+
+async def cmd_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Undo /pause."""
+    from shared.db import kv_set
+    kv_set("engine_paused", "")
+    await update.message.reply_text("▶️ Thelivu resumed — back to normal operation.")
 
 
 async def cmd_setcost(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1637,6 +1659,8 @@ def main():
     app.add_handler(CommandHandler("setbudget", cmd_setbudget))
     app.add_handler(CommandHandler("pauseposting", cmd_pauseposting))
     app.add_handler(CommandHandler("resumeposting", cmd_resumeposting))
+    app.add_handler(CommandHandler("pause", cmd_pause))
+    app.add_handler(CommandHandler("resume", cmd_resume))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("search", cmd_search))
     app.add_handler(CommandHandler("watchlist", cmd_watchlist))

@@ -107,6 +107,17 @@ if service == "thelivu-agent":
         now_utc = datetime.now(timezone.utc)
         today = now_utc.date()
 
+        # Global kill switch (2026-08-30) — Anil: "pause thelivu". Broader than
+        # /pauseposting (which only stops the final Instagram/YouTube post):
+        # this skips the ENTIRE tick body — no news cycles, no belief desk, no
+        # autopost, no scouts, nothing — via one `continue` right here, before
+        # anything below can run. The web server and Telegram bot are separate
+        # processes/threads and stay up regardless, so the site stays live and
+        # /resume still works. Toggle: /pause, /resume in Telegram.
+        if kv_get("engine_paused"):
+            time.sleep(TOPIC_POLL_SECONDS)
+            continue
+
         # Daily cost report — time configurable via /setcost HH:MM (kv: cost_report_utc)
         if _cost_report_due(now_utc) and _cost_report_sent_date != today:
             try:
