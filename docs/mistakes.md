@@ -13,6 +13,71 @@ catch or undo by hand. Newest first. Use the template at the bottom.
 
 ---
 
+## 2026-09-06 — Cloudflare illustration fallback silently sat unconfigured on the service that needed it, for over a week
+
+**What happened:** Anil asked "are all the apis working?" while a periodic
+health-check module (`engine/agents/api_health.py`) was being built. A run of
+the existing `illustration_health.py` against `thelivu-agent` reported the
+Cloudflare FLUX fallback as "not configured" — read as "the credentials were
+never set" and reported to Anil that way. Wrong: he corrected it — "the
+cloudfare api key and account id is in the railway variables, check again."
+
+**Root cause:** Same failure shape as gotcha #9 in `docs/HANDOFF.md`
+(`SLIDE_SERVER_BASE_URL`, 2026-07-15) — `CLOUDFLARE_ACCOUNT_ID`/
+`CLOUDFLARE_API_TOKEN` were on Railway all along, just on `thelivu` (the bot,
+which never generates images) instead of `thelivu-agent` (the only service
+that runs `publishing/illustrate.py`). The 2026-08-30 entry below, when this
+was first built, told the owner to put both vars "in Railway → Variables
+(same place as `NVIDIA_API_KEY`)" without naming a specific service —
+ambiguous wording a per-service variable model doesn't forgive. "Not
+configured" was read as "doesn't exist anywhere" instead of "doesn't exist
+*on this service*."
+
+**Fix:** Copied both values from `thelivu` to `thelivu-agent` via
+`railway variable set --stdin` (value never printed or logged anywhere),
+redeployed, verified live — `illustration_health.py` now reports the
+Cloudflare fallback `ok` instead of "not configured." Documented as a
+recognized recurring pattern in `docs/HANDOFF.md` gotcha #9.
+
+**Caveat / not fixed:** No automated safeguard against the same class
+recurring a third time with a different variable — still relies on whoever's
+debugging remembering to check *which service*, not a pre-flight script that
+diffs required vars across both services and flags gaps. Worth building if
+it happens again.
+
+## 2026-09-02 — A reel's spoken hook was the literal unfilled placeholder "<the spoken opening line>", live on Instagram
+
+**What happened:** Run #212 posted to Instagram with its HOOK beat's spoken
+line being the raw, unfilled script-template placeholder text itself, spoken
+aloud. Anil: "a lot of bugs are getting posted to instagram, i am
+disappointed. Pause all posting." He paused the entire engine, not just
+autoposting — every news cycle, belief desk, scout, and autopost, everything.
+
+**Root cause:** `hook_is_sharp()` correctly flagged the hook ("the hook
+carries no stake") but is deliberately advisory-only — built for a
+genuinely weak-but-real hook, not a broken template artifact, and was never
+meant to be the only check standing between this and posting. The actual
+leak-detection regexes for exactly this shape already existed
+(`_sane_caption`, built for the 2026-08-26/08-29 caption-leak incidents
+below) but were only ever wired to CAPTION fields, never the SPOKEN line.
+
+**Fix:** `publishing/make_reel.py` now runs the same leak-detection regexes
+against every beat's spoken text (hook, numbered beats, and close) —
+hard-blocking, same severity as an unparseable hook, not advisory. Commit
+`a8a4116`. Same session: added `/pause` + `/resume` Telegram commands (a
+broader kill switch than the pre-existing `/pauseposting`, which only
+stopped the final IG/YouTube post step) and proactive illustration-provider
+health checks (`engine/agents/illustration_health.py`) as a guardrail against
+the next silent-fallback-failure class of bug, commit `6b2137e`.
+
+**Caveat / not fixed:** The engine sat fully paused for 4+ days after the fix
+had already shipped and deployed — by design, `/resume` is a deliberate human
+action, nothing auto-resumes a manual pause. Diagnosed and resumed
+2026-09-06/07 after confirming the fix was live and the full local test
+suite passed (2 unrelated pre-existing bugs found and fixed en route — stale
+test-stub debt in `run_illustration_cases.py`, and a real string-vs-datetime
+crash in `engine/desks/ek/scout.py`; commit `5f48aa1`).
+
 ## 2026-08-30 — Text-slide fallback reels were flat and dull, on top of the FLUX outage
 
 **What happened:** Follow-up to the FLUX outage below (still ongoing). Anil,
