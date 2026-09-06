@@ -200,6 +200,13 @@ is proven, not before. `publishing/youtube.py` raises a clear message
    the bot, every approval silently falls back to a plain-text post with no article
    page (this happened 2026-07-15→18 — the July-14 domain rename set it on the agent
    only; fixed + backfilled 2026-07-19). Re-verify on the bot after any domain change.
+   **Recurred 2026-09-06 with `CLOUDFLARE_ACCOUNT_ID`/`CLOUDFLARE_API_TOKEN`**: set on
+   `thelivu` (the bot, which never generates images) and never on `thelivu-agent` (the
+   only service that runs `publishing/illustrate.py`) — illustration_health.py's own
+   "not configured" report on the agent was correct, just misread as "creds don't
+   exist" instead of "creds aren't on this service." **Any per-service Railway var
+   needs checking on the specific service that consumes it, not just "is it set
+   anywhere in the project."**
 10. **Meta / Graph API is flaky from the laptop** (same ISP issue as §5.1). A
     reset/empty response makes `r.json()` throw a bare "Expecting value: line 1
     column 1"; Meta also returns transient error objects (`code:2`,
