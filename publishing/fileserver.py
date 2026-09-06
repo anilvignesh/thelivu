@@ -66,6 +66,23 @@ def _make_handler(slides_dir):
                 self.end_headers()
                 self.wfile.write(page)
                 return
+            # Static Terms of Service page — same pattern as /privacy above.
+            if name == "terms":
+                try:
+                    from publishing.termspage import render
+                    page = render().encode("utf-8")
+                except Exception as e:
+                    log.error("Terms page render failed: %s", e)
+                    self.send_response(500)
+                    self.end_headers()
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(page)))
+                self.send_header("Cache-Control", "public, max-age=86400")
+                self.end_headers()
+                self.wfile.write(page)
+                return
             # The minimal "link in bio" page — kept deliberately separate from
             # the feed above. Every slide footer says "Thelivu · link in bio"
             # and Instagram's in-app browser opens it from the bio tap, so it
