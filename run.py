@@ -4,10 +4,10 @@ service = os.environ.get("RAILWAY_SERVICE_NAME", "thelivu")
 
 if service == "thelivu-agent":
     from engine.agents.orchestrator import run_daily_cycle, process_recheck_requests, process_queued_carousels, cleanup_finished_carousels, send_cost_report, run_source_scout, run_story_scout, run_story_tracker, run_meta_synthesis, run_dig_advance, promote_dig, run_chief_of_staff, run_tech_steward, _cost_report_due
-    import time, logging, sys
+    import time, logging, sys, json
     from datetime import datetime, timezone, timedelta
     from shared.config import ANTHROPIC_API_KEY, APPROVAL_MODE, TELEGRAM_BOT_TOKEN, TELEGRAM_DRAFT_CHAT_ID, CHECK_INTERVAL_HOURS, REPO_ROOT, SLIDE_SERVER_BASE_URL, SLIDE_SERVER_PORT
-    from shared.db import init_db, kv_get, kv_set, update_run, get_due_digs
+    from shared.db import init_db, kv_get, kv_set, update_run, get_due_digs, _is_postgres
     from shared import quota, budget
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", stream=sys.stdout)
@@ -301,6 +301,54 @@ if service == "thelivu-agent":
         except Exception as e:
             log.error("YouTube backfill sweep failed: %s", e, exc_info=True)
             _sweep_failed("YouTube backfill sweep", e)
+
+        # Reel-remake backlog — one promotion per day. Added 2026-09-07, Anil:
+        # "can you remake and republish [the failed reels] in the coming
+        # days?" Same "no model" placement as the sweeps above: this only
+        # flips a reels.status to 'remake_requested' (a plain DB write) — the
+        # actual rebuild happens on the Oracle VM's reel_worker.py, which
+        # already polls for exactly that status and does the real work
+        # (publishing/reel_worker.py's existing /remake mechanism, normally
+        # triggered by a human's Telegram command; this just triggers it
+        # programmatically). Deliberately paced at one/day rather than
+        # promoting the whole backlog at once — these are old, already-
+        # rejected-or-held reels, and dumping all of them on the worker in one
+        # pass would (a) burn a lot of NVIDIA/illustration + Chatterbox
+        # compute in one burst and (b) flood Anil's Telegram with a dozen
+        # review cards at once. TRIAL_START (engine/distribution/sweep.py)
+        # already guarantees none of these can autopublish — they're all
+        # pre-trial parent runs — so posting stays entirely on Anil's own tap
+        # regardless of this cadence; this only paces how fast they become
+        # reviewable, not how fast they'd go live.
+        try:
+            last_promo = kv_get("last_reel_remake_promo_at")
+            if not last_promo or (now_utc - datetime.fromisoformat(last_promo)).total_seconds() >= 24 * 3600:
+                backlog_raw = kv_get("reel_remake_backlog")
+                backlog = json.loads(backlog_raw) if backlog_raw else []
+                if backlog:
+                    item = backlog.pop(0)
+                    from shared.db import _conn
+                    conn = _conn()
+                    try:
+                        cur = conn.cursor()
+                        ph = "%s" if _is_postgres() else "?"
+                        cur.execute(
+                            f"UPDATE reels SET status = 'remake_requested', notes = {ph} WHERE id = {ph}",
+                            (item.get("note"), item["reel_id"]))
+                        conn.commit()
+                    finally:
+                        conn.close()
+                    # Stamp BEFORE writing the trimmed backlog back — same
+                    # retry-storm rule as every other daily sweep here: if
+                    # anything below this line throws, the next tick must not
+                    # re-promote the same item a second time.
+                    kv_set("last_reel_remake_promo_at", now_utc.isoformat())
+                    kv_set("reel_remake_backlog", json.dumps(backlog))
+                    log.info("Reel remake: promoted reel #%s (run %s), %d left in backlog",
+                             item["reel_id"], item.get("run_id"), len(backlog))
+        except Exception as e:
+            log.error("Reel remake backlog promotion failed: %s", e, exc_info=True)
+            _sweep_failed("Reel remake backlog promotion", e)
 
         # ── Quota breaker ─────────────────────────────────────────────────────
         # Both providers ran dry on 2026-07-21 and the tick spent 22 hours
