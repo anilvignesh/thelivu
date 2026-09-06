@@ -13,6 +13,45 @@ catch or undo by hand. Newest first. Use the template at the bottom.
 
 ---
 
+## 2026-09-07 — Attended-mode topic-intake dropped a verified, well-researched story by omitting `END_STORY_BRIEF`
+
+**What happened:** Running the first attended cycle after the 2026-09-02
+pause (Anthropic credit ran out again the same day it was restored, so Anil
+had scouts/maintenance run via this Claude Code session instead of the paid
+API for the rest of the day). Real research confirmed topic #70 ([CHIEF] 5G
+radiation limit raised to 10 W/m²) as a genuine, well-scoped PROCEED — but
+the written response's `STORY_BRIEF` block had no closing `END_STORY_BRIEF`
+marker. `_extract_brief()` in `engine/agents/orchestrator.py` requires both
+delimiters (`re.search(r"STORY_BRIEF\b.*?END_STORY_BRIEF", ...)`); without
+the close tag it returns nothing, and `_run_topic_intake` treats a PROCEED
+with no extractable brief as terminal — `finish_topic(topic_id, "no_brief",
+...)`. The topic was marked done/dead, not requeued, despite the actual
+research being sound.
+
+**Root cause:** The request template shown to the attended session includes
+`END_STORY_BRIEF` in its own example output format — it was simply missed
+while writing the response. A `PROCEED` with a malformed brief fails
+*silently* from the writer's point of view: nothing rejects the response
+file at write time, the pipeline just quietly finishes the topic as
+`no_brief` and moves on. The only signal is a Telegram card ("⚠️ Intake said
+PROCEED but gave no brief") and a warning in the Railway logs — easy to miss
+if nobody's watching right when it happens.
+
+**Fix:** Caught within the same session by reading `run.py`'s live log
+output rather than assuming success. Recovered via `shared.db.requeue_topic
+(70)` — sets `pending_topics.status` back to `'queued'` unconditionally, so
+the next cycle picks it up again — then re-ran topic-intake with a correctly
+closed brief.
+
+**Caveat / not fixed:** `_extract_brief()` still fails closed with no partial
+credit — a PROCEED whose brief is 99% right but missing one delimiter is
+indistinguishable from one with no brief at all, and nothing auto-requeues a
+`no_brief` outcome (by design, matching a genuine "PROCEED but empty" case
+the same way). Worth considering a lenient fallback (accept `STORY_BRIEF` to
+end-of-response when `END_STORY_BRIEF` is absent) if this keeps recurring in
+attended mode specifically — not done here since it's one incident, not
+yet a pattern.
+
 ## 2026-09-06 — Cloudflare illustration fallback silently sat unconfigured on the service that needed it, for over a week
 
 **What happened:** Anil asked "are all the apis working?" while a periodic
