@@ -66,6 +66,7 @@ if service == "thelivu-agent":
         pass
     _breaker_logged_at = None  # throttle the "paused" log to twice an hour
     _budget_logged_at = None   # same throttle for the spend cap
+    _news_cycle_logged_at = None  # same throttle for the news-cycle attended hold
     TOPIC_POLL_SECONDS = 120  # check for owner topics every 2 minutes
 
     # How long a FAILED rss cycle waits before retrying. The full interval would
@@ -260,9 +261,31 @@ if service == "thelivu-agent":
         # publish_run / post_carousel_run / post_reel_run / recommend_now are
         # all DB writes + Graph/YouTube HTTP, no LLM call anywhere in the path
         # — same class of thing as the IG/YouTube sync blocks above.
+        #
+        # NEW guard, 2026-09-07 (Anil, explicit): "make sure if any api
+        # failures are detected, the publish gets blocked" — scoped to the
+        # content APIs specifically (Claude/Gemini/NVIDIA), not the budget cap
+        # above. This is a different concern from the 2026-08-24 fix: that
+        # fix was "don't let a $ cap or a dry provider stop shipping content
+        # that's already safely drafted and approved." This is "don't ship
+        # anything new right after the APIs that DRAFTED/VERIFIED/ILLUSTRATED
+        # it were themselves failing" — a defence-in-depth call after the
+        # 2026-09-02 bad-publish incident, not a claim that publish_run itself
+        # calls a model. Telegram/Instagram/YouTube posting failures do NOT
+        # gate this — those already fail/retry on their own (see gotcha #10 in
+        # docs/HANDOFF.md); only the content-generation side does.
         try:
             from engine.distribution.sweep import run_autopublish_sweep
-            run_autopublish_sweep()
+            from engine.agents.model_health import LAST_RESULT_KEY as _NVIDIA_HEALTH_KEY
+            _content_api_issue = quota.is_blocked()
+            if not _content_api_issue:
+                _nvidia_summary = kv_get(_NVIDIA_HEALTH_KEY) or ""
+                if "FAIL" in _nvidia_summary:
+                    _content_api_issue = f"NVIDIA unhealthy per last health check: {_nvidia_summary}"
+            if _content_api_issue:
+                log.warning("Autopublish sweep held — content API issue: %s", _content_api_issue)
+            else:
+                run_autopublish_sweep()
         except Exception as e:
             log.error("Autopublish sweep failed: %s", e, exc_info=True)
             _sweep_failed("Autopublish sweep", e)
@@ -412,200 +435,219 @@ if service == "thelivu-agent":
         except Exception as e:
             log.error("Belief cycle failed: %s", e, exc_info=True)
 
-        # Weekly: source scout + story scout + story tracker
-        try:
-            last_scout = kv_get("last_scout_at")
-            if not last_scout:
-                kv_set("last_scout_at", now_utc.isoformat())
-                log.info("Weekly jobs scheduled for 7 days from now.")
-            elif (now_utc - datetime.fromisoformat(last_scout)).days >= 7:
-                # Stamp BEFORE running so a mid-way failure can't retry-storm
-                # (re-posting source proposals + re-calling models every 2 min).
-                kv_set("last_scout_at", now_utc.isoformat())
-                run_source_scout()
-                run_story_scout()
-                run_story_tracker()
-        except Exception as e:
-            log.error("Weekly jobs failed: %s", e)
+        # News-cycle attended hold (2026-09-07, Anil's explicit ask: "run
+        # everything other than the desks in attending mode. The whole desk
+        # and publishing, let's resume them.") — separate from the quota
+        # breaker above, which already ran and would have `continue`d before
+        # reaching here if it were open. This gate covers only the main
+        # investigative pipeline below: source/story scouts, meta-synthesis,
+        # rechecks, carousel composition (Claude writes the slide text —
+        # this is a model call, not just DB/HTTP), digs, chief-of-staff,
+        # tech-steward, and the owner-topic/RSS cycle. The belief desks above
+        # this point and the publish/autopost sweeps below are unaffected —
+        # see shared/quota.py's news-cycle-hold section for the full reasoning.
+        _news_cycle_reason = quota.is_news_cycle_held()
+        if _news_cycle_reason:
+            if _news_cycle_logged_at is None or (now_utc - _news_cycle_logged_at).total_seconds() >= 1800:
+                _news_cycle_logged_at = now_utc
+                log.info("News cycle held (attended mode): %s", _news_cycle_reason)
+        else:
+            _news_cycle_logged_at = None
 
-        # Monthly: meta-synthesis
-        try:
-            last_meta = kv_get("last_meta_at")
-            if not last_meta:
-                kv_set("last_meta_at", now_utc.isoformat())
-            elif (now_utc - datetime.fromisoformat(last_meta)).days >= 30:
-                kv_set("last_meta_at", now_utc.isoformat())
-                run_meta_synthesis()
-        except Exception as e:
-            log.error("Meta-synthesis failed: %s", e)
+            # Weekly: source scout + story scout + story tracker
+            try:
+                last_scout = kv_get("last_scout_at")
+                if not last_scout:
+                    kv_set("last_scout_at", now_utc.isoformat())
+                    log.info("Weekly jobs scheduled for 7 days from now.")
+                elif (now_utc - datetime.fromisoformat(last_scout)).days >= 7:
+                    # Stamp BEFORE running so a mid-way failure can't retry-storm
+                    # (re-posting source proposals + re-calling models every 2 min).
+                    kv_set("last_scout_at", now_utc.isoformat())
+                    run_source_scout()
+                    run_story_scout()
+                    run_story_tracker()
+            except Exception as e:
+                log.error("Weekly jobs failed: %s", e)
 
-        # Owner /recheck requests — pick up promptly (cheap when none pending).
-        try:
-            process_recheck_requests()
-        except Exception as e:
-            log.error("Recheck processing failed: %s", e, exc_info=True)
+            # Monthly: meta-synthesis
+            try:
+                last_meta = kv_get("last_meta_at")
+                if not last_meta:
+                    kv_set("last_meta_at", now_utc.isoformat())
+                elif (now_utc - datetime.fromisoformat(last_meta)).days >= 30:
+                    kv_set("last_meta_at", now_utc.isoformat())
+                    run_meta_synthesis()
+            except Exception as e:
+                log.error("Meta-synthesis failed: %s", e)
 
-        # Carousels queued by an article approval — compose + render + send for review.
-        try:
-            process_queued_carousels()
-        except Exception as e:
-            log.error("Carousel processing failed: %s", e, exc_info=True)
+            # Owner /recheck requests — pick up promptly (cheap when none pending).
+            try:
+                process_recheck_requests()
+            except Exception as e:
+                log.error("Recheck processing failed: %s", e, exc_info=True)
 
-        # Manual source scout signal (/scoutnow)
-        try:
-            if kv_get("force_scout_run"):
-                kv_set("force_scout_run", "")
-                log.info("Force scout run signalled — running source scout now")
-                run_source_scout()
-        except Exception as e:
-            log.error("Forced scout run failed: %s", e)
+            # Carousels queued by an article approval — compose + render + send for review.
+            try:
+                process_queued_carousels()
+            except Exception as e:
+                log.error("Carousel processing failed: %s", e, exc_info=True)
 
-        # Manual story-tracker signal (command center "Run now")
-        try:
-            if kv_get("force_tracker_run"):
-                kv_set("force_tracker_run", "")
-                log.info("Force story-tracker signalled")
-                run_story_tracker()
-        except Exception as e:
-            log.error("Forced tracker run failed: %s", e)
+            # Manual source scout signal (/scoutnow)
+            try:
+                if kv_get("force_scout_run"):
+                    kv_set("force_scout_run", "")
+                    log.info("Force scout run signalled — running source scout now")
+                    run_source_scout()
+            except Exception as e:
+                log.error("Forced scout run failed: %s", e)
 
-        # Manual meta-synthesis signal (command center "Run now")
-        try:
-            if kv_get("force_meta_run"):
-                kv_set("force_meta_run", "")
-                log.info("Force meta-synthesis signalled")
-                run_meta_synthesis()
-        except Exception as e:
-            log.error("Forced meta run failed: %s", e)
+            # Manual story-tracker signal (command center "Run now")
+            try:
+                if kv_get("force_tracker_run"):
+                    kv_set("force_tracker_run", "")
+                    log.info("Force story-tracker signalled")
+                    run_story_tracker()
+            except Exception as e:
+                log.error("Forced tracker run failed: %s", e)
 
-        # Targeted dig signal (/dig [theme]) — story-scout on that theme now
-        try:
-            dig_theme = kv_get("dig_request")
-            if dig_theme:
-                kv_set("dig_request", "")
-                # `*` is the bot's "no theme given" sentinel — it has to be non-empty to
-                # get past the `if` above, and maps back to no hint so the scout picks
-                # the ripest watchlist theme itself.
-                hint = None if dig_theme.strip() == "*" else dig_theme
-                log.info("Dig signalled — running story scout: %s",
-                         hint or "(scout picks from the watchlist)")
-                run_story_scout(theme_hint=hint)
-        except Exception as e:
-            log.error("Targeted dig failed: %s", e)
+            # Manual meta-synthesis signal (command center "Run now")
+            try:
+                if kv_get("force_meta_run"):
+                    kv_set("force_meta_run", "")
+                    log.info("Force meta-synthesis signalled")
+                    run_meta_synthesis()
+            except Exception as e:
+                log.error("Forced meta run failed: %s", e)
 
-        # Persistent dig — manual advance signal (dashboard/bot button)
-        try:
-            adv_id = kv_get("advance_dig_id")
-            if adv_id:
-                kv_set("advance_dig_id", "")
-                log.info("Advancing dig #%s (signalled)", adv_id)
-                run_dig_advance(int(adv_id))
-        except Exception as e:
-            log.error("Manual dig advance failed: %s", e)
+            # Targeted dig signal (/dig [theme]) — story-scout on that theme now
+            try:
+                dig_theme = kv_get("dig_request")
+                if dig_theme:
+                    kv_set("dig_request", "")
+                    # `*` is the bot's "no theme given" sentinel — it has to be non-empty to
+                    # get past the `if` above, and maps back to no hint so the scout picks
+                    # the ripest watchlist theme itself.
+                    hint = None if dig_theme.strip() == "*" else dig_theme
+                    log.info("Dig signalled — running story scout: %s",
+                             hint or "(scout picks from the watchlist)")
+                    run_story_scout(theme_hint=hint)
+            except Exception as e:
+                log.error("Targeted dig failed: %s", e)
 
-        # Persistent dig — manual promote signal (dashboard/bot button)
-        try:
-            promo_id = kv_get("promote_dig_id")
-            if promo_id:
-                kv_set("promote_dig_id", "")
-                log.info("Promoting dig #%s (signalled)", promo_id)
-                promote_dig(int(promo_id))
-        except Exception as e:
-            log.error("Manual dig promote failed: %s", e)
+            # Persistent dig — manual advance signal (dashboard/bot button)
+            try:
+                adv_id = kv_get("advance_dig_id")
+                if adv_id:
+                    kv_set("advance_dig_id", "")
+                    log.info("Advancing dig #%s (signalled)", adv_id)
+                    run_dig_advance(int(adv_id))
+            except Exception as e:
+                log.error("Manual dig advance failed: %s", e)
 
-        # Persistent digs — daily auto-advance of due threads (next_action_at passed).
-        # One per tick to keep model cost bounded; the rest wait for the next tick.
-        try:
-            last_dig = kv_get("last_dig_sweep_at")
-            dig_due = (not last_dig) or (now_utc - datetime.fromisoformat(last_dig)).total_seconds() >= 6 * 3600
-            if dig_due:
-                due = get_due_digs(limit=1)
-                if due:
-                    kv_set("last_dig_sweep_at", now_utc.isoformat())
-                    log.info("Auto-advancing due dig #%s", due[0]["id"])
-                    run_dig_advance(due[0]["id"])
-        except Exception as e:
-            log.error("Auto dig advance failed: %s", e)
+            # Persistent dig — manual promote signal (dashboard/bot button)
+            try:
+                promo_id = kv_get("promote_dig_id")
+                if promo_id:
+                    kv_set("promote_dig_id", "")
+                    log.info("Promoting dig #%s (signalled)", promo_id)
+                    promote_dig(int(promo_id))
+            except Exception as e:
+                log.error("Manual dig promote failed: %s", e)
 
-        # Chief of staff — manual signal (dashboard/bot "Run now").
-        try:
-            if kv_get("run_chief_of_staff"):
-                kv_set("run_chief_of_staff", "")
-                log.info("Chief-of-staff sweep signalled")
-                run_chief_of_staff()
-        except Exception as e:
-            log.error("Chief-of-staff (manual) failed: %s", e)
+            # Persistent digs — daily auto-advance of due threads (next_action_at passed).
+            # One per tick to keep model cost bounded; the rest wait for the next tick.
+            try:
+                last_dig = kv_get("last_dig_sweep_at")
+                dig_due = (not last_dig) or (now_utc - datetime.fromisoformat(last_dig)).total_seconds() >= 6 * 3600
+                if dig_due:
+                    due = get_due_digs(limit=1)
+                    if due:
+                        kv_set("last_dig_sweep_at", now_utc.isoformat())
+                        log.info("Auto-advancing due dig #%s", due[0]["id"])
+                        run_dig_advance(due[0]["id"])
+            except Exception as e:
+                log.error("Auto dig advance failed: %s", e)
 
-        # Chief of staff — daily proactive backlog sweep.
-        try:
-            last_cos = kv_get("last_cos_at")
-            cos_due = (not last_cos) or (now_utc - datetime.fromisoformat(last_cos)).total_seconds() >= 24 * 3600
-            if cos_due:
-                # Stamp BEFORE running so a mid-way failure can't retry-storm the
-                # sweep (and its web-search cost) every 2 min. run_chief_of_staff
-                # re-stamps on success.
-                kv_set("last_cos_at", now_utc.isoformat())
-                run_chief_of_staff()
-        except Exception as e:
-            log.error("Chief-of-staff (daily) failed: %s", e)
+            # Chief of staff — manual signal (dashboard/bot "Run now").
+            try:
+                if kv_get("run_chief_of_staff"):
+                    kv_set("run_chief_of_staff", "")
+                    log.info("Chief-of-staff sweep signalled")
+                    run_chief_of_staff()
+            except Exception as e:
+                log.error("Chief-of-staff (manual) failed: %s", e)
 
-        # Tech steward — manual signal (command center "Run now").
-        try:
-            if kv_get("force_tech_steward"):
-                kv_set("force_tech_steward", "")
-                log.info("Tech-steward sweep signalled")
-                run_tech_steward()
-        except Exception as e:
-            log.error("Tech steward (manual) failed: %s", e)
+            # Chief of staff — daily proactive backlog sweep.
+            try:
+                last_cos = kv_get("last_cos_at")
+                cos_due = (not last_cos) or (now_utc - datetime.fromisoformat(last_cos)).total_seconds() >= 24 * 3600
+                if cos_due:
+                    # Stamp BEFORE running so a mid-way failure can't retry-storm the
+                    # sweep (and its web-search cost) every 2 min. run_chief_of_staff
+                    # re-stamps on success.
+                    kv_set("last_cos_at", now_utc.isoformat())
+                    run_chief_of_staff()
+            except Exception as e:
+                log.error("Chief-of-staff (daily) failed: %s", e)
 
-        # Tech steward — weekly technical sweep (model routing, prices, catalogues).
-        try:
-            last_steward = kv_get("last_tech_steward_at")
-            if not last_steward:
-                # Run on first sight rather than stamping — see the belief scout
-                # below for what the stamp-and-skip branch cost there. Already
-                # stamped in production (2026-08-04, with a real brief), so this
-                # cannot fire a sweep on the deploy that introduces it.
-                log.info("Tech steward has never run — running it now")
-                kv_set("last_tech_steward_at", now_utc.isoformat())
-                run_tech_steward()
-            elif (now_utc - datetime.fromisoformat(last_steward)).days >= 7:
-                # Stamp BEFORE running — same retry-storm rule as the sweeps above.
-                kv_set("last_tech_steward_at", now_utc.isoformat())
-                run_tech_steward()
-        except Exception as e:
-            log.error("Tech steward (weekly) failed: %s", e)
+            # Tech steward — manual signal (command center "Run now").
+            try:
+                if kv_get("force_tech_steward"):
+                    kv_set("force_tech_steward", "")
+                    log.info("Tech-steward sweep signalled")
+                    run_tech_steward()
+            except Exception as e:
+                log.error("Tech steward (manual) failed: %s", e)
 
-        # Owner topics — check every 2 minutes, run immediately if queued
-        try:
-            pending = pop_next_topic()
-            if pending:
-                log.info("Owner topic found: %s", pending["topic"][:80])
-                from engine.agents.orchestrator import _run_topic_intake
-                _run_topic_intake(pending)
-            else:
-                # RSS cycle — on schedule or when /runnow signals it
-                force = kv_get("force_rss_run")
-                interval_h = int(kv_get("check_interval_hours") or CHECK_INTERVAL_HOURS)
-                due = _last_rss_run is None or (now_utc - _last_rss_run).total_seconds() >= interval_h * 3600
-                if due or force:
-                    if force:
-                        kv_set("force_rss_run", "")
-                    try:
-                        run_daily_cycle()
-                        _last_rss_run = now_utc
-                    except Exception as e:
-                        # Stamp on failure too, backdated so the retry comes in
-                        # RSS_RETRY_MINUTES rather than on the very next tick.
-                        # Without this a persistent failure re-ran every 2 minutes
-                        # forever (2026-07-21: 22 hours of it).
-                        _last_rss_run = (now_utc
-                                         - timedelta(hours=interval_h)
-                                         + timedelta(minutes=RSS_RETRY_MINUTES))
-                        log.error("RSS cycle failed (retrying in ~%dm): %s",
-                                  RSS_RETRY_MINUTES, e, exc_info=True)
-        except Exception as e:
-            log.error("Topic check failed: %s", e, exc_info=True)
+            # Tech steward — weekly technical sweep (model routing, prices, catalogues).
+            try:
+                last_steward = kv_get("last_tech_steward_at")
+                if not last_steward:
+                    # Run on first sight rather than stamping — see the belief scout
+                    # below for what the stamp-and-skip branch cost there. Already
+                    # stamped in production (2026-08-04, with a real brief), so this
+                    # cannot fire a sweep on the deploy that introduces it.
+                    log.info("Tech steward has never run — running it now")
+                    kv_set("last_tech_steward_at", now_utc.isoformat())
+                    run_tech_steward()
+                elif (now_utc - datetime.fromisoformat(last_steward)).days >= 7:
+                    # Stamp BEFORE running — same retry-storm rule as the sweeps above.
+                    kv_set("last_tech_steward_at", now_utc.isoformat())
+                    run_tech_steward()
+            except Exception as e:
+                log.error("Tech steward (weekly) failed: %s", e)
+
+            # Owner topics — check every 2 minutes, run immediately if queued
+            try:
+                pending = pop_next_topic()
+                if pending:
+                    log.info("Owner topic found: %s", pending["topic"][:80])
+                    from engine.agents.orchestrator import _run_topic_intake
+                    _run_topic_intake(pending)
+                else:
+                    # RSS cycle — on schedule or when /runnow signals it
+                    force = kv_get("force_rss_run")
+                    interval_h = int(kv_get("check_interval_hours") or CHECK_INTERVAL_HOURS)
+                    due = _last_rss_run is None or (now_utc - _last_rss_run).total_seconds() >= interval_h * 3600
+                    if due or force:
+                        if force:
+                            kv_set("force_rss_run", "")
+                        try:
+                            run_daily_cycle()
+                            _last_rss_run = now_utc
+                        except Exception as e:
+                            # Stamp on failure too, backdated so the retry comes in
+                            # RSS_RETRY_MINUTES rather than on the very next tick.
+                            # Without this a persistent failure re-ran every 2 minutes
+                            # forever (2026-07-21: 22 hours of it).
+                            _last_rss_run = (now_utc
+                                             - timedelta(hours=interval_h)
+                                             + timedelta(minutes=RSS_RETRY_MINUTES))
+                            log.error("RSS cycle failed (retrying in ~%dm): %s",
+                                      RSS_RETRY_MINUTES, e, exc_info=True)
+            except Exception as e:
+                log.error("Topic check failed: %s", e, exc_info=True)
 
         # Idle alert — if no RSS cycle has completed in >8h, ping once per 12h
         try:

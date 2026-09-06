@@ -79,3 +79,66 @@ def clear():
     """Close the breaker immediately — after a top-up, or from `attend clear`."""
     kv_set(BLOCKED_UNTIL_KEY, "")
     kv_set(BLOCKED_REASON_KEY, "")
+
+
+# ---------------------------------------------------------------------------
+# News-cycle hold — a second, narrower lever, separate from the breaker above
+# ---------------------------------------------------------------------------
+# Added 2026-09-07, Anil's explicit ask: "run everything other than the desks
+# in attending mode. The whole desk and publishing, let's resume them." The
+# breaker above is a single global switch — it gates the belief desks
+# (engine/desks/ek/), chief-of-staff, tech-steward, and the owner-topic/RSS
+# cycle all together, with no way to split them. This is that split: holds
+# ONLY chief-of-staff, tech-steward, and the owner-topic/RSS cycle (checked at
+# their call sites in run.py) while leaving the belief desks and the
+# publish/autopost sweeps to run normally. Deliberately a separate key from
+# BLOCKED_UNTIL_KEY — this is Anil choosing to run part of the pipeline
+# attended by hand today, not a provider failure, and conflating the two would
+# make a future real outage look like "oh, that's just the attended-mode
+# thing" or vice versa.
+
+NEWS_CYCLE_HOLD_KEY = "news_cycle_llm_hold_until"
+NEWS_CYCLE_HOLD_REASON_KEY = "news_cycle_llm_hold_reason"
+
+
+def trip_news_cycle(reason, minutes=DEFAULT_COOLDOWN_MINUTES):
+    """Hold the news-cycle lane for `minutes`. Same shape as trip() above."""
+    was_open = is_news_cycle_held() is not None
+    until = datetime.now(timezone.utc) + timedelta(minutes=minutes)
+    kv_set(NEWS_CYCLE_HOLD_KEY, until.isoformat())
+    kv_set(NEWS_CYCLE_HOLD_REASON_KEY, str(reason)[:500])
+    return not was_open
+
+
+def is_news_cycle_held():
+    """Return the reason string while held, else None. Same expiry-by-comparison
+    shape as is_blocked()."""
+    raw = kv_get(NEWS_CYCLE_HOLD_KEY)
+    if not raw:
+        return None
+    try:
+        until = datetime.fromisoformat(raw)
+    except (TypeError, ValueError):
+        return None
+    if until.tzinfo is None:
+        until = until.replace(tzinfo=timezone.utc)
+    if datetime.now(timezone.utc) >= until:
+        return None
+    return kv_get(NEWS_CYCLE_HOLD_REASON_KEY) or "News cycle held for attended mode"
+
+
+def news_cycle_held_until():
+    raw = kv_get(NEWS_CYCLE_HOLD_KEY)
+    if not raw or is_news_cycle_held() is None:
+        return None
+    try:
+        until = datetime.fromisoformat(raw)
+    except (TypeError, ValueError):
+        return None
+    return until.replace(tzinfo=timezone.utc) if until.tzinfo is None else until
+
+
+def clear_news_cycle():
+    """Close the news-cycle hold immediately."""
+    kv_set(NEWS_CYCLE_HOLD_KEY, "")
+    kv_set(NEWS_CYCLE_HOLD_REASON_KEY, "")
