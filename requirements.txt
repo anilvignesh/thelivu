@@ -13,6 +13,16 @@ Pillow>=10.0
 pytrends>=4.9  # unofficial Google Trends read — engine/desks/ek/interest.py, informational only
 yt-dlp>=2025.1  # public-post reads: YouTube transcripts (social_desk.py) + Instagram captions (ingestion/fetch.py)
 
+# command_center/ (Starlette + uvicorn SPA, PROJECT-STATUS.md's "zero new deps"
+# note meant no NEW packages needed adding when it was built 2026-07-26 — it
+# did NOT mean these two were already listed here, which they never were.
+# Found 2026-09-07 on a fresh venv rebuild after the laptop wipe: the old
+# laptop's venv had them from some unrecorded manual `pip install`, so this
+# was invisible until a genuinely fresh `pip install -r requirements.txt`
+# tried to run the command center and failed with ModuleNotFoundError.
+starlette>=0.38
+uvicorn>=0.30
+
 # manim>=0.19 (kinetic reel style, publishing/reel_kinetic.py) is DELIBERATELY NOT
 # listed here. Railway never renders reels (see reel_illustrated.py's own
 # LAPTOP-ONLY note on the Malayalam fonts, same reasoning) and manim's dependency

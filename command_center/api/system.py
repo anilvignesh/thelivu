@@ -8,7 +8,7 @@ from starlette.routing import Route
 
 from command_center import db, jobs
 from command_center.api.util import (DESK_GROUPS, J, endpoint, err, cost_usd, INR,
-                                     breaker_state, budget_state)
+                                     breaker_state, budget_state, engine_state)
 from shared import budget
 from shared.db import kv_set, list_digs
 
@@ -182,6 +182,7 @@ def system_status(request, data):
                            "FROM pending_topics WHERE status IN ('queued','running') "
                            "ORDER BY id"),
         breaker=breaker_state,
+        engine=engine_state,
         budget=budget_state,
         steward=lambda: db.kv_many(["latest_tech_brief", "latest_tech_recs",
                                     "last_tech_steward_at",
@@ -211,6 +212,7 @@ def system_status(request, data):
         "reel_voice": (db.kv_many(["reel_voice"]).get("reel_voice") or "").strip()
                       or voices.default_name(),
         "breaker": r["breaker"],
+        "engine": r["engine"],
         "budget": r["budget"],
         "steward": {"last": sw.get("last_tech_steward_at"),
                     "brief": sw.get("latest_tech_brief"),
@@ -413,12 +415,90 @@ def clear_breaker(request, data):
     return J({"ok": True, "breaker": breaker_state()})
 
 
+# ── Engine controls (2026-09-07) ───────────────────────────────────────────
+#
+# Pause/resume existed only as Telegram bot commands (/pause, /pauseposting)
+# until now — Anil's ask: "lets add the pause, resume functionalities on the
+# dashboard." These write the SAME kv keys the bot commands do (see
+# thelivu_bot/bot.py's cmd_pause/cmd_resume/cmd_pauseposting/cmd_resumeposting)
+# rather than a second, shadow flag — the dashboard and the bot must never be
+# able to disagree about whether the engine is paused.
+
+@endpoint
+def pause_engine(request, data):
+    """Full engine pause — same as Telegram /pause. Skips the ENTIRE
+    orchestrator tick: no news cycles, no belief desk, no autopost, no
+    scouts, nothing, until resumed. The web server and bot are separate
+    processes and stay up regardless — the site stays live and this
+    dashboard still works to undo it."""
+    kv_set("engine_paused", "1")
+    return J({"ok": True, "engine": engine_state()})
+
+
+@endpoint
+def resume_engine(request, data):
+    """Undo pause_engine — same as Telegram /resume."""
+    kv_set("engine_paused", "")
+    return J({"ok": True, "engine": engine_state()})
+
+
+@endpoint
+def pause_autopost(request, data):
+    """Stop autoposting reels/carousels to Instagram/YouTube — same as
+    Telegram /pauseposting. Narrower than pause_engine: drafting, review, and
+    rendering keep running, only the final post step pauses, so nothing
+    already in flight is lost."""
+    kv_set("autopost_paused", "1")
+    return J({"ok": True, "engine": engine_state()})
+
+
+@endpoint
+def resume_autopost(request, data):
+    """Undo pause_autopost — same as Telegram /resumeposting."""
+    kv_set("autopost_paused", "")
+    return J({"ok": True, "engine": engine_state()})
+
+
+@endpoint
+def pause_news_cycle(request, data):
+    """Hold the main news cycle (source/story scouts, meta-synthesis,
+    rechecks, carousel composition, digs, chief-of-staff, tech-steward, the
+    owner-topic/RSS cycle) for attended-mode use — see shared/quota.py's
+    news-cycle-hold section. Distinct from pause_engine: belief desks and
+    the publish/autopost sweeps keep running on the API.
+
+    `minutes` (optional, default 24h) and `reason` (optional) in the POST
+    body."""
+    from shared import quota
+    try:
+        minutes = int(data.get("minutes") or 24 * 60)
+    except (TypeError, ValueError):
+        return err("minutes must be a number")
+    reason = (data.get("reason") or "").strip() or "Held from the Command Center"
+    quota.trip_news_cycle(reason, minutes=minutes)
+    return J({"ok": True, "engine": engine_state()})
+
+
+@endpoint
+def resume_news_cycle(request, data):
+    """Undo pause_news_cycle."""
+    from shared import quota
+    quota.clear_news_cycle()
+    return J({"ok": True, "engine": engine_state()})
+
+
 routes = [
     Route("/overview", overview, methods=["GET"]),
     Route("/system", system_status, methods=["GET"]),
     Route("/system/signal", send_signal, methods=["POST"]),
     Route("/system/voice", voice_control, methods=["POST"]),
     Route("/system/breaker/clear", clear_breaker, methods=["POST"]),
+    Route("/system/engine/pause", pause_engine, methods=["POST"]),
+    Route("/system/engine/resume", resume_engine, methods=["POST"]),
+    Route("/system/autopost/pause", pause_autopost, methods=["POST"]),
+    Route("/system/autopost/resume", resume_autopost, methods=["POST"]),
+    Route("/system/news-cycle/pause", pause_news_cycle, methods=["POST"]),
+    Route("/system/news-cycle/resume", resume_news_cycle, methods=["POST"]),
     Route("/system/budget", set_budget, methods=["POST"]),
     Route("/system/voice-default", set_reel_voice, methods=["POST"]),
     Route("/jobs", jobs_recent, methods=["GET"]),

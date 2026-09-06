@@ -188,14 +188,11 @@ def budget_state(spent_usd=None, cap=_UNSET, reserve=_UNSET):
             "over": cap is not None and spent + reserve >= cap}
 
 
-def breaker_state():
-    """Breaker status in ONE round trip. quota.is_blocked()+blocked_until()
-    read kv_store key-by-key — six round trips (~6s on a slow link) for two
-    values; we read both keys at once and apply the same expiry logic."""
-    from shared.quota import BLOCKED_UNTIL_KEY, BLOCKED_REASON_KEY
-    from command_center.db import kv_many
-    kv = kv_many([BLOCKED_UNTIL_KEY, BLOCKED_REASON_KEY])
-    raw = kv.get(BLOCKED_UNTIL_KEY)
+def _held_until(kv, until_key, reason_key, default_reason):
+    """Shared expiry logic for every hold/breaker pair below — all four
+    (engine_paused/autopost_paused are booleans, not timestamps, and handled
+    separately) follow the same "ISO timestamp in the future = open" shape."""
+    raw = kv.get(until_key)
     if not raw:
         return {"open": False, "reason": None, "until": None}
     try:
@@ -206,6 +203,45 @@ def breaker_state():
         until = until.replace(tzinfo=datetime.timezone.utc)
     if datetime.datetime.now(datetime.timezone.utc) >= until:
         return {"open": False, "reason": None, "until": None}
-    return {"open": True,
-            "reason": kv.get(BLOCKED_REASON_KEY) or "LLM providers unavailable",
+    return {"open": True, "reason": kv.get(reason_key) or default_reason,
             "until": until.isoformat()}
+
+
+def breaker_state():
+    """LLM-provider breaker status in ONE round trip. quota.is_blocked()+
+    blocked_until() read kv_store key-by-key — six round trips (~6s on a slow
+    link) for two values; we read both keys at once and apply the same expiry
+    logic."""
+    from shared.quota import BLOCKED_UNTIL_KEY, BLOCKED_REASON_KEY
+    from command_center.db import kv_many
+    kv = kv_many([BLOCKED_UNTIL_KEY, BLOCKED_REASON_KEY])
+    return _held_until(kv, BLOCKED_UNTIL_KEY, BLOCKED_REASON_KEY, "LLM providers unavailable")
+
+
+def engine_state():
+    """Every pause/hold lever in ONE round trip, for the dashboard's engine
+    controls (added 2026-09-07, Anil's ask — pause/resume belonged only to
+    Telegram bot commands until now):
+
+    - `engine_paused` / `autopost_paused` — booleans, Telegram /pause and
+      /pauseposting's own kv keys. Reusing them directly, not shadowing with
+      a second flag, so the dashboard and the bot can never disagree about
+      which one is actually set.
+    - `breaker` — the LLM-provider circuit breaker (shared/quota.py).
+    - `news_cycle` — the narrower attended-mode hold (shared/quota.py,
+      trip_news_cycle/is_news_cycle_held), separate from the breaker on
+      purpose (see that module's own comment)."""
+    from shared.quota import (BLOCKED_UNTIL_KEY, BLOCKED_REASON_KEY,
+                              NEWS_CYCLE_HOLD_KEY, NEWS_CYCLE_HOLD_REASON_KEY)
+    from command_center.db import kv_many
+    kv = kv_many([BLOCKED_UNTIL_KEY, BLOCKED_REASON_KEY,
+                  NEWS_CYCLE_HOLD_KEY, NEWS_CYCLE_HOLD_REASON_KEY,
+                  "engine_paused", "autopost_paused"])
+    return {
+        "engine_paused": bool(kv.get("engine_paused")),
+        "autopost_paused": bool(kv.get("autopost_paused")),
+        "breaker": _held_until(kv, BLOCKED_UNTIL_KEY, BLOCKED_REASON_KEY,
+                               "LLM providers unavailable"),
+        "news_cycle": _held_until(kv, NEWS_CYCLE_HOLD_KEY, NEWS_CYCLE_HOLD_REASON_KEY,
+                                  "News cycle held for attended mode"),
+    }

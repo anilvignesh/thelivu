@@ -1599,6 +1599,69 @@ async function vSystem(main) {
   main.innerHTML = '';
   main.appendChild(el(`<div><h1>System</h1><div class="sub">The machinery — schedules, breaker, voice, jobs, bio page.</div></div>`));
 
+  // Engine controls (2026-09-07) — same kv keys the Telegram bot commands
+  // use (/pause, /resume, /pauseposting, /resumeposting), so this and the
+  // bot can never disagree about state. Three independent levers, narrowest
+  // to broadest: news-cycle hold (attended mode only) < autopost pause
+  // (posting only) < full engine pause (everything).
+  const eng = d.engine || {};
+  const ec = el(`<div class="card ${eng.engine_paused ? 'danger' : ''}">
+    <b>Engine:</b> ${eng.engine_paused
+      ? '⏸ fully paused — no news cycles, no belief desk, no autopost, no scouts'
+      : '▶ running'}
+    <div class="muted small">The broadest lever — same as Telegram /pause. Site and bot stay up regardless.</div>
+    <div class="actions" data-x="a"></div></div>`);
+  if (eng.engine_paused)
+    addBtn(ec.querySelector('[data-x=a]'), 'Resume engine', '', async () => {
+      await api('/system/engine/resume', { method: 'POST', body: {} });
+      toast('Engine resumed.', 'ok'); route();
+    });
+  else
+    addBtn(ec.querySelector('[data-x=a]'), 'Pause engine', 'danger', async () => {
+      if (!await confirmModal('Pause the whole engine?', 'Stops every news cycle, the belief desk, autopost, and scouts until resumed. The site and bot stay up.')) return;
+      await api('/system/engine/pause', { method: 'POST', body: {} });
+      toast('Engine paused.', 'ok'); route();
+    });
+  main.appendChild(ec);
+
+  const ap = el(`<div class="card ${eng.autopost_paused ? 'danger' : ''}">
+    <b>Autoposting:</b> ${eng.autopost_paused
+      ? '⏸ paused — reels/carousels build and queue as usual but won’t post'
+      : '▶ live'}
+    <div class="muted small">Narrower than engine pause — same as Telegram /pauseposting. Drafting/review/rendering keep running either way.</div>
+    <div class="actions" data-x="a"></div></div>`);
+  if (eng.autopost_paused)
+    addBtn(ap.querySelector('[data-x=a]'), 'Resume autoposting', '', async () => {
+      await api('/system/autopost/resume', { method: 'POST', body: {} });
+      toast('Autoposting resumed.', 'ok'); route();
+    });
+  else
+    addBtn(ap.querySelector('[data-x=a]'), 'Pause autoposting', '', async () => {
+      if (!await confirmModal('Pause autoposting?', 'Reels/carousels will build and queue as usual but won’t post to Instagram/YouTube until resumed.')) return;
+      await api('/system/autopost/pause', { method: 'POST', body: {} });
+      toast('Autoposting paused.', 'ok'); route();
+    });
+  main.appendChild(ap);
+
+  const nc = eng.news_cycle || {};
+  const ncCard = el(`<div class="card ${nc.open ? 'danger' : ''}">
+    <b>News cycle (attended mode):</b> ${nc.open ? `held — ${esc(nc.reason)}` : '▶ running on the API'}
+    ${nc.until ? `<div class="muted small">auto-resumes at ${String(nc.until).slice(11, 16)} UTC</div>` : ''}
+    <div class="muted small">Holds source/story scouts, chief-of-staff, tech-steward, and the owner-topic/RSS cycle only — belief desks and publishing are unaffected. For running that lane by hand via <code>./attend</code>.</div>
+    <div class="actions" data-x="a"></div></div>`);
+  if (nc.open)
+    addBtn(ncCard.querySelector('[data-x=a]'), 'Resume news cycle', '', async () => {
+      await api('/system/news-cycle/resume', { method: 'POST', body: {} });
+      toast('News cycle resumed on the API.', 'ok'); route();
+    });
+  else
+    addBtn(ncCard.querySelector('[data-x=a]'), 'Hold for attended mode (24h)', '', async () => {
+      if (!await confirmModal('Hold the news cycle?', 'Source/story scouts, chief-of-staff, tech-steward, and the owner-topic/RSS cycle pause for 24h so you can drive them by hand via ./attend. Belief desks and publishing keep running normally.')) return;
+      await api('/system/news-cycle/pause', { method: 'POST', body: { reason: 'Held from the Command Center' } });
+      toast('News cycle held for attended mode.', 'ok'); route();
+    });
+  main.appendChild(ncCard);
+
   const bk = el(`<div class="card ${d.breaker.open ? 'danger' : ''}">
     <b>Quota breaker:</b> ${d.breaker.open ? `OPEN — ${esc(d.breaker.reason)}` : 'closed (APIs usable, credit permitting)'}
     ${d.breaker.until ? `<div class="muted small">auto-retry at ${String(d.breaker.until).slice(11, 16)} UTC</div>` : ''}
