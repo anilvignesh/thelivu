@@ -569,6 +569,9 @@ def _pick_next_proposal(props):
     oldest = props[-1]
     created = oldest.get("created_at")
     if created is not None:
+        # Postgres (prod) hands this back as a datetime; SQLite (local/test)
+        # hands back a plain string — same pattern as engine/agents/learning.py.
+        created = created if isinstance(created, datetime) else datetime.fromisoformat(str(created))
         if created.tzinfo is None:
             created = created.replace(tzinfo=timezone.utc)
         if datetime.now(timezone.utc) - created >= timedelta(days=PROPOSAL_AGE_CAP_DAYS):

@@ -185,7 +185,7 @@ def main():
         snapshot = list(beats)
 
         def _stub(misses):
-            def gen(scenes, out_dir, progress=None, place=None):
+            def gen(scenes, out_dir, progress=None, place=None, ground=None):
                 out = Path(out_dir)
                 out.mkdir(parents=True, exist_ok=True)
                 made = []
