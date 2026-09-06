@@ -226,6 +226,24 @@ if service == "thelivu-agent":
             log.error("Illustration health check failed: %s", e, exc_info=True)
             _sweep_failed("Illustration health check", e)
 
+        # Same placement, same reasoning as the two checks above. Added
+        # 2026-09-06 (Anil: "are all the apis working? that is a check we
+        # should run periodically") — model_health.py/illustration_health.py
+        # only ever covered NVIDIA/illustration; everything else (Claude,
+        # Gemini, Telegram, Instagram, YouTube) had no proactive check at
+        # all. A manual sweep the same day found the YouTube refresh token
+        # already silently expired — exactly the class of gap this closes.
+        try:
+            from engine.agents.api_health import run_health_check as run_api_check, sync_due as api_sync_due
+            forced_api = kv_get("force_api_health_check")
+            if forced_api:
+                kv_set("force_api_health_check", "")
+            if forced_api or api_sync_due(now_utc):
+                log.info("API health: %s", run_api_check())
+        except Exception as e:
+            log.error("API health check failed: %s", e, exc_info=True)
+            _sweep_failed("API health check", e)
+
         # Autonomy grant, 2026-08-16, made permanent AND extended 2026-08-29
         # (Anil, explicit): publish + post without a human tap for every run
         # that clears normal editorial review — no legal/defamation carve-out
