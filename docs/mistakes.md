@@ -13,6 +13,72 @@ catch or undo by hand. Newest first. Use the template at the bottom.
 
 ---
 
+## 2026-09-07 — Third time: the model's word-count working leaked onto reel captions, live on Instagram
+
+**What happened:** Anil found two reels on the public feed with internal
+scaffolding rendered as the on-screen caption. One read `Cabinet advice
+required - Cabinet(1) advice(2) required(3) = 3 words. Good.` — the correct
+caption, followed by the model counting its words against the skill's 3–6 rule
+and grading the result, all burned into the frame. The other simply read
+`~3-6 words`, the instruction's range itself. Caught by Anil on Instagram, not
+by the engine — same as the two prior times.
+
+**Root cause:** Not a new mechanism — the *same* phenomenon as 2026-08-26 and
+2026-08-29 (the model narrating its caption-construction instead of writing the
+caption), in a third shape. The real cause is how it had been defended: each
+guard was written against the previous incident's exact **string**, so the
+detector only ever recognised the last shape.
+
+- `_CAPTION_SELF_TALK` = `\(\d+\s*words?\)` — needs the count *parenthesised*.
+  Leak 1 says `= 3 words.` unparenthesised → missed.
+- `_CAPTION_TEMPLATE_ECHO` — needs the literal `word text` / `on-screen text`.
+  Leak 2 (`~3-6 words`) drops the word "text" entirely → missed.
+- `MAX_NEWS_CAPTION_WORDS = 14` — leak 1 is 11 words, leak 2 is 2 → missed.
+- `_CAPTION_BARE_META_WORDS` — exact-match set, neither is in it → missed.
+
+Verified all four guards passing both strings before changing anything. The
+irony is that the 2026-08-29 entry is titled "the first fix didn't generalize"
+and the second fix didn't either, for exactly the same reason.
+
+**Fix:** Replaced string-matching with detectors written against the
+phenomenon, behind one predicate `looks_like_self_talk()` in
+`publishing/reel.py`: (a) a word count stated in *any* form, parenthesised or
+not, single or range; (b) a run of parenthesised numbers starting at 1 and
+stepping by 1 (counting tokens out loud); (c) a trailing self-grade ("Good.",
+"Maybe:", "That works."); (d) a leading approximation marker (`~3-6`, `≈4`) —
+plus the two original regexes, kept.
+
+Both call sites now use that one predicate, so caption repair
+(`_sane_caption`) and the spoken-line hard block (`make_reel.py`, added
+2026-09-02) widen together — the 09-02 incident happened precisely because the
+same detection existed but was wired to only one of the two fields.
+
+The prompt is the real fix and got the more important half:
+`engine/skills/video-script/SKILL.md` already banned *describing* the caption,
+but this leak wasn't a description — the model was **checking its own
+compliance inside the field**. The skill now says to count silently and names
+"never check your own work inside the field," with both new strings.
+
+Tested: 10 leak shapes (both new, all prior, several unseen variants) all
+block; 17 legitimate captions all pass. The false-positive case that mattered
+was **`Article 317(1)`** — a statutory citation central to *this very story* —
+which is why (b) requires a *run from 1*, not a bare `\w\(\d+\)`; a single
+parenthesised number stays legal. Verified end-to-end through `parse_script`:
+both leaks fall back to the spoken line, `Article 317(1) referral` survives.
+
+**Caveat / not fixed:** The two reels are **still live on Instagram** — code is
+fixed, published artefacts are not; takedown/remake is Anil's call and hasn't
+been actioned. Detection is still fundamentally a denylist: it now catches the
+shape-class rather than the string, but a genuinely novel *kind* of self-talk
+(no count, no numbering, no verdict) would still pass. The belief desks avoid
+this entirely with `caption_ok()`, which whitelists captions as a contiguous
+span of the spoken line; that can't be ported to the news desk, whose captions
+are a *gist* by spec and legitimately carry acronyms/numbers never spoken
+(`NESAC says up to 80%`). A structural fix for the news desk — some
+containment rule that tolerates compression — is the open question.
+
+---
+
 ## 2026-09-07 — Attended-mode topic-intake dropped a verified, well-researched story by omitting `END_STORY_BRIEF`
 
 **What happened:** Running the first attended cycle after the 2026-09-02

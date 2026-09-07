@@ -130,6 +130,16 @@ Before final output, self-check spoken lines and captions against
   category name — stop and write the real short phrase instead. `HOOK_CAPTION:
   Do we have the water to burn?` is correct; `HOOK_CAPTION: 3-6 word text` and
   `CLOSE_CAPTION: Question` are exactly the failure this note exists to name.
+  **Never check your own work inside the field.** Caught live a third time
+  (2026-09-07, on the public feed): a HOOK_CAPTION came back as `Cabinet advice
+  required - Cabinet(1) advice(2) required(3) = 3 words. Good.` — the caption
+  was correct at the front, and then the count-check against the 3–6 rule above
+  was written out in the same line and burned into the video. A second reel the
+  same day shipped `~3-6 words`, the range itself. Counting the words is right;
+  doing it *in the field* is the bug. Count silently and emit only the final
+  words — a CAPTION line contains the caption and nothing else: no tally, no
+  arithmetic, no `= 3 words`, no `~3-6`, no verdict on it ("Good.", "Perfect.",
+  "That works."). The same applies to every field, SPOKEN lines included.
 - Every beat also gets an **IMAGE** line: a one-sentence description of a
   *conceptual illustration* for that beat. Rules, and they are brand rules, not
   taste: **symbolic, never literal or photographic.** Objects, diagrams, simple

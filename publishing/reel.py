@@ -82,6 +82,77 @@ _CAPTION_TEMPLATE_ECHO = re.compile(
     re.IGNORECASE)
 _CAPTION_BARE_META_WORDS = {"question", "hook", "close", "caption", "beat", "title"}
 
+# Third incident, same class, third shape (2026-09-07 — found by Anil on the
+# live Instagram feed, two reels): a HOOK_CAPTION rendered as
+# `Cabinet advice required - Cabinet(1) advice(2) required(3) = 3 words. Good.`
+# and another as `~3-6 words`. Neither tripped ANY guard above: the first says
+# "3 words" but not parenthesised, so _CAPTION_SELF_TALK's `\(\d+ words?\)`
+# missed it; the second echoes SKILL.md's "3–6 word" count without the literal
+# "text" that _CAPTION_TEMPLATE_ECHO needs, and both sit under the 14-word
+# ceiling.
+#
+# The through-line across all three incidents is that each guard was written
+# against the previous incident's exact STRING, so the same phenomenon — the
+# model narrating its own caption-construction instead of writing the caption —
+# walks straight through in any shape nobody has seen yet. The detectors below
+# are written against the PHENOMENON, which is what stops the fourth incident.
+#
+# (a) Stating a word count in any form: "3 words", "(3 words)", "3-6 words",
+#     "~3-6 words", "= 3 words". A caption about a news story never counts its
+#     own words; the spec it is echoing is the only reason that phrase exists.
+_CAPTION_COUNTS_WORDS = re.compile(
+    r"\b\d+\s*(?:[-–—]\s*\d+\s*)?words?\b", re.IGNORECASE)
+
+# (b) Counting tokens out loud: "Cabinet(1) advice(2) required(3)".
+#     Deliberately NOT a bare `\w\(\d+\)` match — the news desk writes statutory
+#     citations constantly, and this very story's caption is about **Article
+#     317(1)**. One parenthesised number is a citation; a RUN of them starting
+#     at 1 and stepping by 1 is the model numbering its own words, which no
+#     citation does. That distinction is the whole guard — widening it to a
+#     single match would block legitimate legal captions on sight.
+_CAPTION_ENUMERATED = re.compile(r"\S\s?\((\d+)\)")
+
+# (c) The model grading its own draft and leaving the verdict attached:
+#     "… = 3 words. Good." / "3-6 word text. Maybe:". Anchored to a TRAILING
+#     standalone verdict so ordinary uses of the same words inside a real
+#     caption ("public good", "works at the plant") do not match.
+_CAPTION_SELF_GRADE = re.compile(
+    r"(?:^|[.\-–—:;]\s*)(?:good|better|best|perfect|nice|works|that works|"
+    r"maybe|hmm+|okay|ok)\s*[.!:]*\s*$", re.IGNORECASE)
+
+# (d) A spec artifact left leading the caption: "~3-6", "≈4". The tilde is an
+#     approximation marker out of the instruction, never punctuation a caption
+#     opens on.
+_CAPTION_APPROX_SPEC = re.compile(r"^\s*[~≈]\s*\d")
+
+
+def _counts_out_loud(text):
+    """Is this the model numbering its own words, rather than citing law?
+
+    True only for a RUN of parenthesised numbers starting at 1 and stepping by
+    1 — see _CAPTION_ENUMERATED on why a single `(1)` must stay legal."""
+    nums = [int(n) for n in _CAPTION_ENUMERATED.findall(text)]
+    return (len(nums) >= 2 and nums[0] == 1
+            and all(b - a == 1 for a, b in zip(nums, nums[1:])))
+
+
+def looks_like_self_talk(text):
+    """Is `text` the model talking about the line instead of writing it?
+
+    One predicate for every leak signal, so the caption repair (_sane_caption)
+    and the spoken-line hard block in make_reel both widen together — the 2026
+    -09-02 incident happened because the same detection existed but was wired
+    to only one of the two fields."""
+    s = (text or "").strip()
+    if not s:
+        return False
+    return bool(_CAPTION_SELF_TALK.search(s)
+                or _CAPTION_TEMPLATE_ECHO.search(s)
+                or _CAPTION_COUNTS_WORDS.search(s)
+                or _CAPTION_SELF_GRADE.search(s)
+                or _CAPTION_APPROX_SPEC.search(s)
+                or _counts_out_loud(s))
+
 
 def _sane_caption(caption, spoken):
     """A beat's caption if it looks like an actual caption, else the spoken line
@@ -91,7 +162,7 @@ def _sane_caption(caption, spoken):
     if not cap:
         return spoken
     bare = cap.strip(" .!?\"'").lower()
-    if (_CAPTION_SELF_TALK.search(cap) or _CAPTION_TEMPLATE_ECHO.search(cap)
+    if (looks_like_self_talk(cap)
             or len(cap.split()) > MAX_NEWS_CAPTION_WORDS
             or bare in _CAPTION_BARE_META_WORDS):
         log.warning("caption looked like leaked model reasoning, not on-screen "

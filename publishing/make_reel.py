@@ -551,7 +551,7 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
     #    handoff automatically when THELIVU_ATTENDED=1 (the ./attend process), or to
     #    Claude in api mode. Either way the parsing/marker check is identical.
     from publishing.reel import (parse_script, build_reel, synth_beats,
-                                  _CAPTION_SELF_TALK, _CAPTION_TEMPLATE_ECHO)
+                                  looks_like_self_talk)
     # One hook check for every path: the same predicate the nvidia generator enforces is
     # handed to run_structured_skill as its marker (it accepts a callable), so api and
     # attended modes cannot drift to a weaker rule than the default mode.
@@ -632,7 +632,7 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
     # different field next. Hard block, same severity as an unparseable hook
     # above, not advisory.
     for spoken, _caption in fields["beats"]:
-        if _CAPTION_SELF_TALK.search(spoken) or _CAPTION_TEMPLATE_ECHO.search(spoken):
+        if looks_like_self_talk(spoken):
             return {"ok": False, "error": f"a spoken line is leaked model "
                     f"reasoning/template text, not real narration: {spoken!r} — "
                     f"nothing was rendered"}
