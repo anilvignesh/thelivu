@@ -386,7 +386,22 @@ def _load_skill(skill_name):
 class GeminiContentBlocked(Exception):
     """Gemini returned no text because its safety/recitation filter blocked the
     response (not a quota outage, not truncation). These are permanent for the
-    given prompt — the fix is to fall back to Claude+web-search, not to retry."""
+    given prompt — the fix is to fall back to Claude+web-search, not to retry.
+
+    Carries the raw reasons as attributes (2026-09-08) so the catch site can
+    RECORD them, not just log them. SAFETY and RECITATION are different problems
+    wearing the same exception: a safety block is Gemini declining the subject
+    (a lighter-filtered model would answer it), while a recitation block is
+    Gemini refusing to reproduce source text (which would follow us to any
+    model). Which one dominates decides whether switching provider is even
+    coherent — and until 2026-09-08 the answer went only to a Railway log line
+    that rotates, so nobody could tell.
+    """
+
+    def __init__(self, message, finish_reason="", block_reason=""):
+        super().__init__(message)
+        self.finish_reason = finish_reason or ""
+        self.block_reason = block_reason or ""
 
 
 def _run_gemini(skill_name, input_text, system_prompt, max_tokens, run_id=None,
@@ -436,7 +451,8 @@ def _run_gemini(skill_name, input_text, system_prompt, max_tokens, run_id=None,
         # to Claude+web-search (which doesn't hard-empty on named-person / sensitive topics).
         raise GeminiContentBlocked(
             f"Gemini blocked '{skill_name}' (finish_reason={finish_reason}"
-            f"{', block_reason=' + block_reason if block_reason else ''})"
+            f"{', block_reason=' + block_reason if block_reason else ''})",
+            finish_reason=finish_reason, block_reason=block_reason,
         )
     return text.strip()
 
@@ -796,6 +812,29 @@ def run_skill(skill_name, input_text, extra_tools=None, max_tokens=4096,
                 # quota outage is transient, and they warrant opposite responses.
                 log.warning("Gemini content-blocked %s (%s) — falling back to Claude+web-search.",
                             skill_name, e)
+                # RECORD it, don't just log it (2026-09-08). Measured over 30 days, this
+                # path is 9% of the research tokens and 69% of the research spend —
+                # ~$5.50/mo — and every one of the nine stories it fired on was
+                # accountability reporting naming a real institution (a party, the Union
+                # government, a state government, a public insurer, an airline, a
+                # university, election officials). None of that was knowable from the
+                # system: the reason went to a Railway log line that had already rotated.
+                #
+                # record_event, NOT _notify_card: this fires ~30x/month and a Telegram
+                # card each time would train the owner to ignore the channel. It lands in
+                # the dashboard feed and is queryable, which is what the question
+                # "SAFETY or RECITATION?" actually needs.
+                try:
+                    from shared.db import record_event
+                    record_event(
+                        kind="gemini-content-block",
+                        title=f"Gemini blocked {skill_name} — fell back to Claude+search",
+                        body=(f"finish_reason={e.finish_reason or '?'} "
+                              f"block_reason={e.block_reason or '(none given)'}"),
+                        run_id=run_id, level="warn",
+                    )
+                except Exception:
+                    log.warning("could not record the Gemini block for %s", skill_name)
                 return _run_claude(skill_name, input_text, system_prompt,
                                    [WEB_SEARCH_TOOL] + (extra_tools or []), max_tokens, run_id)
             except Exception as e:
