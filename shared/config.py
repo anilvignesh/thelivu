@@ -100,7 +100,14 @@ CHECK_INTERVAL_HOURS = int(os.environ.get("CHECK_INTERVAL_HOURS", "6"))
 # --- Models ---
 # Env-overridable so a routing change is a Railway variable, not a code push
 # (the tech steward's recommendations apply this way).
-CLAUDE_MODEL    = os.environ.get("THELIVU_CLAUDE_MODEL", "claude-sonnet-4-6")
+# Sonnet 5, not 4.6 (2026-09-08). The 2026-07-26 decision to stay on 4.6 "through
+# the Sonnet 5 intro-pricing window" has inverted: Sonnet 5 is now $2/$10 per MTok
+# against 4.6's $3/$15, so the newer model is simply 33% cheaper. Railway already
+# carried THELIVU_CLAUDE_MODEL=claude-sonnet-5, which is why both models show up in
+# 30-day spend — everything that does NOT read that Railway variable (the Oracle
+# reel VM, local command-center builds) was quietly running the pricier one. Moving
+# the default aligns them and saves ~$1.97/mo at current volume, no quality tradeoff.
+CLAUDE_MODEL    = os.environ.get("THELIVU_CLAUDE_MODEL", "claude-sonnet-5")
 # Triage/selection/gating runs here — same Claude family, ~1/3 the price.
 # Journalism (writing, editorial, verification) never routes to it.
 HAIKU_MODEL     = os.environ.get("THELIVU_HAIKU_MODEL", "claude-haiku-4-5")
