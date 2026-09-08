@@ -136,6 +136,133 @@ def _counts_out_loud(text):
             and all(b - a == 1 for a, b in zip(nums, nums[1:])))
 
 
+# ── numbers must come from the article ────────────────────────────────────────
+# Added 2026-09-08. The ARTICLE is verified (source-verifier, editorial-reviewer,
+# human gate); the reel SCRIPT that compresses it was verified by nothing. SKILL.md
+# warns the model that compression is where overstatement happens ("tabled != passed")
+# and then never checked the output — reel #12 said students "won a bill" that had
+# only been tabled, and on 2026-09-08 a re-cut of the Delhi collapse story rendered
+# "Permission: 2 storeys" for a building the article says was sanctioned
+# "ground-plus-one". Neither figure was invented maliciously; both were arithmetic
+# the model did on its own and put on screen as fact.
+#
+# Anil's rule: "for us facts should also be correct." So a number that is not in the
+# article does not go on screen.
+_NUM_WORDS = {
+    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+    "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
+    "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16, "seventeen": 17,
+    "eighteen": 18, "nineteen": 19, "twenty": 20, "thirty": 30, "forty": 40,
+    "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90,
+    "hundred": 100, "thousand": 1000, "million": 1000000, "billion": 1000000000,
+    "lakh": 100000, "crore": 10000000,
+}
+# A bare digit run, with optional thousands separators and decimal part. Ranges
+# ("70-80") and compounds ("ground-plus-1") fall out of this for free: the split is
+# on non-digit characters, so each side is read as its own number.
+_DIGITS_RE = re.compile(r"\d[\d,]*(?:\.\d+)?")
+
+
+def _numeric_tokens(text, words=True):
+    """Every quantity in `text`, normalised to floats.
+
+    `words=True` also reads number-WORDS, which is what makes the comparison work
+    at all: an article writes "ground-plus-one" and "seven people" where a caption
+    writes "1" and "7". Only the article side reads words — see
+    unsupported_numbers() for why the script side deliberately does not.
+    """
+    out = set()
+    for m in _DIGITS_RE.finditer(text or ""):
+        try:
+            out.add(float(m.group(0).replace(",", "")))
+        except ValueError:
+            pass
+    if words:
+        for w in re.split(r"[^a-z]+", (text or "").lower()):
+            if w in _NUM_WORDS:
+                out.add(float(_NUM_WORDS[w]))
+    return out
+
+
+def unsupported_numbers(script_text, article_text):
+    """Figures the reel states that the article it came from does not.
+
+    Only DIGIT-form numbers in the script are checked, on purpose. Number-words
+    carry far too much ordinary English ("one of them", "a couple of weeks") and
+    checking them turns a fact gate into a nuisance; a fabricated statistic almost
+    always reaches the screen as a digit, because that is how captions are written.
+    The ARTICLE side reads both forms, so "1 floor" is correctly satisfied by
+    "ground-plus-one".
+
+    Returns a sorted list of the unsupported values — empty means every figure on
+    screen traces to the verified piece.
+    """
+    if not script_text or not article_text:
+        return []
+    said = _numeric_tokens(script_text, words=False)
+    known = _numeric_tokens(article_text, words=True)
+    return sorted(said - known)
+
+
+# A number alone is too weak a check: "Permission: 2 storeys" passed the test above
+# because the article happens to contain "those two facts", "a floor or two" and "two
+# days of police custody" — none of which is about storeys. What has to match is the
+# number TOGETHER WITH WHAT IT COUNTS. Verified against the same story: with the unit
+# attached, "2 storeys" fails (the article only ever says five storeys / ground-plus-
+# one) while "5 storeys" passes.
+_CLAIM_RE = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s*(?:%|per cent|percent)?[\s\-–—]*([A-Za-z]{3,})")
+# Window, in characters, for "the article says this number about this thing". Wide
+# enough for "sanctioned for ground-plus-one, and it grew to five storeys", narrow
+# enough that a number three sentences away does not vouch for an unrelated noun.
+_CLAIM_WINDOW = 90
+
+
+def _unit_key(word):
+    """Crude singular form, so storeys/storey and floors/floor are one unit."""
+    w = (word or "").lower()
+    return w[:-1] if len(w) > 3 and w.endswith("s") else w
+
+
+def unsupported_number_claims(script_text, article_text):
+    """Figures the reel attaches to a thing the article does not attach them to.
+
+    For each `<digits> <noun>` in the script, look for that noun in the article and
+    check the same value (digit OR word form) appears near it. Returns a list of
+    "2 storeys"-style strings.
+
+    Only digit-led claims are checked, for the same reason as unsupported_numbers():
+    number-words carry ordinary English and would make this a nuisance rather than a
+    gate.
+    """
+    if not script_text or not article_text:
+        return []
+    art = article_text.lower()
+    bad = []
+    for m in _CLAIM_RE.finditer(script_text or ""):
+        raw, unit = m.group(1), m.group(2)
+        try:
+            val = float(raw.replace(",", ""))
+        except ValueError:
+            continue
+        key = _unit_key(unit)
+        if len(key) < 3:
+            continue
+        # Every place the article talks about this thing.
+        spots = [mm.start() for mm in re.finditer(r"\b%s" % re.escape(key), art)]
+        if not spots:
+            continue          # the article never mentions it — that is the writer's
+                              # business, not an arithmetic error; don't block on it
+        ok = False
+        for s in spots:
+            near = art[max(0, s - _CLAIM_WINDOW): s + _CLAIM_WINDOW]
+            if val in _numeric_tokens(near, words=True):
+                ok = True
+                break
+        if not ok:
+            bad.append("%g %s" % (val, unit))
+    return bad
+
+
 def looks_like_self_talk(text):
     """Is `text` the model talking about the line instead of writing it?
 

@@ -565,7 +565,8 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
     #    handoff automatically when THELIVU_ATTENDED=1 (the ./attend process), or to
     #    Claude in api mode. Either way the parsing/marker check is identical.
     from publishing.reel import (parse_script, build_reel, synth_beats,
-                                  looks_like_self_talk)
+                                  looks_like_self_talk, unsupported_numbers,
+                                  unsupported_number_claims)
     # One hook check for every path: the same predicate the nvidia generator enforces is
     # handed to run_structured_skill as its marker (it accepts a callable), so api and
     # attended modes cannot drift to a weaker rule than the default mode.
@@ -653,6 +654,40 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
             return {"ok": False, "error": f"a spoken line is leaked model "
                     f"reasoning/template text, not real narration: {spoken!r} — "
                     f"nothing was rendered"}
+    # Every figure on screen or in the voice must come from the verified article
+    # (2026-09-08, Anil: "for us facts should also be correct"). The article passed
+    # source-verifier, editorial-reviewer and the human gate; the script that
+    # compresses it passed nothing, and compression is exactly where a number moves
+    # — a re-cut of the Delhi collapse story rendered "Permission: 2 storeys" for a
+    # building the piece says was sanctioned "ground-plus-one".
+    #
+    # Hard block, same severity as leaked self-talk: a wrong number is worse than a
+    # late reel, and this is the "never ship a known inaccuracy" rule in code.
+    #
+    # Skipped for the belief desks (spine is post-gate and verified verbatim) and
+    # for a hand-supplied script, which is what Anil himself approved.
+    if draft and not spine and script_input:
+        said = " ".join(f"{sp} {cap}" for sp, cap in fields["beats"])
+        # Two tiers, because one alone is not enough. Containment catches a figure
+        # invented wholesale; the claim check catches a real figure attached to the
+        # wrong thing — "Permission: 2 storeys" passed containment because the piece
+        # says "those two facts" and "two days of police custody" elsewhere.
+        stray = unsupported_numbers(said, draft)
+        misclaimed = unsupported_number_claims(said, draft)
+        if stray or misclaimed:
+            bits = []
+            if misclaimed:
+                bits.append("states %s, which the article does not say about %s"
+                            % (", ".join(misclaimed),
+                               "that" if len(misclaimed) == 1 else "those"))
+            if stray:
+                bits.append("uses figures absent from the article: "
+                            + ", ".join("%g" % n for n in stray))
+            why = "; ".join(bits)
+            log.error("run #%s: reel fails the fact check — %s", run_id, why)
+            return {"ok": False, "error": (
+                f"the reel {why}. Every number a reel puts on screen has to trace to "
+                f"the verified piece — nothing was rendered.")}
     # The belief desks' one hard rule at this stage: what the voice says must still
     # be the spine the verifier passed. Checked AFTER parsing, so it covers a spine
     # mangled by the script format and a hand-corrected script whose words drifted.
