@@ -2605,13 +2605,26 @@ def get_ready_reels():
     returned every one of them, and autopublish.py posted run #120's floods
     story THREE TIMES (reels #18/19/20, three separate remakes) before this fix.
     That bug is exactly why this used to be a plain WHERE status='ready' query
-    and now is not — see the incident note in autopublish.py."""
+    and now is not — see the incident note in autopublish.py.
+
+    The 2026-08-16 dedupe only ever looked at READY rows, which left the other
+    half of the same bug open: a run whose reel has ALREADY POSTED is invisible
+    to it, because the posted sibling never appears in the set being deduped.
+    Found 2026-09-08 — Anil recognised a queued reel as one he had already seen
+    on Instagram. Run #121 had reels #14 and #15 sitting ready while #16 was
+    long posted, and run #154 had #30 ready while #31 was posted; both would
+    have gone out a second time. Nothing in the system could see it: the reels
+    table knew, but no query asked. So this now excludes any run that already
+    has a posted reel — the check the dedupe above should always have carried."""
     conn = _conn()
     try:
         cur = conn.cursor()
         cur.execute(
             "SELECT id, run_id, kind, caption, status, ig_media_id, ig_permalink, "
-            "notes, created_at, posted_at FROM reels WHERE status = 'ready' ORDER BY id")
+            "notes, created_at, posted_at FROM reels r WHERE status = 'ready' "
+            "AND NOT EXISTS (SELECT 1 FROM reels p "
+            "                WHERE p.run_id = r.run_id AND p.status = 'posted') "
+            "ORDER BY id")
         rows = _fetchall(cur)
     finally:
         conn.close()
