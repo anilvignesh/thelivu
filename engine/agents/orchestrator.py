@@ -355,6 +355,7 @@ def _split_chunks(text):
 
 def _tg_post(chat_id, text, reply_markup=None, parse_mode=None):
     """Send a single message — caller must ensure len(text) ≤ 4096."""
+    _tg_post.last_error = None
     payload = {"chat_id": str(chat_id), "text": text, "disable_web_page_preview": False}
     if reply_markup:
         payload["reply_markup"] = json.dumps(reply_markup)
@@ -376,6 +377,10 @@ def _tg_post(chat_id, text, reply_markup=None, parse_mode=None):
             log.warning("Telegram HTML send failed (%s) — retrying as plain text", e)
             plain = re.sub(r"<[^>]+>", "", text)
             return _tg_post(chat_id, plain, reply_markup=reply_markup, parse_mode=None)
+        # Stashed for _notify_card, which stamps it on the engine_events row so a
+        # dropped card is answerable later. Logging alone put this only in Railway,
+        # which the owner never reads — the 2026-09-08 bug in full.
+        _tg_post.last_error = f"{type(e).__name__}: {e}"[:500]
         log.error("Telegram send failed: %s", e)
         return None
 
@@ -575,11 +580,12 @@ def _notify_card(emoji, title, body="", report_title=None, report_md=None,
     happens FIRST: a Telegram outage or a blocked telegra.ph link must not be
     able to destroy the only copy of a dropped lead or a halted run.
     """
+    event_id = None
     try:
         from shared.db import record_event
-        record_event(kind=_event_kind(title), title=title, body=body,
-                     report=report_md or "", run_id=run_id,
-                     level=_EVENT_LEVEL.get(emoji, "info"))
+        event_id = record_event(kind=_event_kind(title), title=title, body=body,
+                                report=report_md or "", run_id=run_id,
+                                level=_EVENT_LEVEL.get(emoji, "info"))
     except Exception:
         log.exception("Failed to record engine event: %s", title)
     parts = [f"{emoji} <b>{_esc(title)}</b>"]
@@ -589,8 +595,17 @@ def _notify_card(emoji, title, body="", report_title=None, report_md=None,
     if link:
         parts += ["", link]
     html = "\n".join(parts)
-    _tg_post(TELEGRAM_DRAFT_CHAT_ID, html[:4096], reply_markup=reply_markup,
-             parse_mode="HTML")
+    msg_id = _tg_post(TELEGRAM_DRAFT_CHAT_ID, html[:4096], reply_markup=reply_markup,
+                      parse_mode="HTML")
+    # Whether it landed is now part of the record, not just a Railway log line.
+    try:
+        from shared.db import mark_event_delivery
+        mark_event_delivery(event_id, message_id=msg_id,
+                            error=None if msg_id else (
+                                getattr(_tg_post, "last_error", None) or "send returned no message id"))
+    except Exception:
+        log.warning("could not stamp Telegram delivery for: %s", title)
+    return msg_id
 
 
 def send_for_approval(run_id, draft_text, verification_report, review_text):

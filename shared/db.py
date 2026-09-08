@@ -809,6 +809,20 @@ def init_db():
                     conn.commit()
                 except Exception:
                     conn.rollback()  # column already exists
+            # Delivery outcome per card (2026-09-08). record_event already made the
+            # CONTENT survive a Telegram outage (see its docstring) — but whether the
+            # card actually reached Anil was still recorded nowhere, so a silently
+            # failing _tg_post looked exactly like a working one. Found when a topic
+            # he submitted was declined, the decision was recorded at 18:31, and he
+            # never saw it; the next card 17 min later never arrived either, and
+            # nothing in the system could say whether either had been sent.
+            # NULL message id + NULL error = not yet attempted (or pre-migration).
+            for col, defn in [("tg_message_id", "BIGINT"), ("tg_error", "TEXT")]:
+                try:
+                    cur.execute(f"ALTER TABLE engine_events ADD COLUMN {col} {defn}")
+                    conn.commit()
+                except Exception:
+                    conn.rollback()  # column already exists
             # Indexes over migrated columns must come AFTER the ALTERs. The copy in
             # _SCHEMA only fires for a fresh database, where CREATE TABLE already
             # carries the column; on an existing one it runs before `desk` exists,
@@ -1303,13 +1317,63 @@ def record_event(kind, title, body="", report="", run_id=None, level="info"):
     try:
         cur = conn.cursor()
         ph = "%s" if _is_postgres() else "?"
-        cur.execute(
-            f"INSERT INTO engine_events (kind, level, title, body, report, run_id) "
-            f"VALUES ({ph},{ph},{ph},{ph},{ph},{ph})",
-            (kind or "note", level or "info", (title or "")[:400],
-             (body or "")[:8000], report or "", run_id),
-        )
+        sql = (f"INSERT INTO engine_events (kind, level, title, body, report, run_id) "
+               f"VALUES ({ph},{ph},{ph},{ph},{ph},{ph})")
+        args = (kind or "note", level or "info", (title or "")[:400],
+                (body or "")[:8000], report or "", run_id)
+        # Returns the new row id so the caller can stamp the delivery outcome on it
+        # once Telegram has answered — see mark_event_delivery().
+        if _is_postgres():
+            cur.execute(sql + " RETURNING id", args)
+            new_id = cur.fetchone()[0]
+        else:
+            cur.execute(sql, args)
+            new_id = cur.lastrowid
         conn.commit()
+        return new_id
+    finally:
+        conn.close()
+
+
+def mark_event_delivery(event_id, message_id=None, error=None):
+    """Stamp whether the Telegram card for `event_id` actually landed.
+
+    Deliberately best-effort and swallowing: this is telemetry about a
+    notification, and it must never be the thing that breaks the notification
+    path (or the engine tick above it). A row that never gets stamped reads as
+    'unknown', which is exactly what it is.
+    """
+    if not event_id:
+        return
+    try:
+        conn = _conn()
+        try:
+            cur = conn.cursor()
+            ph = "%s" if _is_postgres() else "?"
+            cur.execute(
+                f"UPDATE engine_events SET tg_message_id = {ph}, tg_error = {ph} "
+                f"WHERE id = {ph}",
+                (message_id, (error or "")[:500] or None, event_id))
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        log.warning("could not stamp delivery for event %s", event_id, exc_info=True)
+
+
+def undelivered_events(hours=24, limit=50):
+    """Cards recorded but never confirmed delivered — the query that would have
+    answered 'did he get it?' in one line."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        interval = ("now() - interval '%d hours'" % int(hours)) if _is_postgres() \
+            else ("datetime('now', '-%d hours')" % int(hours))
+        cur.execute(
+            "SELECT id, created_at, title, tg_error FROM engine_events "
+            f"WHERE created_at > {interval} AND tg_message_id IS NULL "
+            "ORDER BY id DESC LIMIT %d" % int(limit))
+        return [dict(zip([d[0] for d in cur.description], r)) for r in cur.fetchall()]
     finally:
         conn.close()
 
