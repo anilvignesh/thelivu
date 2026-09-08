@@ -74,6 +74,7 @@ if service == "thelivu-agent":
     # crash loop, because _last_rss_run was only stamped on success.
     RSS_RETRY_MINUTES = 30
 
+
     def _tg_notify(text):
         """Send a plain-text notification to the draft chat from run.py."""
         try:
@@ -438,8 +439,26 @@ if service == "thelivu-agent":
         # returning True the whole time. Moving the whole belief section here —
         # ahead of literally everything else that spends money — is the only
         # place "first crack at a fresh $0.00 cap" is actually true.
+        # RETIRED 2026-09-08 (Anil: "lets kill the other desk, thelivu only needs the
+        # single desk, news" / "we will merge the other one to didyouknow shorts").
+        # Everyone Knows and Turns Out move to the did_you_know Shorts channel
+        # (~/trend-shorts), which is already the myth-and-fact format; Thelivu goes
+        # back to being one thing — accountability journalism.
+        #
+        # Gated rather than deleted, deliberately. The desks reach 79 call sites across
+        # run.py, orchestrator.py, make_reel.py and skill_runner.py plus an 11-file
+        # engine/desks/ek/ subsystem, and ripping that out in one pass is how the NEWS
+        # path breaks quietly. This stops all belief spend immediately and reversibly;
+        # the code and the 19 finished pieces stay until removal is done as its own
+        # careful change. Clear with kv_set("belief_desks_retired", "") to undo.
+        if kv_get("belief_desks_retired"):
+            _belief_note = "retired"
+        else:
+            _belief_note = None
         try:
-            if kv_get("force_belief_scout"):
+            if _belief_note:
+                pass
+            elif kv_get("force_belief_scout"):
                 kv_set("force_belief_scout", "")
                 log.info("Belief scout signalled")
                 from engine.desks.ek.scout import run_belief_scout
@@ -449,9 +468,12 @@ if service == "thelivu-agent":
             _sweep_failed("Belief scout", e)
 
         # Belief desks — weekly scout, so the queue is never empty when Anil is.
+        # Retired 2026-09-08 — see the note on the manual scout above.
         try:
-            last_bs = kv_get("last_belief_scout_at")
-            if not last_bs:
+            last_bs = None if _belief_note else kv_get("last_belief_scout_at")
+            if _belief_note:
+                pass                # retired — see the note on the manual scout above
+            elif not last_bs:
                 # First sight: RUN it. This branch used to stamp and return, which
                 # deferred the very first scout run by a full week AND wrote a
                 # timestamp indistinguishable from a successful one — the command
@@ -473,15 +495,16 @@ if service == "thelivu-agent":
             log.error("Belief scout (weekly) failed: %s", e, exc_info=True)
             _sweep_failed("Belief scout", e)
 
-        try:
-            from engine.desks.ek.scout import cycle_due, run_belief_cycle
-            forced = kv_get("force_belief_run")
-            if forced:
-                kv_set("force_belief_run", "")
-            if forced or cycle_due(now_utc):
-                log.info("Belief cycle: %s", run_belief_cycle())
-        except Exception as e:
-            log.error("Belief cycle failed: %s", e, exc_info=True)
+        if not _belief_note:
+            try:
+                from engine.desks.ek.scout import cycle_due, run_belief_cycle
+                forced = kv_get("force_belief_run")
+                if forced:
+                    kv_set("force_belief_run", "")
+                if forced or cycle_due(now_utc):
+                    log.info("Belief cycle: %s", run_belief_cycle())
+            except Exception as e:
+                log.error("Belief cycle failed: %s", e, exc_info=True)
 
         # News-cycle attended hold (2026-09-07, Anil's explicit ask: "run
         # everything other than the desks in attending mode. The whole desk
