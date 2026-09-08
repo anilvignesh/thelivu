@@ -362,13 +362,32 @@ def _tg_post(chat_id, text, reply_markup=None, parse_mode=None):
     if parse_mode:
         payload["parse_mode"] = parse_mode
     try:
-        r = requests.post(
-            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-            json=payload,
-            timeout=15,
-        )
-        r.raise_for_status()
-        return r.json().get("result", {}).get("message_id")
+        # Retry transient failures (2026-09-08). One attempt used to be all a card
+        # got: a single dropped connection or a 5xx lost the notice permanently and
+        # silently, which is the shape of the bug where two cards 17 minutes apart
+        # both vanished while the credentials were provably fine. 4xx is NOT retried
+        # — a bad chat id or a blocked bot fails identically every time, and retrying
+        # it just delays the error we actually want recorded.
+        last = None
+        for attempt in range(3):
+            try:
+                r = requests.post(
+                    f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+                    json=payload,
+                    timeout=15,
+                )
+                r.raise_for_status()
+                return r.json().get("result", {}).get("message_id")
+            except requests.HTTPError as he:
+                code = getattr(he.response, "status_code", 0)
+                if 400 <= code < 500 and code != 429:
+                    raise
+                last = he
+            except requests.RequestException as re_:
+                last = re_
+            if attempt < 2:
+                time.sleep(2 * (attempt + 1))
+        raise last
     except Exception as e:
         # An HTML send can fail if a 4096-cut split a tag/entity ("can't parse
         # entities"). Never lose the message (or an attached approval keyboard) —
