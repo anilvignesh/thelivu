@@ -26,6 +26,27 @@ verified material runs deeper than that, use the room the platform actually give
 before reaching for a shorter number that isn't reflecting what's really in the
 piece.
 
+**Budget it in WORDS, because that is the only unit you can count.** You cannot
+hear how long your script takes to say, and guessing at seconds is what put two
+reels over the ceiling on 2026-09-08 (118s and 109s — the 118s one reached
+Instagram). The cloned voice reads at roughly **2.5 spoken words per second**, so:
+
+| Target | Total SPOKEN words (hook + beats + close) |
+|---|---|
+| ~45s, a tight story | ~110 words |
+| **~70s, the normal target** | **~175 words** |
+| 85s, only if the material truly earns it | ~210 words |
+| **HARD CEILING — never exceed** | **225 words** |
+
+Count only the SPOKEN lines; CAPTION and IMAGE lines are not read aloud and do not
+count. Six beats of 30 words each is already 180 — so if you are writing six or
+more beats, the lines have to be short. Prefer **fewer, denser beats** over many
+thin ones: cutting a whole beat keeps the remaining ones at full strength, whereas
+thinning every line to fit makes the entire reel read rushed.
+
+If you are over budget, cut a middle beat. Never cut the hook, the close, or the
+attribution that makes a claim checkable.
+
 This skill enforces the project's editorial charter (`../../CHARTER.md`) and brand
 (`../../BRAND.md`). Read them if present; the charter governs in any conflict. It
 writes a script only — it never fabricates, never overstates, and never publishes.

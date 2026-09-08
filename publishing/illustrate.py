@@ -450,6 +450,21 @@ def generate_beat_images(scenes, out_dir, *, seed=7, progress=None, place=None,
         data = base64.b64decode(art["base64"])
         return data if len(data) >= MIN_IMAGE_BYTES else None
 
+    def _primary_flagged_broken():
+        """Has the illustration health check flagged FLUX/NVIDIA as down?
+
+        Key and label are illustration_health.py's own (`alert_key`), so the flag
+        this reads is exactly the one that check raises and clears — no second
+        source of truth about provider health. Best-effort by design: if the flag
+        can't be read, fall through and try the provider, because a KV blip must
+        not be able to disable the primary renderer.
+        """
+        try:
+            from shared.db import kv_get
+            return bool(kv_get("illustration_health_alerted_flux.1-dev (nvidia, primary)"))
+        except Exception:
+            return False
+
     def _try_cloudflare(prompt, img_seed):
         """Secondary provider, only reached when the NVIDIA transport itself failed
         (see the `except` below) — same model family, independent infra. Cloudflare's
@@ -522,6 +537,20 @@ def generate_beat_images(scenes, out_dir, *, seed=7, progress=None, place=None,
         for rung, prompt in enumerate(prompt_ladder(scene)):
             img_seed = seed + i + RUNG_SEED_STRIDE * rung
             try:
+                # Skip the primary entirely while the health check has it flagged
+                # broken (2026-09-08). illustration_health.py already pings both
+                # providers and raises exactly this flag, clearing it on recovery —
+                # but nothing read it, so a known-dead FLUX was still asked first on
+                # every beat: 3 attempts x 180s timeout = ~9 minutes burnt per beat
+                # before falling back. Measured on run #186 that morning, a 6-beat
+                # reel took ~70 minutes to render, essentially all of it waiting on
+                # an endpoint already known to be down. Raising the same exception
+                # the transport failure raises keeps the fallback path below
+                # identical — this only skips the waiting.
+                if _primary_flagged_broken():
+                    raise RuntimeError(
+                        "flux.1-dev flagged broken by the illustration health check "
+                        "— going straight to the Cloudflare fallback")
                 data = _try(prompt, img_seed)
             except Exception as e:
                 # Transport, not judgment — `call_with_retry` already exhausted the

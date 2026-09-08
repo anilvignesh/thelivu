@@ -98,6 +98,20 @@ _NVIDIA_SCRIPT_MODEL = os.environ.get("NVIDIA_SCRIPT_MODEL", "nvidia/nemotron-3.
 # budget) silently truncated mid-reasoning; this leaves real margin.
 _NVIDIA_SCRIPT_MAX_TOKENS = int(os.environ.get("NVIDIA_SCRIPT_MAX_TOKENS", "10000"))
 
+# Reel length (2026-09-08). Instagram's Graph API only gives Reels-tab/discovery
+# placement to 5-90s videos: past 90s a reel still publishes but forfeits the
+# non-follower reach the whole format exists for. That ceiling lived ONLY as prose
+# in engine/skills/video-script/SKILL.md and was enforced nowhere in code — which
+# went unnoticed while the free script model erred short (one cut came out 8.4s).
+# Moving the script step to Haiku (36ce10f) traded "too short and broken" for
+# "well-developed and too long": the first two cuts ran 118s and 109s, and the
+# 118s one reached Instagram before anyone measured it.
+MAX_REEL_SECONDS = float(os.environ.get("THELIVU_MAX_REEL_SECONDS", "90"))
+# What the corrective retry asks for. Deliberately well under the ceiling: the
+# voice is what decides the real duration, and asking for exactly 90 lands over it
+# as often as under.
+TARGET_REEL_SECONDS = float(os.environ.get("THELIVU_TARGET_REEL_SECONDS", "72"))
+
 # The owner's revision notes from the remake box. Direction, NOT licence: the reel is a
 # POST-GATE artefact, so nothing re-verifies it after he taps Post — a note that asks for
 # a claim the article doesn't carry has to lose to the article. Stated here rather than
@@ -556,6 +570,7 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
     # handed to run_structured_skill as its marker (it accepts a callable), so api and
     # attended modes cannot drift to a weaker rule than the default mode.
     _M_SCRIPT = _has_hook
+    script_input = None   # set only when a model writes the script; see the retry below
     if script:
         # A human-corrected script. The generator compresses, and compression is
         # where it overstates — reel #12 said the students "won a bill" that had
@@ -595,6 +610,8 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
                  else "Waiting for the script (attended handoff)…")
         # ONE prompt for both engines — the notes must not be able to reach Gemma but
         # not Claude (or vice versa) depending on which mode is active.
+        # Kept in scope past this block so the over-length retry below can re-ask the
+        # same question with a length correction appended.
         script_input = draft + _notes_block(notes)
         try:
             if nvidia:
@@ -687,6 +704,78 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
         except Exception as e:
             log.error("voicing failed for run #%s: %s", run_id, e)
             return {"ok": False, "error": f"voicing failed: {e}"}
+
+        # Length gate. Checked HERE, after voicing and before illustrating, because
+        # the voice is the only thing that knows the real duration and the pictures
+        # are the expensive step — a too-long script is caught before a single image
+        # is paid for. See MAX_REEL_SECONDS for why this exists.
+        #
+        # A too-long reel is a worse product but not a broken one: it publishes, it
+        # just loses discovery reach. So this regenerates ONCE and then ships the best
+        # cut it has rather than failing the build — no reel at all is less reach than
+        # a long one. Only model-written scripts are retried: a hand-supplied script
+        # is what Anil approved, and a belief spine is post-gate and may not be
+        # rewritten to fit a clock.
+        total_s = sum(d for _w, d, _p2 in voiced)
+        if total_s > MAX_REEL_SECONDS and script_input and not spine:
+            log.warning("run #%s: voiced at %.1fs, over the %.0fs ceiling — asking for "
+                        "a shorter cut once", run_id, total_s, MAX_REEL_SECONDS)
+            _p(0.20, f"Cut ran {total_s:.0f}s — rewriting shorter…")
+            shorter = (
+                f"{script_input}\n\n---\nYour previous script voiced at "
+                f"{total_s:.0f} SECONDS. The hard ceiling is {MAX_REEL_SECONDS:.0f}s "
+                f"— past it Instagram drops the reel out of Reels-tab/discovery and it "
+                f"loses the reach this format exists for.\n\nRewrite it to land near "
+                f"{TARGET_REEL_SECONDS:.0f} SECONDS of speech. Cut whole beats rather "
+                f"than thinning every line — keep the hook, keep the close, keep the "
+                f"load-bearing attribution, and drop the least essential middle beats. "
+                f"Do not speed-read: same voice, fewer words. Output ONLY the "
+                f"structured script.")
+            try:
+                if nvidia:
+                    script2 = _gen_script_nvidia(shorter, run_id=run_id)
+                else:
+                    from engine.agents.skill_runner import run_structured_skill
+                    script2 = run_structured_skill("video-script", shorter,
+                                                   marker=_M_SCRIPT, run_id=run_id)
+                fields2 = parse_script(script2)
+                bad2 = any(looks_like_self_talk(sp) for sp, _c in fields2.get("beats", []))
+                if fields2.get("beats") and fields2.get("hook") and not bad2:
+                    voiced2 = synth_beats(fields2["beats"], "chatterbox",
+                                          tmpdir / "vo2", voice=voice)
+                    total2 = sum(d for _w, d, _p2 in voiced2)
+                    # Keep the retry only if it actually helped. A "shorter" rewrite
+                    # that came back longer is not an improvement to ship.
+                    if total2 < total_s:
+                        log.info("run #%s: shorter cut %.1fs (was %.1fs)%s", run_id,
+                                 total2, total_s,
+                                 "" if total2 <= MAX_REEL_SECONDS else " — still over")
+                        script, fields, voiced, total_s = script2, fields2, voiced2, total2
+                    else:
+                        log.warning("run #%s: rewrite came back %.1fs, keeping the "
+                                    "original %.1fs", run_id, total2, total_s)
+                else:
+                    log.warning("run #%s: shorter rewrite was unusable "
+                                "(beats=%s hook=%s leak=%s) — keeping the original",
+                                run_id, len(fields2.get("beats", [])),
+                                bool(fields2.get("hook")), bad2)
+            except Exception as e:
+                log.warning("run #%s: shorter rewrite failed (%s) — keeping the "
+                            "original cut", run_id, e)
+        if total_s > MAX_REEL_SECONDS:
+            # Still over. Ship it, but make that visible rather than silent — the
+            # whole reason this went unnoticed is that nothing ever measured it.
+            log.error("run #%s: shipping a %.1fs reel, over the %.0fs ceiling — it "
+                      "will publish but lose Reels-tab/discovery reach",
+                      run_id, total_s, MAX_REEL_SECONDS)
+            try:
+                from engine.agents.orchestrator import _notify_card
+                _notify_card("⚠️", "Reel over the 90s reach ceiling",
+                             body=(f"Run #{run_id} voiced at <b>{total_s:.0f}s</b> after a "
+                                   f"shorter rewrite was attempted. It will publish but "
+                                   f"drops out of Reels-tab/discovery."))
+            except Exception:
+                pass
 
         if illustrated:
             shots_per_beat = _plan_shots(voiced)
