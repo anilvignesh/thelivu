@@ -42,15 +42,24 @@ SLIDE_SERVER_PORT = int(os.environ.get("PORT", "8080"))
 # --- Reels ---
 # How the reel's video-script (a POST-GATE model step — the article is already
 # verified + human-approved, so this never touches the trust gate) is produced:
-#   "nvidia"   — free hosted Gemma 4 via NVIDIA (NVIDIA_API_KEY). No Anthropic/Gemini
+#   "api"      — call the Claude API (Haiku 4.5; video-script is in _HAIKU_SKILLS).
+#                ACTIVE default since 2026-09-08. The quota breaker guards it, so a
+#                dry Claude budget now blocks reel builds — accepted deliberately.
+#   "nvidia"   — free hosted model via NVIDIA (NVIDIA_API_KEY). No Anthropic/Gemini
 #                credit, independent of the quota breaker, runs anywhere incl. the
-#                dashboard. ACTIVE default (2026-07-26): reels without Claude credit.
+#                dashboard. Was the default 2026-07-26 .. 2026-09-08.
 #   "attended" — hand it to the human-driven terminal session (./attend reel <id>);
 #                no API. Use when you want a human writing the script.
-#   "api"      — call the Claude API directly. KEPT but INACTIVE — flip to re-enable.
-# NVIDIA is a deliberate engine choice for a post-gate step, NOT the silent trust-gate
-# fallback the charter forbids. Model id overridable via NVIDIA_SCRIPT_MODEL.
-REEL_MODE = os.environ.get("THELIVU_REEL_MODE", "nvidia").strip().lower()
+# Why the default moved (2026-09-08, Anil's call): the free script model was a small
+# REASONING model whose deliberation bled into the output — measured 6/6 captions
+# leaked on run #186, the cut that reached Instagram, and its leak-free rebuild was
+# still an unusable 2-beat 8.4s fragment. Haiku: 0/5 leaked at ~$0.0095/reel. Five
+# incidents (2026-08-26 .. 09-08) were all this one cause. Full note in
+# engine/agents/skill_runner.py::_HAIKU_SKILLS and docs/mistakes.md.
+# Either engine is charter-safe here: this is a POST-GATE step, not the silent
+# trust-gate fallback the charter forbids. NVIDIA model overridable via
+# NVIDIA_SCRIPT_MODEL; set THELIVU_REEL_MODE=nvidia to roll back.
+REEL_MODE = os.environ.get("THELIVU_REEL_MODE", "api").strip().lower()
 
 # Publishing behaviour — reels are the reach default; carousels are OPTIONAL, made
 # on demand only for the stories where the receipts are the story (owner's call,

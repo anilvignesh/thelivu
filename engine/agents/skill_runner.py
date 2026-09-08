@@ -291,7 +291,11 @@ _BELIEF_CLAUDE_SKILLS = {"ek:record-verifier", "ek:explainer-writer",
 # a finished piece, not a judgment about one. (The belief desks' reel needs no
 # equivalent — its narration is copied from the verified spine, so there is no
 # script skill at all; see publishing/belief_reel.py.)
-_NVIDIA_SKILLS = {"carousel-composer", "video-script", "ek:carousel-composer"}
+# video-script came OUT of this set 2026-09-08 — see _HAIKU_SKILLS below for the
+# measurement. Note this check runs BEFORE the Claude/Gemini routing (line ~726),
+# so leaving it here would silently override THELIVU_REEL_MODE=api: the reel mode
+# picks the CALLER, this set picks the PROVIDER, and NVIDIA wins ties.
+_NVIDIA_SKILLS = {"carousel-composer", "ek:carousel-composer"}
 
 # TRIAGE — still Claude, but Haiku 4.5 ($1/$5 vs $3/$15). These skills sift and
 # select against a strict output contract: they don't write prose, don't reason
@@ -304,7 +308,26 @@ _HAIKU_SKILLS = {"news-monitor", "topic-intake", "chief-of-staff", "newsworthine
                  # contract and writes no prose — same profile as the news triage
                  # skills. It decides only whether to SPEND, never whether a claim is
                  # true; record-verifier (Claude) is this desk's trust gate.
-                 "ek:premise-check"}
+                 "ek:premise-check",
+                 # video-script, moved off free NVIDIA 2026-09-08 (Anil: "the video
+                 # script should be run on claude"). It is post-gate like the triage
+                 # skills — it reformats an already verified + human-approved article
+                 # and touches no trust decision — but unlike them its words DO reach a
+                 # reader, so it sits here on judgement, not on the "nothing reaches a
+                 # reader" rule above.
+                 #
+                 # Measured on run #186's article, the story that leaked to Instagram:
+                 #   nemotron-3.5-lightning-30b-a3b (free)  6/6 captions leaked
+                 #   google/gemma-4-31b-it (free)           unavailable (300s timeout, 504)
+                 #   claude-haiku-4-5                       0/5 leaked, $0.0095/reel
+                 # The free model is a small REASONING model, and its deliberation bled
+                 # into the output fields — five incidents (2026-08-26 .. 09-08) were all
+                 # that one cause. Its leak-free rebuild was still unusable: 2 beats, 8.4s,
+                 # no hook, no close. ~$0.0095/reel at ~2 reels/day is ~$0.57/mo.
+                 # Haiku not Sonnet: this formats verified prose, it does not judge truth.
+                 # Cost of this choice is the quota breaker — in api mode a dry Claude
+                 # budget now blocks reel builds, which free NVIDIA never did.
+                 "video-script"}
 
 # Everything else routes to Claude (judgment / structured decisions / writing):
 # pattern-synthesizer, meta-synthesizer, article-writer, editorial-reviewer,

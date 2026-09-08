@@ -36,9 +36,16 @@ tg_chat = app.get("TELEGRAM_DRAFT_CHAT_ID", "")
 # fallback just stays inactive without them, nothing else breaks.
 cf_token = app.get("CLOUDFLARE_API_TOKEN", "")
 cf_account = app.get("CLOUDFLARE_ACCOUNT_ID", "")
+# Added 2026-09-08: the video-script step moved from free NVIDIA to Claude Haiku
+# (REEL_MODE default "api" — see shared/config.py). Without this key the worker
+# cannot build ANY reel, so it is required, not optional. This script rewrites
+# reel-worker.env wholesale on a schedule, so a key added by hand on the VM would
+# be erased on the next run — it has to be sourced here to survive.
+anthropic_key = app.get("ANTHROPIC_API_KEY", "")
 
 missing = [n for n, v in [("DATABASE_PUBLIC_URL", db_url),
-                          ("NVIDIA_API_KEY", nvidia_key)] if not v]
+                          ("NVIDIA_API_KEY", nvidia_key),
+                          ("ANTHROPIC_API_KEY", anthropic_key)] if not v]
 if missing:
     sys.exit(f"missing required Railway vars: {missing}")
 # Telegram push is optional (reel_worker logs + skips if absent) — warn, don't fail.
@@ -52,6 +59,7 @@ if not (cf_token and cf_account):
 with open(out_path, "w") as f:
     f.write(f"DATABASE_URL={db_url}\n")
     f.write(f"NVIDIA_API_KEY={nvidia_key}\n")
+    f.write(f"ANTHROPIC_API_KEY={anthropic_key}\n")
     f.write(f"SLIDE_SERVER_BASE_URL={base_url}\n")
     f.write(f"TELEGRAM_BOT_TOKEN={tg_token}\n")
     f.write(f"TELEGRAM_DRAFT_CHAT_ID={tg_chat}\n")
@@ -59,8 +67,8 @@ with open(out_path, "w") as f:
         f.write(f"CLOUDFLARE_API_TOKEN={cf_token}\n")
     if cf_account:
         f.write(f"CLOUDFLARE_ACCOUNT_ID={cf_account}\n")
-print("wrote vars: DATABASE_URL, NVIDIA_API_KEY, SLIDE_SERVER_BASE_URL, "
-      "TELEGRAM_BOT_TOKEN, TELEGRAM_DRAFT_CHAT_ID" +
+print("wrote vars: DATABASE_URL, NVIDIA_API_KEY, ANTHROPIC_API_KEY, "
+      "SLIDE_SERVER_BASE_URL, TELEGRAM_BOT_TOKEN, TELEGRAM_DRAFT_CHAT_ID" +
       (", CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID" if cf_token else ""))
 PYEOF
 
