@@ -81,6 +81,16 @@ def make_carousel(request, data):
         return err("no such run", 404)
     if run["status"] != "published":
         return err(f"run #{rid} is '{run['status']}' — carousels are made for published stories")
+    # Refuse at the button rather than queueing work the engine is paused from doing
+    # (2026-09-08). Queuing while paused looks like it worked and then silently never
+    # composes — the failure shape this codebase keeps getting bitten by.
+    from shared.db import kv_get as _kv_get
+    if _kv_get("carousels_paused"):
+        return err("carousels are paused — carousel-composer's model "
+                   "(google/gemma-4-31b-it, NVIDIA free tier) stopped answering: 50s and "
+                   "300s timeouts and a 504 in one day. Nothing was queued. Clear "
+                   "kv 'carousels_paused' once it answers again, or point "
+                   "carousel-composer at a model that does.")
     base = _BASE()
     url = f"{base}/a/{run['slug']}" if base and run.get("slug") else ""
     queue_carousel_run(rid, article_url=url)

@@ -536,8 +536,22 @@ if service == "thelivu-agent":
                 log.error("Recheck processing failed: %s", e, exc_info=True)
 
             # Carousels queued by an article approval — compose + render + send for review.
+            # Paused 2026-09-08 (Anil: "for the time being, lets pause the carousels").
+            # carousel-composer routes to google/gemma-4-31b-it on NVIDIA's free tier,
+            # and that model stopped answering: measured 50s timeout, a 300s timeout and
+            # a 504 in one day, while nemotron-3.5-lightning on the SAME endpoint replied
+            # in 9.1s — so it is that model, not the endpoint. Composing would hang the
+            # tick for minutes per carousel and produce nothing.
+            #
+            # A queued carousel is NOT dropped: it stays 'queued' and composes whenever
+            # this is cleared, so nothing is lost by leaving the pause on. Clear with
+            # kv_set("carousels_paused", "") once the model is answering again or
+            # carousel-composer is pointed at one that does.
             try:
-                process_queued_carousels()
+                if kv_get("carousels_paused"):
+                    pass
+                else:
+                    process_queued_carousels()
             except Exception as e:
                 log.error("Carousel processing failed: %s", e, exc_info=True)
 
