@@ -23,7 +23,11 @@ Env required (same variables command_center/run.sh already pulls from Railway):
   DATABASE_URL          — must be set BEFORE shared.db is imported (module-level
                            constant there), which is why this file sets up env
                            first and only imports thelivu modules after.
-  NVIDIA_API_KEY         — script (Gemma) + illustration (FLUX) generation.
+  NVIDIA_API_KEY         — illustration (FLUX) generation. Was also the script
+                           engine until 2026-09-08; the video-script step moved
+                           to Claude Haiku (see shared/config.py::REEL_MODE).
+  ANTHROPIC_API_KEY      — the video-script step. REQUIRED since 2026-09-08: with
+                           REEL_MODE=api and no key, no reel builds at all.
   SLIDE_SERVER_BASE_URL  — for the article_url passed into the reel (source link
                            card / caption) AND the public video URL Telegram
                            fetches to preview it. Reel still builds without it,
@@ -192,6 +196,28 @@ def _tg_post_text(text):
         return None
 
 
+def _worker_mode():
+    """Which script engine this unattended worker may use.
+
+    Was hardcoded "nvidia" at both call sites until 2026-09-08, which silently
+    outranked shared.config.REEL_MODE — so moving the video-script step to Claude
+    (36ce10f) changed the config default, the provider routing and this worker's
+    behaviour not at all, and the reel it built next still came from the free
+    model. Config is the single source of truth now.
+
+    The one thing that must not change: "attended" hands the script to a human at
+    a terminal, and there is no terminal here — it would block forever. That is
+    why the mode was pinned in the first place; keep the invariant, drop the pin.
+    """
+    from shared.config import REEL_MODE
+    mode = (REEL_MODE or "").strip().lower()
+    if mode == "attended":
+        log.warning("REEL_MODE=attended cannot run in the unattended worker "
+                    "(no terminal to hand the script to) — using api instead")
+        return "api"
+    return mode or "api"
+
+
 def _build_one(run_id, slug):
     from publishing.make_reel import make_narrated_reel
     from shared.db import get_run, kv_get, kv_set
@@ -205,7 +231,7 @@ def _build_one(run_id, slug):
               run_id, dark, article_url)
     try:
         result = make_narrated_reel(run_id, dark=dark, article_url=article_url,
-                                    mode="nvidia")
+                                    mode=_worker_mode())
     except Exception as e:
         # make_narrated_reel's contract is to never raise for expected failures
         # (voice down, quota, etc. all come back as {ok:False, ...}) — this is
@@ -266,7 +292,7 @@ def _build_remake(old_reel_id, run_id, notes):
               run_id, old_reel_id, notes)
     try:
         result = make_narrated_reel(run_id, dark=dark, article_url=article_url,
-                                    mode="nvidia", notes=notes)
+                                    mode=_worker_mode(), notes=notes)
     except Exception as e:
         log.exception("remake for run #%s raised", run_id)
         update_reel(old_reel_id, status="ready")  # don't strand it stuck mid-remake
