@@ -342,6 +342,16 @@ _SHOT_ANGLES = [
 MAX_HOUSE_CARDS = 1
 
 
+class NoIllustrationProvider(Exception):
+    """Every beat came back with no picture — the providers are down, not the prompts.
+
+    Distinct from the text-slide fallback on purpose. A handful of beats losing their
+    art to content refusals is a PROMPT problem, and text slides are the honest
+    product for it. EVERY beat failing is an OUTAGE, and the honest answer there is to
+    wait: retrying a refused prompt loops forever, retrying a dead endpoint succeeds
+    the moment it comes back."""
+
+
 def _illustrate(fields, out_dir, _p, shots=None, presentation_style=None):
     """Illustrations per beat, or None if too many beats went unillustrated.
 
@@ -408,6 +418,11 @@ def _illustrate(fields, out_dir, _p, shots=None, presentation_style=None):
                if g and len(g) < max(int(shots[i]), 1)]
     if partial:
         log.info("beats %s lost a sub-shot — holding the beat's own picture", partial)
+    if grouped and len(bare) == len(grouped):
+        # Not one beat got a picture from any provider. That is an outage, not a
+        # refusal — see NoIllustrationProvider.
+        raise NoIllustrationProvider(
+            "no provider produced an image for any of the %d beats" % len(grouped))
     if len(bare) > MAX_HOUSE_CARDS:
         log.warning("no illustration for beats %s (max %d) — text-slide fallback",
                     bare, MAX_HOUSE_CARDS)
@@ -821,9 +836,29 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
             try:
                 images = _illustrate(fields, tmpdir / "ill", _p, shots=shots_per_beat,
                                      presentation_style=presentation_style)
+            except NoIllustrationProvider as e:
+                log.error("run #%s: %s — NOT shipping a pictureless reel; the run stays "
+                          "unbuilt and the worker retries on the next poll", run_id, e)
+                return {"ok": False, "retry": True, "error": (
+                    "no illustration provider available — the reel was not built rather "
+                    "than shipped without pictures. It rebuilds automatically once a "
+                    "provider recovers.")}
             except Exception as e:
                 log.warning("illustration step failed for run #%s: %s", run_id, e)
                 images = None
+            # Both providers down = WAIT, don't ship a pictureless reel (2026-09-09,
+            # Anil: "if it fails, we wait and continue once done" — his call after
+            # pricing Gemini as a third provider at ~$22/mo against Cloudflare's $5).
+            #
+            # On 2026-09-08 reels #96-#101 rendered with no illustrations and were
+            # saved 'ready' anyway, queued to autopost. Nobody was told; Anil found it
+            # by watching them. A text-slide reel is a legitimate DELIBERATE look, but
+            # falling into it because two providers happened to be down is not a
+            # choice, it is an outage wearing the costume of a finished product.
+            #
+            # Failing here leaves the run with no reel row at all, which is precisely
+            # the state reel_worker._find_candidates() looks for — so the next poll
+            # rebuilds it automatically once a provider is back. Waiting IS the retry.
             if images:
                 from publishing.reel_illustrated import make_renderer
                 render_frame = make_renderer(images)
