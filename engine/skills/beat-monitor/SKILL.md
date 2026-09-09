@@ -81,10 +81,12 @@ City corporations run budgets in the hundreds to thousands of crores with far le
 state or central government — added 2026-09-10 after finding two live, apparently under-followed
 leads in a single pass on BBMP alone.
 
-- **Local-body CAG audits.** State Accountants General audit municipal corporations, not just state
-  departments: search `cag.gov.in [state] audit report [city corporation name]` (confirmed live for
-  Karnataka/BBMP at `cag.gov.in/ag1/karnataka` — check whether the equivalent exists per-state before
-  assuming it does elsewhere). These findings run into the thousands of crores and rarely get
+- **Local-body CAG audits — nationwide, not city-specific.** `data.gov.in/catalog/cag-local-bodies-audit-reports`
+  is the Open Government Data Platform's consolidated catalog of CAG local-body audits across
+  states — the right first stop for any metro or tier-1 city, not just the ones already checked.
+  State Accountants General also publish directly, e.g. `cag.gov.in/ag1/karnataka` for
+  Karnataka/BBMP — search `cag.gov.in [state] audit report [city corporation name]` per city when the
+  OGD catalog doesn't have it. These findings run into the thousands of crores and rarely get
   follow-up coverage past the initial headline.
 - **Budget vs. actual expenditure.** Search `[city corporation] budget estimates [year] site:data.opencity.in`
   — a civic-data aggregator that mirrors municipal budget PDFs for multiple Indian cities (confirmed
@@ -108,6 +110,56 @@ leads in a single pass on BBMP alone.
   the cited MOSPI/NSO release actually say that, or is the number rounded, cherry-picked from a
   favorable quarter, or compared against a revised-down base year? The gap between the claim and the
   primary release is the story, not the growth number itself.
+
+### 12. Union government — scheme spend, ad spend, official travel
+
+The centre gets less routine scrutiny than state governments on exactly the categories that are
+most trackable, because the primary records already exist and are already public.
+
+- **Scheme allocation vs. actual spend.** CAG performs Union-level audits, not just state ones —
+  search `cag.gov.in Financial Audit Report Union Government [year]` and
+  `CAG performance audit [scheme name]`. A CAG report tabled April 2026 flagged **₹54,282.32 crore in
+  unaccounted Central expenditure** for FY2024-25 — check whether that finding, or one like it, has
+  had any real follow-up before assuming it's been covered.
+- **Government advertising spend.** The Central Bureau of Communication (formerly DAVP) tracks this,
+  and it is RTI-able and periodically disclosed in Parliament — search
+  `DAVP OR "Central Bureau of Communication" advertisement expenditure crore [year]` and
+  `Lok Sabha question government advertisement expenditure [year]`. Historical figures already
+  public: ~₹10,000cr over 2002-03 to 2017-18, ~₹713cr in 2019-20, digital/social spend growing from
+  ~₹14cr (2020-21) to ~₹131cr (2025-26) — the pattern is to compare a period's ad spend against the
+  scheme spend it's meant to be publicizing, not to report the ad figure alone.
+- **PM and VVIP foreign travel.** Cost breakdowns are periodically disclosed via RTI and tabled in
+  Parliament (the RTI activist Commodore Lokesh Batra's disclosures are a recurring, citable primary
+  source for this) — search `Rajya Sabha OR Lok Sabha PM foreign visit cost crore [year]`.
+  **Accuracy note:** the Air India One aircraft purchase (~₹8,400cr for two Boeing 777s) is a
+  one-time capital cost serving the President, Vice-President and PM — never fold it into a
+  routine-travel figure, that's exactly the kind of number-conflation the fact-check gate exists to
+  catch.
+- **Who benefits.** Same cross-referencing as Pattern 1, applied to Union-level contracts and scheme
+  implementing agencies — winning vendor → MCA21 directors → any overlap with declared political
+  affiliations or donor records.
+
+### 13. Group and communal violence — accountability, record-based only
+
+A real, legitimate beat — and the one place on this list where the charter's neutrality mandate
+(§2, "no fixed villains") has to be applied most deliberately, because the failure mode here is
+starting from a name instead of a record.
+
+- **Never start from an organization.** Start from a specific incident (a date, a location, an FIR
+  number) and follow the record to whoever it actually names — search `FIR [incident] [date]
+  organizers named` and `chargesheet [incident] court`. If the record names an individual or a
+  group, report that; if it doesn't, there is no story yet, regardless of who public suspicion has
+  already settled on.
+- **Distinguish stages precisely** — named in an FIR ≠ chargesheeted ≠ convicted, same discipline as
+  the charter's verb-precision rule for scheme status (tabled ≠ passed, alleged ≠ found ≠ proven).
+- **Apply identically regardless of which side of the aisle it lands on.** The charter's own symmetry
+  test — a month with no story inconvenient to the editor's own sympathies means the lean crept back
+  in — governs here exactly as it does everywhere else on this list. An outlet that investigates
+  violence linked to one organization and gives every other organization a pass fails its own
+  credibility test, not just a rule.
+- **Key pattern:** police action or inaction after a communal incident — was an FIR filed promptly,
+  against whom, and does the chargesheet (if any) match the initial public allegations or diverge
+  from them? A diverging chargesheet, in either direction, is itself the story.
 
 ---
 
