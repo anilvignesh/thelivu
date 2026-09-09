@@ -201,7 +201,28 @@ def unsupported_numbers(script_text, article_text):
         return []
     said = _numeric_tokens(script_text, words=False)
     known = _numeric_tokens(article_text, words=True)
-    return sorted(said - known)
+    return sorted(_unmatched(said, known))
+
+
+def _unmatched(said, known):
+    """`said` values with no supporting `known` value, rounding-tolerant.
+
+    A spoken script always rounds a source figure's decimal remainder for the
+    ear — "262 crore," never "two hundred sixty-two point zero six crore" — so
+    an exact-float comparison rejects a real figure for the rounding a spoken
+    read always does. Run #223 looped for 4.5 hours this way: the article said
+    ₹262.06 crore, the script rounded it to 262 for narration, and 262.0 was
+    never a member of {262.06, ...}. A whole-number `said` value is now also
+    supported by any `known` value that rounds to it (Python's round-half-to-
+    even, which agrees with round-half-up at the .06/.29/.15/.94-style
+    remainders these figures actually carry). A `said` value that itself
+    carries a decimal (e.g. "3.86%") still requires an exact match — this only
+    widens the whole-number case, so a genuine percentage or precise figure is
+    not laundered through rounding.
+    """
+    known_rounded = {round(k) for k in known}
+    return {s for s in said
+            if s not in known and not (s == int(s) and s in known_rounded)}
 
 
 # A number alone is too weak a check: "Permission: 2 storeys" passed the test above
@@ -255,7 +276,10 @@ def unsupported_number_claims(script_text, article_text):
         ok = False
         for s in spots:
             near = art[max(0, s - _CLAIM_WINDOW): s + _CLAIM_WINDOW]
-            if val in _numeric_tokens(near, words=True):
+            # Same rounding tolerance as unsupported_numbers() and for the same
+            # reason: "262 crore" attached to the CMDRF fund has to be accepted
+            # against a nearby "262.06 crore" — see _unmatched()'s docstring.
+            if not _unmatched({val}, _numeric_tokens(near, words=True)):
                 ok = True
                 break
         if not ok:
