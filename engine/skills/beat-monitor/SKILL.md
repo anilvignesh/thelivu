@@ -75,6 +75,40 @@ Use web_search to probe each of these. Do not just check that the site exists �
 - Search `TRAI order [telecom issue] 2024` — especially surveillance, call-data, interception orders.
 - Search `IRDAI penalty insurance company Kerala 2024`.
 
+### 10. Municipal / urban local body finance
+
+City corporations run budgets in the hundreds to thousands of crores with far less scrutiny than
+state or central government — added 2026-09-10 after finding two live, apparently under-followed
+leads in a single pass on BBMP alone.
+
+- **Local-body CAG audits.** State Accountants General audit municipal corporations, not just state
+  departments: search `cag.gov.in [state] audit report [city corporation name]` (confirmed live for
+  Karnataka/BBMP at `cag.gov.in/ag1/karnataka` — check whether the equivalent exists per-state before
+  assuming it does elsewhere). These findings run into the thousands of crores and rarely get
+  follow-up coverage past the initial headline.
+- **Budget vs. actual expenditure.** Search `[city corporation] budget estimates [year] site:data.opencity.in`
+  — a civic-data aggregator that mirrors municipal budget PDFs for multiple Indian cities (confirmed
+  for GHMC; check coverage for others). Compare the claimed revenue surplus/deficit against visible
+  service delivery — a paper surplus next to unaddressed civic complaints is a story.
+- **Procurement and tenders.** City corporations publish e-tender awards. Cross-reference winning
+  contractors against MCA21 director data (Pattern 1, below) exactly as for state contracts — the
+  same director-overlap pattern applies at municipal scale and is checked far less often.
+- **Key pattern:** an audit finding sits unresolved for years (BBMP has objections dating to
+  1964-65) — who benefits from the non-resolution being the actual story, not just the original
+  finding.
+
+### 11. GDP and macroeconomic data
+
+- Search `MOSPI GDP estimate [quarter/year]` and `NSO GSDP [state] [year]` — the government's own
+  released growth figures, which get cited in headlines far more often than actually checked against
+  the underlying release.
+- Search `RBI monetary policy report [date]` for the central bank's own growth/inflation read, useful
+  as a cross-check against the government's official GDP claim in the same period.
+- **Key pattern:** a state or the centre claims a growth figure in a speech or press release — does
+  the cited MOSPI/NSO release actually say that, or is the number rounded, cherry-picked from a
+  favorable quarter, or compared against a revised-down base year? The gap between the claim and the
+  primary release is the story, not the growth number itself.
+
 ---
 
 ## The "join the dots" patterns — what to actively look for
@@ -86,6 +120,18 @@ These are the cross-database patterns that produce original scoops. Run at least
 
 **Pattern 2 — Declared Wealth vs Actual Trajectory**
 > Pick two MLAs or MPs. Search their 2019 and 2024 affidavits on MyNeta. If assets grew more than salary + known business income can explain, flag it. What businesses does the difference coincide with?
+
+**Pattern 2b — Declared Number vs Visible Lifestyle (2026-09-10)**
+> The affidavit figure and the visible lifestyle are two different signals, and the second is
+> checked far less often. A politician can under-declare or hold assets benami; a genuinely
+> disproportionate lifestyle — a property, a vehicle, a child's school, a foreign trip — reported in
+> the record (a registered property document, a vehicle registration, court/RTI records naming an
+> asset) is evidence in its own right, independent of what the affidavit says. **The distinction that
+> keeps this charter-safe: report the documented record (a specific registered property, a specific
+> disclosed trip), never a bare "how does he afford this" inference from visible wealth alone** — the
+> latter is exactly the unverifiable-innuendo pattern the charter's neutrality mandate forbids. If a
+> visible-lifestyle lead can't be traced to an actual record, it's not a lead yet, it's a hunch — hold
+> it, don't publish the suspicion.
 
 **Pattern 3 — CAG Finding → Next Budget**
 > A CAG report flagged fund diversion in Scheme X in 2022. Did Scheme X receive a budget increase in 2023 or 2024? Did the implementing officer get transferred or promoted? Both are stories.
