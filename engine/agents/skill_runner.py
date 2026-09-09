@@ -327,7 +327,13 @@ _HAIKU_SKILLS = {"news-monitor", "topic-intake", "chief-of-staff", "newsworthine
                  # Haiku not Sonnet: this formats verified prose, it does not judge truth.
                  # Cost of this choice is the quota breaker — in api mode a dry Claude
                  # budget now blocks reel builds, which free NVIDIA never did.
-                 "video-script"}
+                 "video-script",
+                 # reel-fact-check: reads an article and a list of figures and says
+                 # which are stated in it. Strict output contract, no prose, no trust
+                 # decision -- it guards a POST-gate artefact against compression
+                 # errors, it does not decide whether anything is true. Same profile
+                 # as the triage skills, and cheap enough to run on every reel.
+                 "reel-fact-check"}
 
 # Everything else routes to Claude (judgment / structured decisions / writing):
 # pattern-synthesizer, meta-synthesizer, article-writer, editorial-reviewer,

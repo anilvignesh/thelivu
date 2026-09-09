@@ -581,7 +581,8 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
     #    Claude in api mode. Either way the parsing/marker check is identical.
     from publishing.reel import (parse_script, build_reel, synth_beats,
                                   looks_like_self_talk, unsupported_numbers,
-                                  unsupported_number_claims)
+                                  unsupported_number_claims, numeric_claims,
+                                  fact_check_claims)
     # One hook check for every path: the same predicate the nvidia generator enforces is
     # handed to run_structured_skill as its marker (it accepts a callable), so api and
     # attended modes cannot drift to a weaker rule than the default mode.
@@ -703,6 +704,37 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
             return {"ok": False, "error": (
                 f"the reel {why}. Every number a reel puts on screen has to trace to "
                 f"the verified piece — nothing was rendered.")}
+
+        # Tier 3, the semantic one (2026-09-09). The two tiers above are string
+        # matching and cannot see MEANING: "Permission: 2 storeys" passed them for a
+        # building the article calls "sanctioned for ground-plus-one", because the
+        # article separately says "an extra floor or two" about other buildings. The
+        # tokens really do sit together; only the claim differs.
+        #
+        # So a model reads the article and must QUOTE the sentence supporting each
+        # figure. A claim it cannot cite is refused — the sentence exists or it does
+        # not, which is the one thing a model cannot flatter its way past.
+        #
+        # If the check could not RUN, that is not a pass. Every other gate in this
+        # file was written after something shipped because a failure looked like a
+        # success; this one says so out loud and blocks.
+        claims = numeric_claims(fields["beats"])
+        if claims:
+            bad, checked = fact_check_claims(claims, draft, run_id=run_id)
+            if not checked:
+                log.error("run #%s: fact check could not run — not shipping unverified "
+                          "figures", run_id)
+                return {"ok": False, "retry": True, "error": (
+                    "the reel states figures but the fact check could not run, so they "
+                    "are unverified — nothing was rendered. It will retry.")}
+            if bad:
+                log.error("run #%s: figures not supported by the article: %s",
+                          run_id, "; ".join(bad))
+                return {"ok": False, "error": (
+                    "the article does not state these figures: "
+                    + "; ".join(repr(b) for b in bad) +
+                    ". Every number a reel puts on screen has to trace to the verified "
+                    "piece — nothing was rendered.")}
     # The belief desks' one hard rule at this stage: what the voice says must still
     # be the spine the verifier passed. Checked AFTER parsing, so it covers a spine
     # mangled by the script format and a hand-corrected script whose words drifted.

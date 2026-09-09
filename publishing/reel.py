@@ -1177,3 +1177,82 @@ if __name__ == "__main__":
         print("narrated reel:", path)
     else:
         ap.error("give --script or --carousel-slides")
+
+
+# ── semantic fact check (the tier the regexes cannot reach) ───────────────────
+# unsupported_numbers() catches a figure absent from the article, and
+# unsupported_number_claims() catches a figure attached to a noun the article
+# never attaches it to. Both are string matching, and on 2026-09-09 the second
+# was shown to have a real false negative: the reel said "Permission: 2 storeys"
+# for a building the article calls "sanctioned for ground-plus-one", and passed,
+# because the article separately contains "an extra floor or two" — about OTHER
+# buildings. The tokens genuinely sit together. No proximity window separates
+# those two claims, because the difference between them is meaning.
+#
+# So this tier asks a model — but the design point is making it HARDER to fool
+# than the regex, not easier. A model asked "is this supported?" says yes to
+# anything plausible. This one must QUOTE the article sentence, verbatim, and a
+# claim with no quotable sentence is refused. The sentence either exists or it
+# does not, which is a check the model cannot flatter its way past.
+_CLAIM_LINE = re.compile(r"^CLAIM:\s*(.+)$", re.MULTILINE)
+_VERDICT_LINE = re.compile(r"^VERDICT:\s*(SUPPORTED|NOT_SUPPORTED)", re.MULTILINE)
+_QUOTE_LINE = re.compile(r"^QUOTE:\s*(.+)$", re.MULTILINE)
+
+
+def numeric_claims(beats):
+    """The digit-bearing lines a reel puts in front of a viewer, deduped.
+
+    Only digit-led claims, for the same reason the regex tiers use that cut:
+    number-words carry ordinary English ("one of them", "a floor or two") and
+    checking them turns a fact gate into a nuisance."""
+    seen, out = set(), []
+    for spoken, caption in beats:
+        for text in (caption, spoken):
+            t = (text or "").strip()
+            if t and _DIGITS_RE.search(t) and t not in seen:
+                seen.add(t)
+                out.append(t)
+    return out
+
+
+def fact_check_claims(claims, article_text, run_id=None):
+    """Which claims the article does not state. Returns (unsupported, checked_ok).
+
+    `checked_ok` is False when the check could not run (model unavailable,
+    malformed reply). The caller decides what that means — this function does
+    not get to silently approve a reel it never actually checked, which is the
+    failure mode every other gate in this file was written after.
+    """
+    if not claims or not article_text:
+        return [], True
+    payload = ("ARTICLE:\n" + article_text.strip()[:14000] +
+               "\n\nCLAIMS:\n" + "\n".join("- " + c for c in claims))
+    try:
+        from engine.agents.skill_runner import run_skill
+        out = run_skill("reel-fact-check", payload, max_tokens=2000, run_id=run_id)
+    except Exception as e:
+        log.warning("reel fact-check could not run (%s)", e)
+        return [], False
+
+    blocks = re.split(r"(?=^CLAIM:)", out or "", flags=re.MULTILINE)
+    verdicts = {}
+    for b in blocks:
+        cm, vm, qm = _CLAIM_LINE.search(b), _VERDICT_LINE.search(b), _QUOTE_LINE.search(b)
+        if not (cm and vm):
+            continue
+        claim = cm.group(1).strip()
+        quote = (qm.group(1).strip() if qm else "")
+        supported = vm.group(1) == "SUPPORTED"
+        # A SUPPORTED verdict with no quote is not a verdict. This is the whole
+        # mechanism: the model may not vouch for a claim it cannot cite.
+        if supported and (not quote or quote.upper() == "NONE"):
+            log.warning("fact-check said SUPPORTED with no quote — treating as "
+                        "unsupported: %r", claim[:80])
+            supported = False
+        verdicts[claim] = supported
+
+    if not verdicts:
+        log.warning("reel fact-check returned nothing parseable")
+        return [], False
+    # A claim the model simply didn't return a verdict for is unchecked, not fine.
+    return [c for c in claims if not verdicts.get(c, False)], True
