@@ -50,7 +50,19 @@ def call_with_retry(fn, *, what="nvidia call", tries=None, backoff=None,
         try:
             return fn()
         except requests.HTTPError as e:
-            if getattr(e.response, "status_code", 0) < 500:
+            code = getattr(e.response, "status_code", 0)
+            # 429 is the one 4xx worth retrying: it means "you asked too fast",
+            # which is by definition transient and is exactly what backoff is for.
+            # Every other 4xx is a bad request and will fail identically forever.
+            #
+            # Found 2026-09-09: six reel beats hit the Cloudflare illustration
+            # endpoint inside four seconds, every one returned 429, none was
+            # retried, and four reels (#97-#100) rendered with no images at all.
+            # The calls only used to be spaced because each beat spent ~9 minutes
+            # timing out against a dead FLUX first — remove that accidental
+            # rate-limiter (as the 2026-09-08 skip did) and the 429s arrive
+            # immediately.
+            if code < 500 and code != 429:
                 raise
             last = e
         except (requests.Timeout, requests.ConnectionError) as e:

@@ -461,7 +461,15 @@ def generate_beat_images(scenes, out_dir, *, seed=7, progress=None, place=None,
         """
         try:
             from shared.db import kv_get
-            return bool(kv_get("illustration_health_alerted_flux.1-dev (nvidia, primary)"))
+            primary_down = bool(kv_get("illustration_health_alerted_flux.1-dev (nvidia, primary)"))
+            # Only skip the primary if the FALLBACK is actually healthy. Skipping
+            # towards a provider that is itself flagged broken does not avoid a
+            # failure, it just reaches it faster and with no attempt made at all —
+            # which is how reels #97-#100 rendered with no images on 2026-09-08
+            # while BOTH providers were flagged. A dead primary is still worth
+            # trying when the alternative is nothing.
+            fallback_down = bool(kv_get("illustration_health_alerted_flux-1-schnell (cloudflare, fallback)"))
+            return primary_down and not fallback_down
         except Exception:
             return False
 
