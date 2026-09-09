@@ -127,6 +127,26 @@ Before final output, self-check spoken lines and captions against
   The stake must be one the article established — sharpening is selection, never
   escalation. If the piece does not support a sharp hook, the honest fix is a
   narrower story, not a bigger claim.
+
+  **The hook does not have to be the story's chronological opening fact — go
+  find the single most attention-grabbing detail anywhere in the piece,
+  beginning, middle, or end, and lead with that.** The first three seconds
+  decide whether anyone sees the rest, so spend them on whatever detail is
+  sharpest, not whatever detail happens to come first in the telling. This is
+  a cold open: flash forward to the fact, then BEAT 1 properly restarts the
+  story from its real beginning and builds up to that same moment again in
+  its natural place — repeating it there is correct, not redundant, because
+  the hook was a tease and the body is where it gets its context. Example —
+  a protest story where the most dramatic fact is the arrest count, which
+  chronologically belongs a few beats in:
+  - HOOK: "A hundred people were detained at a protest that started with
+    twelve people holding signs."
+  - BEAT 1: restarts properly — "It began Tuesday morning outside the
+    collector's office, when a dozen farmers sat down demanding the promised
+    compensation." (the real beginning, told straight, no callback to the hook)
+  - BEAT 2/3: the story builds back up to the same fact — "By evening police
+    had detained a hundred people, according to the station's own log." — now
+    landing with the full context of how it got there, sourced and specific.
 - **Body (3–4 short beats, up to 6 when the extra length is earned):** the key
   fact → the context that reframes it → the evidence → the turn → (if a fifth or
   sixth beat is truly load-bearing) the counter-case, a second data point, or the
