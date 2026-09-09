@@ -209,7 +209,7 @@ Long-running investigation threads worked by story-scout weekly:
 
 ## Editorial guardrails
 
-- **Nothing auto-publishes.** Human approval required for every story.
+- **Publishing is gated by code, not by a human tap.** The manual gate was removed 2026-08-29 — all volume autopublishes and reels autopost. What is non-negotiable is that a failed gate *refuses* rather than warning and shipping anyway.
 - **Facts only from sources.** No stage may assert a fact from a model's training memory — every fact comes from a live search or the provided input. Each skill is told today's date; when memory and a source conflict, the source wins. A news agency that can't verify holds; it never fabricates.
 - **Skills are validated functions.** Every decision skill must return its structured block; on malformed/conversational output the call retries once, then the run **halts loudly** (`needs_attention`) and pings the editor — it never silently degrades or cascades.
 - **Capture survives outages.** Leads are queued the moment they're found; the expensive spine drains the queue only when credit is available. A dead provider pauses processing, it doesn't lose stories.
@@ -229,7 +229,7 @@ Set on **both** Railway services.
 
 | Variable | Required | Notes |
 |----------|----------|-------|
-| `ANTHROPIC_API_KEY` | Yes | Claude Sonnet 4.6 — judgment / writing |
+| `ANTHROPIC_API_KEY` | Yes | Claude Sonnet 5 — judgment / writing; Haiku 4.5 — triage + reel scripts |
 | `GEMINI_API_KEY` | Yes | Gemini 2.5 Flash + Pro — research / verify, billing enabled |
 | `DATABASE_URL` | Yes | Railway PostgreSQL URL |
 | `TELEGRAM_BOT_TOKEN` | Yes | From BotFather |

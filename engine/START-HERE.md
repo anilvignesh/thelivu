@@ -70,7 +70,12 @@ Phase-1 artifacts (`DRY-RUN-PLAYBOOK.md`, `dry-run-log.md`) are kept as history.
 
 ## 4. The non-negotiables (compressed charter — full text in `CHARTER.md`)
 
-1. **Nothing auto-publishes.** A human approves every piece. Final and mandatory.
+1. **Publishing is gated by CODE, not by a tap (changed 2026-08-29).** This used to
+   read "nothing auto-publishes; a human approves every piece." Anil removed that
+   gate: all volume now autopublishes and reels autopost, and he reads what shipped.
+   What is non-negotiable is what replaced it — the gates that *refuse*: verification,
+   self-talk detection, number containment, the 90s ceiling, the duplicate guard. A
+   failed gate must never become a warning that ships anyway.
 2. **Under-coverage selects, never confirms.** Obscurity says "look," never
    "it's true." Obscure claims face a *higher* bar.
 3. **One source proposes, the whole web disposes.** A claim's origin never counts
