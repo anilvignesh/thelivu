@@ -31,10 +31,16 @@ if it looks stale again, trust `PROJECT-STATUS.md`, which is the living state.
 - **Operations happen in the command centre**, not in a chat: `command_center/` on
   `:8600` (laptop, LAN, phone over Tailscale). The old Streamlit `dashboard.py` is
   **retired** as of 2026-07-30. See `docs/command-center-v2.md`.
-- **Reels + carousels are built locally** on the owner's laptop (cloned voice + ffmpeg;
-  Railway has no GPU) and stored in the DB for the fileserver to serve.
-- **The human gate is unchanged and non-negotiable** — publishing and posting are the
-  only gated actions, and nothing auto-publishes.
+- **Reels are built on the Oracle VM** (`129.225.103.20` — cloned voice + ffmpeg;
+  Railway has neither) and stored in the DB for the fileserver to serve. It auto-pulls
+  git hourly and restarts itself. *Moved off the laptop 2026-08; carousels are paused
+  entirely as of 2026-09-08 — that branch had been dead since 2026-07-23.*
+- **The human gate is GONE, deliberately (2026-08-29).** All volume autopublishes and
+  reels autopost in two daily slots; the human sees it afterwards. What replaced it is
+  hard gates in code that *refuse* rather than ask — verification, self-talk detection,
+  number containment, the 90s reach ceiling, the duplicate-post guard. Do not restore a
+  manual tap without reading `work/active/Thelivu/Autonomy & Editorial Rules` first;
+  removing it was an owner decision, not drift.
 
 Phase-1 artifacts (`DRY-RUN-PLAYBOOK.md`, `dry-run-log.md`) are kept as history.
 
@@ -48,10 +54,15 @@ Phase-1 artifacts (`DRY-RUN-PLAYBOOK.md`, `dry-run-log.md`) are kept as history.
 - **First source:** FYI by Creator House (Kerala). Full list in `sources.yaml`.
 - **Models:** Claude for reasoning (investigate/verify/write/review); Gemini for video
   ingestion and some monitoring. Channels are *tips*; the open web is the substance.
-  **Presentation-side skills only** (`carousel-composer`, `video-script`) run on free
-  NVIDIA-hosted Gemma — they format an already-verified, already-approved story, so they
-  never touch the trust gate. That split is the locked part: *never* move a judgment or
-  verification step onto a cheaper model to save credit.
+  **Presentation-side skills** format an already-verified, already-approved story, so
+  they never touch the trust gate — that split is the locked part: *never* move a
+  judgment or verification step onto a cheaper model to save credit. Which model they
+  run on is NOT locked and has changed: `video-script` moved to **Claude Haiku 4.5** on
+  2026-09-08 after the free NVIDIA reasoning model leaked its own chain-of-thought into
+  on-screen captions five times (measured: 6 leaks in 6 captions vs 0 in 5, ~$0.0095 a
+  reel). `carousel-composer` is still on free NVIDIA and is currently paused. The lesson
+  is the inverse of the locked rule: cheap is fine post-gate, but *verify it empirically*
+  — a small reasoning model is the wrong CLASS for structured output, not merely weaker.
 - **Hosting (superseded 2026-07-30):** the engine runs unattended on **Railway**;
   media rendering is local on the owner's **Pop!_OS laptop** (not the M1 Mac this
   originally said). Attended mode (`./attend`) still exists as the fallback for when the

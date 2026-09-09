@@ -217,6 +217,45 @@ def post_reel_run(reel_id, progress=None):
     if r.get("status") == "posted" and r.get("ig_media_id"):
         return {"ok": True, "media_id": r["ig_media_id"], "permalink": r.get("ig_permalink"),
                 "already_posted": True}
+    # ...and the OTHER double-post: a DIFFERENT reel for a story that already has one
+    # live (2026-09-09). The check above only stops the same row going twice.
+    #
+    # Found because Anil recognised a queued reel as one he had already seen on
+    # Instagram: run #121 had reels #14 and #15 sitting ready while #16 was long
+    # posted, and run #154 had #30 ready against #31 posted. get_ready_reels() now
+    # excludes those, but that is the SELECTION query — the command centre's Post
+    # button and the Telegram approve handler call this function directly and never
+    # touch it. With autoposting on (Anil: "since you are autoposting, that duplicate
+    # reels never get posted"), the guard belongs at the irreversible step, not only
+    # at the step that chooses.
+    #
+    # A remake is unaffected: reel_worker marks the old row 'superseded', not
+    # 'posted'. This only fires when the story genuinely went out already.
+    try:
+        from shared.db import _conn, _is_postgres
+        run_id = r.get("run_id")
+        if run_id:
+            conn = _conn()
+            try:
+                cur = conn.cursor()
+                ph = "%s" if _is_postgres() else "?"
+                cur.execute(
+                    f"SELECT id, ig_permalink FROM reels WHERE run_id = {ph} "
+                    f"AND status = 'posted' AND id <> {ph} LIMIT 1", (run_id, reel_id))
+                row = cur.fetchone()
+            finally:
+                conn.close()
+            if row:
+                log.error("refusing to post reel #%s: run #%s already posted reel #%s (%s)",
+                          reel_id, run_id, row[0], row[1])
+                return {"ok": False, "duplicate": True, "error": (
+                    f"run #{run_id} already has a reel on Instagram — reel #{row[0]}, "
+                    f"{row[1] or 'no permalink recorded'}. Posting this one would put the "
+                    f"same story out twice. Kill it, or delete the live post first.")}
+    except Exception as e:
+        # Never let the guard's own failure block a legitimate post.
+        log.warning("could not check run #%s for an existing posted reel: %s",
+                    r.get("run_id"), e)
     if not SLIDE_SERVER_BASE_URL:
         return {"ok": False, "error": "SLIDE_SERVER_BASE_URL not set — no public host for the reel"}
     if not IG_USER_ID or not IG_ACCESS_TOKEN:

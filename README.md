@@ -1,6 +1,8 @@
 # Thelivu — AI-Powered Public Interest Journalism Engine
 
-A fully autonomous investigative journalism pipeline. It monitors primary government sources, investigates leads, verifies claims, writes drafts, and sends them to a human editor for approval before anything is published. Nothing reaches the @thelivu Telegram channel without a human decision.
+A fully autonomous investigative journalism pipeline. It monitors primary government sources, investigates leads, verifies claims, writes drafts, publishes articles, and cuts them into narrated Instagram/YouTube reels in Anil's own cloned voice.
+
+**Publishing is automatic; the gates are editorial, not manual.** Until 2026-08-29 nothing published without a human tap. That gate was removed deliberately — all volume now autopublishes, and the human sees it afterwards. What replaced it is a set of *hard* gates in code that refuse to ship rather than asking permission: a claim that fails verification, a reel whose captions leak model reasoning, a figure that isn't in the article, a cut that breaks the 90-second reach ceiling, or a story whose reel already went out. The human decision moved from "approve each piece" to "set the rules and read what shipped."
 
 ---
 
@@ -18,9 +20,11 @@ Every 6 hours, the engine:
 8. **Verifies** every claim against a strict two-source corroboration gate (on Gemini 2.5 Pro)
 9. **Writes** a transparent draft with Fact / Allegation / Inference labels
 10. **Reviews** for quality, charter compliance, and legal risk
-11. **Sends** the draft to the editor on Telegram — a clean Telegraph preview + Approve / Kill / Hold buttons
+11. **Publishes** the article to its own page + a formatted @thelivu teaser, and notifies Telegram
+12. **Cuts a reel** — script (Claude Haiku) → narration in Anil's cloned voice (Chatterbox) → conceptual illustrations (FLUX) → ffmpeg
+13. **Posts** the reel to Instagram and cross-posts to YouTube Shorts, in two daily slots (10:00 and 18:00 IST)
 
-The editor approves → it publishes to @thelivu as a formatted teaser + Telegraph article. No approval → nothing goes out.
+Steps 12-13 run on a separate always-on VM, not on Railway — reels need a voice server and ffmpeg.
 
 **Two foundational rules:** (1) **facts come only from live sources, never from a model's training memory** — every skill is told today's date and instructed that sources always win; (2) **each skill is a validated function, not a chatbot** — it returns a structured block or the run halts loudly (`needs_attention`), so a stray conversational reply can never cascade or get published.
 
@@ -29,33 +33,34 @@ The editor approves → it publishes to @thelivu as a formatted teaser + Telegra
 ## Architecture
 
 ```
-Railway: thelivu-agent (always-on)          Railway: thelivu (always-on bot)
-┌──────────────────────────────────┐        ┌──────────────────────────────┐
-│  run.py — 2-min polling loop     │        │  bot.py — Telegram bot       │
-│                                  │        │                              │
-│  Every 2 min:                    │        │  /topic  → queue a story     │
-│    check pending_topics          │        │  /runnow → force RSS cycle   │
-│    → run topic pipeline          │        │  /queue  → show queue        │
-│                                  │        │  /costs  → today's spend     │
-│  Every 6h:                       │        │                              │
-│    ingest RSS + beat-monitor     │        │  Approve → posts to @thelivu │
-│    → capture leads to queue      │        │  Kill / Hold → logged        │
-│    → drain queue through spine   │        │  /republish → re-review a run│
-│                                  │        └──────────────────────────────┘
-│  Weekly:                         │
-│    source scout + story scout    │        Dashboard: streamlit run dashboard.py
-│    story tracker (follow-ups)    │        5 tabs: Overview · Drafts · Pipeline
-│                                  │               Sources · Costs
-│  Monthly:                        │
-│    meta-synthesis (patterns)     │
-└──────────────────────────────────┘
-         │
-         ▼ shared
-PostgreSQL on Railway
-pipeline_runs · publications · token_usage · lead_queue
-active_agents · pending_topics · seen_items
-source_proposals · approved_sources · kv_store
+Railway: thelivu-agent (always-on)        Railway: thelivu (always-on)
+┌────────────────────────────────┐        ┌──────────────────────────────┐
+│ run.py — 2-min polling loop    │        │ bot.py — Telegram bot        │
+│                                │        │ fileserver — serves reel MP4s│
+│ every 2 min: owner topics      │        │ article pages — /a/<slug>    │
+│ every 6h:    RSS + beat-monitor│        │                              │
+│ daily:       chief-of-staff    │        │ /topic /runnow /queue /costs │
+│ weekly:      scouts, tracker   │        │ /remake /pause /resume       │
+│ 2x daily:    autopost sweep    │        └──────────────────────────────┘
+│              10:00 · 18:00 IST │
+└────────────────────────────────┘
+        │                                  Oracle VM (always-on, ARM)
+        │                                 ┌──────────────────────────────┐
+        │                                 │ reel-worker — builds reels   │
+        │                                 │ chatterbox  — cloned voice   │
+        │                                 │ auto-pulls git hourly        │
+        │                                 └──────────────────────────────┘
+        ▼ shared
+PostgreSQL on Railway                      Laptop: localhost:8600
+pipeline_runs · reels · digs · publications └─ command centre (review + tap Post)
+lead_queue · pending_topics · token_usage
+engine_events · ig_media · kv_store
 ```
+
+**Four hosts, one database.** Railway runs the engine and the public surface;
+the Oracle VM builds reels (it needs a voice server and ffmpeg, which Railway
+has neither of); the laptop is where you look and where you tap Post. Nothing
+depends on the laptop being awake.
 
 **Resilience — capture is decoupled from processing.** Finding leads is cheap and
 runs every cycle, persisting new leads to `lead_queue`. Running the spine
@@ -82,7 +87,7 @@ Each skill is a `SKILL.md` file — the file IS the system prompt. No code in th
 | `story-scout` | 2.5 Flash | Works the watchlist weekly — one theme → a dig brief. |
 | `story-tracker` | 2.5 Flash | Checks published stories for new developments; queues follow-ups. |
 
-### Judgment / writing tier — Claude Sonnet 4.6
+### Judgment / writing tier — Claude Sonnet 5
 | Skill | What it does |
 |-------|-------------|
 | `news-monitor` | Ranks queued leads by impact × under-coverage; emits a structured `SELECTED_LEAD` (or `NONE` on a quiet day). Disqualifies already-well-covered and routine-process news. |
@@ -95,7 +100,7 @@ Each skill is a `SKILL.md` file — the file IS the system prompt. No code in th
 | `source-ingestor` | Extracts structured claims from YouTube transcripts. |
 
 ### Deterministic (no model)
-- **publisher** — posts the approved article as a Telegraph page + a formatted channel teaser; pure Python in the bot, never an LLM (it must not alter substance).
+- **publishing/publish.py** — posts the article as its own page + a formatted channel teaser; pure Python, never an LLM (it must not alter substance). (The old `publisher` *skill* is dead — last call 2026-06-25.)
 - **cost report** — daily spend computed from `token_usage` in Python (8pm IST).
 - **entertainment pre-filter** — keyword exclusion before any model call.
 
@@ -115,6 +120,52 @@ Two providers. **Gemini** for anything that must touch the live web; **Claude** 
 **No cross-engine fallback — pause, don't degrade.** If a provider is out of credit, the pipeline does **not** silently switch engines (e.g. run research on Claude's web-search, or judgment on a weaker model). Switching engines changes *how* facts are sourced and erodes the consistency of the flow. Instead, both providers behave the same way: the run pauses and the work goes back in the queue, resuming automatically when credit returns. Lead capture is cheap and keeps running throughout, so nothing is lost — a dead provider costs you time, never stories. (A no-search model is *doubly* barred from research: it can't ground facts at all.)
 
 **Symmetric outage behavior.** Gemini down → research/verify pause, leads wait. Claude down → judgment/writing pause, leads wait. Either way the queue keeps filling and drains when the provider is back. Quota alerts hit Telegram immediately — 🟡 temporary, 🔴 billing — one per issue per day; a pause posts a ⏸ card.
+
+---
+
+## Reels — the reach surface
+
+Every published story becomes a <90s vertical reel, narrated in Anil's own cloned
+voice, and posted to Instagram + YouTube Shorts in two daily slots (10:00 and
+18:00 IST, one reel per slot, oldest eligible first).
+
+```
+article ─► video-script (Claude Haiku 4.5) ─► Chatterbox (cloned voice)
+                                           ─► FLUX illustrations (1 per beat)
+                                           ─► ffmpeg ─► reels table ─► autopost
+```
+
+**The script model matters more than it looks.** It was on a free NVIDIA
+reasoning model until 2026-09-08, which leaked its own chain-of-thought into
+on-screen captions five separate times — reels shipped reading
+`Cabinet(1) advice(2) required(3) = 3 words. Good.` Measured on one article:
+that model leaked 6 captions out of 6; Haiku leaked 0 of 5, at ~$0.01 a reel.
+
+**Illustrations** come from FLUX.1-dev (NVIDIA, free) with FLUX.1-schnell
+(Cloudflare Workers AI, paid $5/mo) as an independently-hosted second provider —
+same model family, shared infrastructure with neither. Capped at 40 images/day,
+which is Cloudflare's included daily allowance, so the bill is $5 flat. If *both*
+providers are down the reel is **not built** rather than shipped pictureless; the
+run keeps no reel row, so the next poll rebuilds it once a provider recovers.
+
+### The gates that replaced the human tap
+
+Each of these exists because something bad shipped, and each **refuses** rather
+than warns:
+
+| Gate | Blocks | Because |
+|------|--------|---------|
+| self-talk detection | model reasoning in a caption or spoken line | five incidents, 2026-08-26 → 09-08 |
+| number containment | a figure absent from the article | compression invents statistics |
+| claim matching | a real figure attached to the wrong thing | `2 storeys` for a ground-plus-one building |
+| 90-second ceiling | cuts that lose Reels-tab reach | a 118s reel reached Instagram |
+| duplicate guard | a second reel for a story already posted | runs #121 and #154 were queued to post twice |
+| daily image cap | more than 40 images/day | keeps the Cloudflare bill at exactly $5 |
+
+The honest limit: these validate the artefact in front of them. The duplicate
+guard exists because *none* of the others could see what had already been
+published — that class of blindness was found by a human recognising a video,
+not by a check.
 
 ---
 
@@ -197,23 +248,21 @@ Set on **both** Railway services.
 
 ## Dashboard
 
-A Streamlit control panel. It can publish, kill, and run raw SQL, so it is
-**password-gated** — set `DASHBOARD_PASSWORD` or it refuses to start. Secrets come
-from env only (none hardcoded). Host it as a separate Railway service (start
-command `python -m streamlit run dashboard.py --server.port $PORT --server.address
-0.0.0.0`) with **App Sleeping** on so it costs ~nothing when idle.
-
-```bash
-DASHBOARD_PASSWORD=... DATABASE_URL=... python -m streamlit run dashboard.py
-```
+The **command centre** (`command_center/`, `localhost:8600`, password-gated) —
+Starlette + a hand-rolled SPA, no new dependencies. Autostarts on login; reach it
+from a phone over Tailscale.
 
 | Tab | What you can do |
 |-----|----------------|
-| Overview | See live agents, recent runs, submit a topic, force RSS cycle, today's cost |
-| Drafts | Read full draft text, Approve / Kill / Hold (posts directly to channel) |
-| Pipeline | All runs with status filter, expandable detail: draft · review · verification |
-| Sources | Active sources, pending proposals with Add/Skip, add RSS feed manually |
-| Costs | Daily spend by provider, per-model pie, per-skill breakdown, published log |
+| Gate / Stories | Read drafts, publish, kill, hold |
+| Reels | Preview every cut, Post to Instagram, Edit caption, Remake, Kill |
+| Digs | Persistent investigations and their logs |
+| Sources | Active sources, pending proposals |
+| Costs | Daily spend by model and skill |
+| System | Pause/resume the engine, autopost hold, news-cycle hold |
+
+*(The Streamlit dashboard this replaced was retired 2026-07 — see
+`docs/plans/04-streamlit-retirement.md`. `dashboard.py` still exists but is dead.)*
 
 ---
 

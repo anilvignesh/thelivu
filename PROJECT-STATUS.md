@@ -6,6 +6,55 @@ state of the work — update it as you go. For how the engine runs, see
 
 ---
 
+## Single desk, paid images, and five gates (2026-09-08 → 09)
+
+**Thelivu is the news desk only.** The Everyone Knows / Turns Out belief desks are
+retired (Anil: *"thelivu only needs the single desk, news"*). Gated, not deleted —
+they reach 79 call sites plus an 11-file `engine/desks/ek/` subsystem, and ripping
+that out in one pass is how the news path breaks quietly. Undo with
+`kv_set("belief_desks_retired", "")`. Their material moved to the did_you_know
+Shorts channel: `trend-shorts/storage/from_thelivu_belief_desk.json`, 19 finished
+pieces with grounding intact + 13 researched premises needing sources.
+
+**Model routing changed twice.**
+- `video-script` moved off the free NVIDIA reasoning model to **Claude Haiku 4.5**.
+  Measured on run #186's article: NVIDIA leaked 6 captions of 6, Haiku 0 of 5, at
+  ~$0.0095/reel. That model was the single cause of five leak incidents from
+  2026-08-26 to 09-08.
+- Default `CLAUDE_MODEL` is now **`claude-sonnet-5`**. The 2026-07-26 decision to
+  wait out Sonnet 5's intro pricing has *reversed* — it is now $2/$10 against 4.6's
+  $3/$15. Railway already carried the override, so the VM and local builds were
+  quietly on the pricier model.
+
+**Images are paid now.** Cloudflare Workers Paid ($5/mo) after the free 10,000
+neurons/day ran out and four reels shipped with no pictures. Capped at 40
+images/day (= the included allowance) so the bill is $5 flat. Gemini was priced as
+a third provider and rejected: ~$22/mo against Cloudflare's $5. If both providers
+fail the reel is **not built** rather than shipped pictureless.
+
+**Five gates added, all hard blocks:** generalised self-talk detection, number
+containment, claim-matching, the 90-second reach ceiling, and a duplicate-post
+guard. See the README's "gates that replaced the human tap" table.
+
+**Carousels paused** (`carousels_paused`) — the branch had been dead since
+2026-07-23 and its model stopped answering.
+
+**Backlog cleared.** 48 items awaiting a decision → 2. Six reviewer-approved
+articles published (some 9 weeks old), 36 draftless runs killed, 4 revived into
+`investigating` (the CAG cluster + the SIR-forms story).
+
+**Known open:**
+- `needs_attention` has no sweep. It reached 41 runs before this clear-out.
+- The fact gate catches invented numbers but **not** a real number attached to the
+  wrong claim in a way proximity can't see — verified false negative on
+  `2 storeys` against an article containing "an extra floor or two".
+- NVIDIA FLUX still flagged broken; health check re-tests it.
+- Gemini blocks 16–18% of research calls, almost certainly RECITATION not SAFETY.
+  Now recorded per-block (`gemini-content-block` events) — check the reasons after
+  a week before acting on it.
+
+---
+
 ## Homepage feed — the "just a list" bio page split into a real news feed (2026-08-29)
 
 Anil: the homepage read as "just a list." Built a real scroll feed at `/`, kept
