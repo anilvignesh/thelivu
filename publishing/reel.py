@@ -237,6 +237,22 @@ _CLAIM_RE = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s*(?:%|per cent|percent)?[\s\-–�
 # enough that a number three sentences away does not vouch for an unrelated noun.
 _CLAIM_WINDOW = 90
 
+# A bare 4-digit number in the ordinary calendar range is a year, not a quantity.
+# Run #223 failed repeatedly on "2026 shows" and "2026 calls" — the regex cannot tell
+# a year sitting next to an ordinary verb from "719 crore", and a year is never the
+# kind of number this check is for (nothing "attaches" a unit to a year). Skip it
+# outright rather than trying to enumerate every verb that might follow one.
+_YEAR_RE = re.compile(r"^(19|20)\d{2}$")
+
+# The regex's "next word" is sometimes a function word, not the noun being counted —
+# "0.3%, that direction is up" reads as "0.3 that". None of these is ever a unit a
+# number counts, so a number immediately followed by one is never a genuine claim.
+_NON_UNIT_WORDS = {
+    "that", "this", "these", "those", "which", "who", "whom", "and", "but", "for",
+    "with", "from", "into", "onto", "upon", "the", "was", "were", "are", "has",
+    "have", "had", "not", "its", "his", "her", "their", "our", "your",
+}
+
 
 def _unit_key(word):
     """Crude singular form, so storeys/storey and floors/floor are one unit."""
@@ -261,6 +277,8 @@ def unsupported_number_claims(script_text, article_text):
     bad = []
     for m in _CLAIM_RE.finditer(script_text or ""):
         raw, unit = m.group(1), m.group(2)
+        if _YEAR_RE.match(raw) or unit.lower() in _NON_UNIT_WORDS:
+            continue
         try:
             val = float(raw.replace(",", ""))
         except ValueError:
