@@ -523,8 +523,54 @@ def generate_beat_images(scenes, out_dir, *, seed=7, progress=None, place=None,
         data = base64.b64decode(b64)
         return data if len(data) >= MIN_IMAGE_BYTES else None
 
+    # Daily image cap (2026-09-09, Anil: "make sure you dont go above the limit, the 5 dollar
+    # limit"). Cloudflare Workers Paid is "$5/month + usage": the $5 is a base, not a ceiling.
+    # It still includes 10,000 neurons/day, and overage is $0.011 per 1,000 after that.
+    #
+    # Measured from this project's own numbers: ~30 images exhausted 10,000 neurons on
+    # 2026-09-08, so roughly 250 neurons an image — about $0.003. Normal volume is ~2.7
+    # reels/day x 6 beats = ~16 images = ~4,000 neurons, comfortably inside the daily
+    # allowance. The cap exists for the ABNORMAL day: 2026-09-08 only blew through it
+    # because six articles were republished at once and every one queued a rebuild.
+    #
+    # 40 images/day is ~10,000 neurons — the free daily allowance — so staying under it
+    # means the bill is exactly $5 and never a cent more. Raise MAX_IMAGES_PER_DAY only
+    # with the overage arithmetic in hand: each extra 1,000 neurons (~4 images) is $0.011.
+    MAX_IMAGES_PER_DAY = int(os.environ.get("THELIVU_MAX_IMAGES_PER_DAY", "40"))
+
+    def _images_today(add=0):
+        """Count images generated today, optionally adding to it. Best-effort: a KV
+        failure must not stop a reel building, so it fails OPEN — the cap is a cost
+        guard, not a correctness one."""
+        try:
+            from shared.db import kv_get, kv_set
+            from datetime import datetime, timezone
+            key = "images_generated_" + datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            n = int(kv_get(key) or 0)
+            if add:
+                n += add
+                kv_set(key, str(n))
+            return n
+        except Exception:
+            return 0
+
     paths = []
     for i, scene in enumerate(scenes):
+        if _images_today() >= MAX_IMAGES_PER_DAY:
+            # Loudly, not silently. An imageless reel shipping unnoticed is exactly what
+            # happened on 2026-09-08, and the whole point of a cost cap is that hitting it
+            # is a decision you get told about rather than a mystery in the output.
+            log.error("daily image cap reached (%d) — remaining beats get no illustration. "
+                      "Raise THELIVU_MAX_IMAGES_PER_DAY if this is wrong.", MAX_IMAGES_PER_DAY)
+            try:
+                from engine.agents.orchestrator import _notify_card
+                _notify_card("⚠️", "Daily image cap reached",
+                             body=(f"Stopped after <b>{MAX_IMAGES_PER_DAY}</b> images today to stay "
+                                   f"inside Cloudflare's free daily allowance, so the bill stays at "
+                                   f"$5. Reels built from here get text slides until UTC midnight."))
+            except Exception:
+                pass
+            break
         if progress:
             try:
                 progress(i, len(scenes))
@@ -584,5 +630,9 @@ def generate_beat_images(scenes, out_dir, *, seed=7, progress=None, place=None,
             continue
         p = out_dir / f"beat_{i}.png"
         p.write_bytes(data)
+        # Count only images we actually GOT. A 429 or a content-filter refusal costs
+        # nothing, so counting attempts would throttle the day on failures rather than
+        # on spend — the opposite of what a cost cap is for.
+        _images_today(add=1)
         paths.append(p)
     return paths
