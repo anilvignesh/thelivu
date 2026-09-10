@@ -22,6 +22,56 @@ that fails is logged and slept off, and government sources change format often
 enough that today's working URL is not a permanent fact.
 """
 
+# Dataset targets: a data.gov.in resource watched by arithmetic rather than
+# read by a model. No model call, so no hallucination surface — see
+# engine/digger/dataset_watch.py. `kind` distinguishes them from index targets.
+DATASET_TARGETS = [
+    {
+        "key": "nh-projects-delayed",
+        "kind": "dataset",
+        "name": "MoRTH — NH projects and delayed projects, by state",
+        "resource_id": "239bb06d-9598-45e2-bef9-4322908b3fad",
+        "verified": True,
+        "enabled": True,
+    },
+    # All verified 2026-09-11 by running dataset_watch.examine() over the live
+    # rows: the column pair is comparable, the median is plausible, and the
+    # anomalies it reports are outliers against the table's own distribution.
+    {
+        "key": "state-budget-vs-actual",
+        "kind": "dataset",
+        "name": "State/UT sanctioned budget vs actual expenditure",
+        "resource_id": "9b4965b9-effe-430b-9915-d20adfa17627",
+        "verified": True,   # median 10%; flags Bihar 33%, Puducherry 31%
+        "enabled": True,
+    },
+    {
+        "key": "scheme-funds-released-vs-spent",
+        "kind": "dataset",
+        "name": "State/UT funds released vs expenditure incurred on sanctioned projects",
+        "resource_id": "eb76fa2b-53ec-4bff-a191-20795e5584e5",
+        "verified": True,   # median 0% — most states spend what they get, so an
+                            # outlier here is stark: Gujarat 894 released, 21 spent
+        "enabled": True,
+    },
+    {
+        "key": "jail-staff-vacancy",
+        "kind": "dataset",
+        "name": "State/UT sanctioned vs actual strength of total jail staff",
+        "resource_id": "330a7b3f-8872-474f-aa47-caaa969f0eb9",
+        "verified": True,   # median 31%; flags Jharkhand at 62%
+        "enabled": True,
+    },
+    {
+        "key": "civil-police-vacancy",
+        "kind": "dataset",
+        "name": "State/UT sanctioned vs actual strength of civil police",
+        "resource_id": "29a72c62-58e3-4116-8b98-b66d6ea4709c",
+        "verified": True,   # median 19%; flags Haryana 68%, Lakshadweep 73%
+        "enabled": True,
+    },
+]
+
 TARGETS = [
     {
         "key": "sebi-enforcement",
@@ -72,6 +122,14 @@ TARGETS = [
         "name": "CAG local-body audit reports (nationwide OGD catalog)",
         "index_url": "https://www.data.gov.in/catalog/cag-local-bodies-audit-reports",
         "link_pattern": r"/resource/|/catalog/",
+        # DISABLED 2026-09-11. data.gov.in's HTML catalog returns 403 to our
+        # fetcher, and it failed every rotation for a day. The API key we now
+        # hold opens api.data.gov.in, but a search of the 287k-resource catalog
+        # found no structured equivalent of the CAG local-body audits — the
+        # nearest hits are Local Government Directory listings, which are
+        # administrative registers, not audits. Re-enable if a resource id for
+        # the audits themselves turns up.
+        "enabled": False,
         "verified": False,
         "brief": (
             "Audit findings on municipal or local-body finances: unspent or "
@@ -84,6 +142,12 @@ TARGETS = [
         "name": "MOSPI / NSO statistical releases",
         "index_url": "https://www.mospi.gov.in/press-release",
         "link_pattern": r"/press-release|/sites/default/files",
+        # DISABLED 2026-09-11. Every MOSPI listing path tried yields zero
+        # document links — the pages are JS-rendered and there is no feed. It
+        # failed every rotation. MOSPI's macro data is better reached as
+        # datasets anyway (see DATASET_TARGETS); this target was the wrong shape
+        # for the source.
+        "enabled": False,
         "verified": False,
         "brief": (
             "Official statistical releases — GDP/GSDP growth figures, revisions "
@@ -126,12 +190,13 @@ def db_targets():
 
 
 def active_targets():
-    """Targets in the rotation: the built-in list plus anything a human has
-    activated. A target may be disabled outright when it is known-broken (see
-    PIB) rather than left to burn a cycle every few hours."""
+    """Targets in the rotation: built-in index targets, dataset targets, plus
+    anything a human has activated. A target may be disabled outright when it is
+    known-broken (see PIB) rather than left to burn a cycle every few hours."""
     builtin = [t for t in TARGETS if t.get("enabled", True)]
-    known = {t["key"] for t in builtin}
-    return builtin + [t for t in db_targets() if t["key"] not in known]
+    datasets = [t for t in DATASET_TARGETS if t.get("enabled", True)]
+    known = {t["key"] for t in builtin + datasets}
+    return builtin + datasets + [t for t in db_targets() if t["key"] not in known]
 
 
 def by_key(key):

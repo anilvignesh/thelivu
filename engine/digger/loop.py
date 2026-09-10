@@ -12,6 +12,7 @@ Design constraints that are not negotiable on this host (945MB burstable VM):
 """
 
 import argparse
+import json
 import logging
 import os
 import random
@@ -19,6 +20,7 @@ import sys
 import time
 
 from engine.digger import extract, fetch, freellm, prefilter, routing, targets
+from engine.digger import dataset_watch
 from shared import db
 
 log = logging.getLogger("digger")
@@ -52,6 +54,9 @@ def run_cycle(target=None, dry_run=False):
     if target is None:
         log.warning("no targets configured")
         return []
+
+    if target.get("kind") == "dataset":
+        return _run_dataset_cycle(target, dry_run=dry_run)
 
     log.info("cycle start: %s (%s)", target["key"], target["index_url"])
     run_id = None if dry_run else db.start_digger_run(target["key"])
@@ -158,6 +163,84 @@ def run_cycle(target=None, dry_run=False):
         return []
 
 
+def _run_dataset_cycle(target, dry_run=False):
+    """A dataset target: fetch the table, do arithmetic, record anomalies.
+
+    No model is called. A finding here cannot be a hallucination because nothing
+    generated it — it is a subtraction over rows that were fetched, and the row
+    is kept as the excerpt.
+    """
+    from engine.digger import datagov
+
+    key = target["key"]
+    log.info("cycle start: %s (dataset %s)", key, target.get("resource_id", "?"))
+    run_id = None if dry_run else db.start_digger_run(key)
+    try:
+        rows = datagov.resource_all(target["resource_id"], page=200, cap=2000)
+        prev_raw = _kv_get(f"digger_dataset_{key}", "")
+        previous = {}
+        if prev_raw:
+            try:
+                previous = json.loads(prev_raw)
+            except Exception:
+                previous = {}
+
+        result = dataset_watch.examine(rows, previous=previous)
+        if not result.get("watchable"):
+            log.info("%s: not watchable (%s)", key, result.get("why"))
+            if not dry_run:
+                db.finish_digger_run(run_id, ok=True, docs_fetched=1,
+                                     candidates_found=0, model_calls=0)
+                _kv_set(_LAST_KEY, key)
+            return []
+
+        log.info("%s: %s rows, shape %s (%s), median %.0f%%, %d anomal%s, %d change(s)",
+                 key, result["rows"], result["shape"], result["measure"],
+                 result["median_shortfall"] * 100, len(result["anomalies"]),
+                 "y" if len(result["anomalies"]) == 1 else "ies",
+                 len(result["changes"]))
+
+        url = (f"https://api.data.gov.in/resource/{target['resource_id']}")
+        cands = dataset_watch.to_candidates(result, target.get("name", key), url,
+                                            target_key=key)
+        kept, dropped = prefilter.run(cands)
+        for c, why in dropped:
+            log.info("filtered: %s — %s", c["title"][:56], why[:60])
+
+        recorded = []
+        seen = set() if dry_run else db.digger_seen_urls(key)
+        for c in kept:
+            if dry_run:
+                log.info("[dry-run] %s", c["title"][:100])
+            else:
+                # Dedup by title here, not URL: every row of one dataset shares
+                # a URL, so per-URL dedup would record only the first anomaly.
+                if any(c["title"] == s for s in seen):
+                    continue
+                db.record_digger_candidate(
+                    target_key=key, title=c["title"], finding=c["finding"],
+                    source_url=c["source_url"], excerpt=c["excerpt"],
+                    model_a=None, model_b=None, answer_a=c["finding"],
+                    answer_b=None, agreement=c["agreement"], fetched_at=None)
+            recorded.append(c)
+
+        if not dry_run:
+            _kv_set(f"digger_dataset_{key}", json.dumps(result.get("state", {})))
+            db.finish_digger_run(run_id, ok=True, docs_fetched=1,
+                                 candidates_found=len(recorded), model_calls=0)
+            _kv_set(_LAST_KEY, key)
+        return recorded
+
+    except Exception as e:
+        log.warning("dataset cycle failed (%s): %s", key, e)
+        if not dry_run:
+            db.finish_digger_run(run_id, ok=False, docs_fetched=0,
+                                 candidates_found=0, model_calls=0,
+                                 error=str(e)[:500])
+            _kv_set(_LAST_KEY, key)
+        return []
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Thelivu Tier-0 digger")
     ap.add_argument("--once", action="store_true", help="run a single cycle and exit")
@@ -186,8 +269,9 @@ def main(argv=None):
 
     if args.list_targets:
         for t in targets.active_targets():
-            src = t.get("source", "builtin")
-            print(f"{t['key']:24s} [{src}] {t['index_url']}")
+            src = t.get("source", t.get("kind", "builtin"))
+            where = t.get("index_url") or f"dataset:{t.get('resource_id','?')}"
+            print(f"{t['key']:24s} [{src}] {where}")
         return 0
 
     if args.propose:

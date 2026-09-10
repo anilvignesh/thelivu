@@ -92,6 +92,31 @@ def search(title, limit=20, newest_first=True):
     } for r in (body.get("records") or []) if r.get("index_name")]
 
 
+def search_precise(terms, limit=40, min_hits=2):
+    """Search wide, then filter client-side on title word overlap.
+
+    `filters[title]` ORs its terms, so a topic query returns thousands of
+    matches on the commonest word and is useless — "RBI enforcement penalty"
+    came back with school libraries. Asking for a broad page and keeping only
+    titles containing at least `min_hits` of the distinctive words is what
+    actually finds things.
+
+    Search by SHAPE rather than topic. A dataset whose title contains both
+    "sanctioned" and "actual", or "released" and "expenditure", is an
+    accountability dataset whatever ministry produced it — the gap between the
+    two columns is the story, and that is true across every beat.
+    """
+    words = [w.lower() for w in terms.split() if len(w) > 3]
+    out = []
+    for r in search(terms, limit=limit):
+        title = (r.get("title") or "").lower()
+        hits = sum(1 for w in words if w in title)
+        if hits >= min_hits:
+            r["relevance"] = hits
+            out.append(r)
+    return sorted(out, key=lambda r: (-r["relevance"], r["updated"]), reverse=False)
+
+
 def resource(resource_id, limit=200, offset=0):
     """The rows of one resource, as dicts."""
     body = _get(f"resource/{resource_id}", limit=limit, offset=offset)
