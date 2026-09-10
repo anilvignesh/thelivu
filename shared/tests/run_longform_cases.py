@@ -22,6 +22,7 @@ _TMPDB.close()
 os.environ["DB_PATH"] = _TMPDB.name
 
 from publishing import youtube                    # noqa: E402
+from publishing import longform                   # noqa: E402
 
 _fails = []
 
@@ -144,6 +145,131 @@ def t_chapters_sorted_and_blank_labels_ignored():
     check("three survivors rendered", len(out.splitlines()), 3)
 
 
+# --------------------------------------------------------------------------
+# graduation — when a story stops fitting the reel format
+# --------------------------------------------------------------------------
+
+def _reel(hook, beats, close):
+    lines = [f"HOOK: {hook}", "HOOK_CAPTION: cap", "HOOK_IMAGE: img"]
+    for i, b in enumerate(beats, 1):
+        lines += [f"BEAT {i}: {b}", f"BEAT {i} CAPTION: cap", f"BEAT {i} IMAGE: img"]
+    lines += [f"CLOSE: {close}", "CLOSE_CAPTION: cap", "CLOSE_IMAGE: img",
+              "TITLE: t", "PLACE: India", "HASHTAGS: A B C"]
+    return "\n".join(lines)
+
+
+W20 = " ".join(["word"] * 20)
+
+
+def t_caption_and_image_lines_are_not_spoken():
+    """Counting them would inflate every script by roughly a third and graduate
+    stories that fit the reel format fine."""
+    script = _reel(W20, [W20, W20], W20)
+    check("only spoken words counted", longform.spoken_words(script), 80)
+
+
+def t_short_script_does_not_graduate():
+    ok, reason = longform.should_graduate(_reel(W20, [W20, W20], W20))
+    check("short script stays a reel", ok, False)
+    check("reason gives the count", "80" in reason, True)
+
+
+def t_overlong_but_cuttable_does_not_graduate():
+    """The reel rule handles this: drop a middle beat and it fits. Graduating
+    here would produce long-form videos for stories that never needed one."""
+    script = _reel(W20, [W20] * 12, W20)   # 280 spoken words
+    total = longform.spoken_words(script)
+    ok, reason = longform.should_graduate(script)
+    check("script is over budget", total > longform.REEL_HARD_CEILING_WORDS, True)
+    check("but does not graduate", ok, False)
+    check("reason names the middle-beat cut", "middle beats" in reason, True)
+
+
+def t_uncuttable_overflow_graduates():
+    """Still over budget with every middle beat gone — the only cuts left are
+    the hook, the close, and attribution, which the reel rule forbids."""
+    long_beat = " ".join(["word"] * 130)
+    script = _reel(long_beat, [long_beat] * 3, long_beat)
+    ok, reason = longform.should_graduate(script)
+    check("graduates to long-form", ok, True)
+    check("reason names what would be lost", "attribution" in reason, True)
+
+
+def t_two_beat_script_cannot_be_cut_further():
+    """With no middle beats there is nothing safe left to remove."""
+    long_beat = " ".join(["word"] * 200)
+    ok, _ = longform.should_graduate(_reel(long_beat, [long_beat], long_beat))
+    check("two-beat overflow graduates", ok, True)
+
+
+# --------------------------------------------------------------------------
+# script parsing and budget
+# --------------------------------------------------------------------------
+
+SCRIPT = """TITLE: The road money
+PLACE: Karnataka, India
+WHY_LONG_FORM: The same figure is used two different ways by two sources.
+COLD_OPEN: Forty six thousand crore rupees of road work. One complaint says most of it never reached the road.
+COLD_OPEN_IMAGE: A road cross-section with a hollow beneath the asphalt.
+CHAPTER 1 TITLE: What the audit actually found
+CHAPTER 1: The comptroller and auditor general put irregularities at one thousand nine hundred and fifty crore rupees for the year, across every department of the corporation.
+CHAPTER 1 IMAGE: The audit paragraph held on screen.
+CHAPTER 2 TITLE: Where the bigger number comes from
+CHAPTER 2: A separate enforcement complaint uses a much larger figure, and uses it differently: as the total spent, not as the amount misappropriated.
+CHAPTER 2 IMAGE: Two documents side by side with the same number circled.
+CLOSE: What would settle it is a departmental audit of road contracts specifically. That has not been published.
+CLOSE_IMAGE: An empty document tray.
+DESCRIPTION: A look at two readings of one figure. Sources: CAG state audit, ED complaint.
+HASHTAGS: BBMP Bengaluru CAG RoadWorks Audit Karnataka
+WORD_COUNT: 92
+"""
+
+
+def t_parses_chapters_in_order():
+    p = longform.parse_script(SCRIPT)
+    check("title parsed", p["title"], "The road money")
+    check("place parsed", p["place"], "Karnataka, India")
+    check("trigger recorded", p["why_long_form"].startswith("The same figure"), True)
+    check("two chapters", len(p["chapters"]), 2)
+    check("chapter order", [c["n"] for c in p["chapters"]], [1, 2])
+    check("chapter title", p["chapters"][0]["title"], "What the audit actually found")
+    check("chapter image kept", bool(p["chapters"][1]["image"]), True)
+    check("hashtags stripped of #", p["hashtags"][0], "BBMP")
+
+
+def t_parses_fenced_output():
+    p = longform.parse_script("```\n" + SCRIPT + "\n```")
+    check("fenced script still parses", len(p["chapters"]), 2)
+
+
+def t_chapter_timestamps_start_at_zero_and_ascend():
+    p = longform.parse_script(SCRIPT)
+    marks = longform.estimate_chapter_timestamps(p)
+    check("starts at 0", marks[0][0], 0)
+    check("ascending", all(b[0] >= a[0] for a, b in zip(marks, marks[1:])), True)
+    check("one mark per chapter plus intro", len(marks), 3)
+    check("youtube accepts the block",
+          bool(youtube.format_chapters(marks)), True)
+
+
+def t_budget_check_rejects_over_ceiling():
+    ok, msg = longform.budget_check(longform.LONGFORM_HARD_CEILING + 1)
+    check("over ceiling rejected", ok, False)
+    check("advises cutting a whole chapter", "whole chapter" in msg, True)
+
+
+def t_budget_check_reports_synthesis_cost():
+    """A script's real cost is an hour of the reel-worker's only voice server —
+    knowing it before starting is the difference between scheduling and
+    discovering."""
+    ok, msg = longform.budget_check(1200)
+    check("target length accepted", ok, True)
+    audio, synth = longform.synthesis_estimate(1200)
+    check("8 minutes of audio", round(audio / 60), 8)
+    check("about an hour to synthesise", round(synth / 60), 58)
+    check("message states the cost", "synthesise" in msg, True)
+
+
 def main():
     print("long-form video cases")
     for t in (t_permalink_is_watch_not_shorts,
@@ -153,7 +279,17 @@ def main():
               t_chapters_render_into_the_description,
               t_hour_long_chapters_get_an_hour_field,
               t_invalid_chapter_lists_are_dropped_not_half_written,
-              t_chapters_sorted_and_blank_labels_ignored):
+              t_chapters_sorted_and_blank_labels_ignored,
+              t_caption_and_image_lines_are_not_spoken,
+              t_short_script_does_not_graduate,
+              t_overlong_but_cuttable_does_not_graduate,
+              t_uncuttable_overflow_graduates,
+              t_two_beat_script_cannot_be_cut_further,
+              t_parses_chapters_in_order,
+              t_parses_fenced_output,
+              t_chapter_timestamps_start_at_zero_and_ascend,
+              t_budget_check_rejects_over_ceiling,
+              t_budget_check_reports_synthesis_cost):
         t()
 
     print("\n" + "=" * 72)
