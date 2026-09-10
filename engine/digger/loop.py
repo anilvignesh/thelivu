@@ -351,8 +351,12 @@ def main(argv=None):
         log.info("done: %d candidate(s)", len(found))
         return 0
 
-    log.info("digger starting: cycle=%ss, targets=%d",
-             CYCLE_SECONDS, len(targets.TARGETS))
+    active = targets.active_targets()
+    kinds = {}
+    for t in active:
+        kinds[t.get("kind", "index")] = kinds.get(t.get("kind", "index"), 0) + 1
+    log.info("digger starting: cycle=%ss, targets=%d (%s)", CYCLE_SECONDS, len(active),
+             ", ".join(f"{n} {k}" for k, n in sorted(kinds.items())))
     while True:
         run_cycle(target=target, dry_run=args.dry_run)
         nap = CYCLE_SECONDS * (1 + random.uniform(-JITTER_FRAC, JITTER_FRAC))

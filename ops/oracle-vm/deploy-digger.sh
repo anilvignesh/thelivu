@@ -75,6 +75,16 @@ DIGGER_CYCLE_SECONDS=3600
 DIGGER_MAX_DOCS=1
 EOF
 
+# data.gov.in key: preserved from the running env rather than re-fetched, since
+# it is registered to Anil's account and lives only on this box. Losing it on a
+# redeploy would silently disable every dataset target.
+EXISTING_KEY="$($SSH "sudo grep -h '^DATA_GOV_IN_API_KEY=' $ETC_DIR/digger.env 2>/dev/null" || true)"
+if [ -n "$EXISTING_KEY" ]; then
+  printf '%s\n' "$EXISTING_KEY" >> "$TMP_ENV"
+else
+  echo "NOTE: no DATA_GOV_IN_API_KEY on the VM — dataset targets will be skipped" >&2
+fi
+
 echo "== syncing code to $APP_DIR =="
 $SSH "sudo mkdir -p $APP_DIR && sudo chown opc:opc $APP_DIR"
 rsync -az --delete \
