@@ -134,3 +134,111 @@ def publish_short(video_bytes, title, description="", tags=None, progress=None):
         raise YouTubePublishError(f"Upload succeeded but no video id in response: {body}")
     _p(1.0, "Posted ✓")
     return video_id, f"https://youtube.com/shorts/{video_id}"
+
+
+def publish_video(video_bytes, title, description="", tags=None, progress=None,
+                  privacy="public", chapters=None):
+    """Upload a full-length (horizontal or vertical) video. Returns (id, permalink).
+
+    The long-form sibling of publish_short(), for stories too dense for the 90s
+    reel ceiling — see docs/plans/ and the Long-Form Video Format note. Kept as a
+    separate function rather than a flag on publish_short() because the two
+    differ in ways that matter and would otherwise accumulate as branches:
+
+      * No "#Shorts" tag. Appending it to a 10-minute video does not make it a
+        Short; it just mislabels the video and can suppress its placement.
+      * The permalink is /watch?v=, not /shorts/. A long video served under a
+        /shorts/ URL redirects, and any link we have already published stays
+        wrong.
+      * `privacy` is a parameter and can be "private" or "unlisted". A long-form
+        cut is the kind of thing worth reviewing before it is public, and the
+        90s pipeline's straight-to-public default is not obviously right here.
+      * Chapters. YouTube builds them from timestamps in the description, and
+        long-form is exactly where they earn their keep.
+
+    Timeouts are raised over publish_short()'s: a 10-minute render is a much
+    larger file, and a PUT that dies at 300s on a slow uplink would waste the
+    ~70 minutes of CPU that produced it (Chatterbox measured at ~7.2x realtime
+    on the reel-worker, 2026-09-10).
+
+    Raises YouTubeNotConfigured / YouTubePublishError.
+    """
+    def _p(frac, msg):
+        if progress:
+            try: progress(min(max(frac, 0.0), 1.0), msg)
+            except Exception: pass
+
+    _p(0.05, "Authenticating with YouTube…")
+    token = _access_token()
+
+    desc = description or ""
+    if chapters:
+        desc = (desc.rstrip() + "\n\n" + format_chapters(chapters)).strip()
+
+    if privacy not in ("public", "unlisted", "private"):
+        raise YouTubePublishError(f"invalid privacy: {privacy!r}")
+
+    metadata = {
+        "snippet": {
+            "title": (title or "Thelivu")[:100],
+            "description": desc[:5000],
+            "tags": (tags or [])[:500],
+            "categoryId": "25",  # News & Politics, same as the reel path
+        },
+        "status": {
+            "privacyStatus": privacy,
+            "selfDeclaredMadeForKids": False,
+        },
+    }
+
+    _p(0.15, "Starting the upload session…")
+    init = requests.post(
+        _UPLOAD_URL,
+        headers={"Authorization": f"Bearer {token}",
+                 "Content-Type": "application/json; charset=UTF-8",
+                 "X-Upload-Content-Type": "video/mp4",
+                 "X-Upload-Content-Length": str(len(video_bytes))},
+        json=metadata, timeout=60,
+    )
+    if init.status_code != 200 or "Location" not in init.headers:
+        raise YouTubePublishError(f"Could not start upload session: "
+                                  f"{init.status_code} {init.text[:300]}")
+    upload_url = init.headers["Location"]
+
+    _p(0.3, f"Uploading {len(video_bytes) / 1e6:.1f}MB…")
+    put = requests.put(
+        upload_url,
+        headers={"Content-Type": "video/mp4",
+                 "Content-Length": str(len(video_bytes))},
+        data=video_bytes, timeout=1800,
+    )
+    if put.status_code not in (200, 201):
+        raise YouTubePublishError(f"Upload failed: {put.status_code} {put.text[:300]}")
+
+    body = put.json()
+    video_id = body.get("id")
+    if not video_id:
+        raise YouTubePublishError(f"Upload succeeded but no video id in response: {body}")
+    _p(1.0, "Posted ✓")
+    return video_id, f"https://youtube.com/watch?v={video_id}"
+
+
+def format_chapters(chapters):
+    """[(seconds, label), ...] -> the timestamp block YouTube parses.
+
+    YouTube's rules, which are easy to get subtly wrong: the list must start at
+    00:00, needs at least three entries, and they must be in ascending order —
+    break any of those and YouTube silently renders no chapters at all rather
+    than reporting an error. Returning the block unchanged when it would not
+    qualify keeps a half-valid list out of the description.
+    """
+    items = sorted((int(s), str(l).strip()) for s, l in chapters if str(l).strip())
+    if len(items) < 3 or items[0][0] != 0:
+        return ""
+    lines = []
+    for secs, label in items:
+        h, rem = divmod(secs, 3600)
+        m, sec = divmod(rem, 60)
+        stamp = f"{h}:{m:02d}:{sec:02d}" if h else f"{m}:{sec:02d}"
+        lines.append(f"{stamp} {label}")
+    return "\n".join(lines)
