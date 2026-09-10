@@ -402,29 +402,17 @@ def t_robots_check_raises_with_a_clear_reason():
 # routing — reaching a record without defeating anyone
 # --------------------------------------------------------------------------
 
-def t_disallowed_host_routes_to_a_permitted_one():
-    """rajyasabha.nic.in disallows us; sansad.in serves the same questions and
-    permits us. Asking the party that said yes is not circumventing the one
-    that said no."""
-    alts = routing.alternates(
-        "https://cms.rajyasabha.nic.in/UploadedFiles/Questions/x.pdf")
-    check("an alternate exists", len(alts), 1)
-    check("routes to sansad.in", "sansad.in" in alts[0], True)
-    check("path preserved", alts[0].endswith("/UploadedFiles/Questions/x.pdf"), True)
-
-
-def t_routing_is_host_only_never_path_guessing():
-    """Guessing paths is crawling blind. We only ever ask a different publisher
-    for the same document."""
-    src = "https://eparlib.sansad.in/bitstream/1/2/3.pdf?a=b"
-    alt = routing.alternates(src)[0]
-    from urllib.parse import urlparse
-    check("path unchanged", urlparse(alt).path, "/bitstream/1/2/3.pdf")
-    check("query preserved", urlparse(alt).query, "a=b")
-
-
-def t_unknown_host_has_no_alternates():
-    check("no invented alternates",
+def t_no_unverified_host_rewrites():
+    """Measured 2026-09-10: rewriting eparlib.sansad.in -> sansad.in 404s,
+    because they are different repositories with different path schemes. An
+    unverified rewrite is worse than none — it turns a clear "this host
+    disallows us" into a confusing 404 from a host that never had the file, and
+    the real reason disappears. Entries go in only once the rewrite is
+    confirmed to return the document."""
+    check("no unverified mappings shipped", routing.HOST_ALTERNATES, {})
+    check("eparlib not rewritten",
+          routing.alternates("https://eparlib.sansad.in/bitstream/1/2/3.pdf"), [])
+    check("unknown host unchanged",
           routing.alternates("https://example.gov.in/x"), [])
 
 
@@ -855,9 +843,7 @@ def main():
               t_robots_4xx_means_allowed_per_rfc9309,
               t_robots_5xx_means_back_off,
               t_robots_check_raises_with_a_clear_reason,
-              t_disallowed_host_routes_to_a_permitted_one,
-              t_routing_is_host_only_never_path_guessing,
-              t_unknown_host_has_no_alternates,
+              t_no_unverified_host_rewrites,
               t_api_key_is_used_when_held_and_absent_otherwise,
               t_every_block_gets_a_door_or_an_honest_handoff,
               t_crawl_delay_is_actually_enforced,

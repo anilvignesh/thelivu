@@ -8,11 +8,17 @@ hands every future subject an easy way to dismiss it.
 The way out is that "blocked" is four different situations wearing one word,
 and three of them have a legitimate door:
 
-1. **robots.txt disallows this host.** Very often the *same record* is served by
-   a host that allows us. `rajyasabha.nic.in` disallows us; `sansad.in` serves
-   the same parliamentary questions and permits us — that is how Unstarred
-   Question 843 was obtained on 2026-09-10. Routing to the permitted host is
-   not circumvention: it is asking the party that said yes.
+1. **robots.txt disallows this host, but a permitted host serves the same
+   record.** `rajyasabha.nic.in` and `eparlib.sansad.in` disallow us; `sansad.in`
+   serves the same parliamentary questions and permits us. Going to the
+   permitted host is not circumvention — it is asking the party that said yes.
+
+   Note *how*, because the obvious method does not work: rewriting the host in
+   a URL 404s, since these are different repositories with different path
+   schemes (measured 2026-09-10). What works is **search-then-fetch** — search
+   engines have already indexed the permitted host's PDFs, so a search returns
+   the exact `sansad.in` URL and the fetcher takes it from there. That is how
+   Unstarred Question 843 was obtained, with no human step.
 
 2. **An official API exists.** data.gov.in answers `api.data.gov.in` with
    HTTP 400, not 403 — it is talking to us and objecting to the parameters,
@@ -39,19 +45,26 @@ from urllib.parse import urlparse, urlunparse
 # 1. Permitted hosts serving the same record
 # ---------------------------------------------------------------------------
 #
-# Keyed by the blocked host. The rewrite is only ever host-level: we are not
-# guessing at paths, only asking a different publisher of the same document.
-# A rewrite that does not resolve simply fails and is recorded as such.
-
-HOST_ALTERNATES = {
-    # Parliament: the unified portal permits crawling; the older per-house and
-    # library hosts do not. Same questions, same answers, same annexures.
-    "rajyasabha.nic.in": ["sansad.in"],
-    "cms.rajyasabha.nic.in": ["sansad.in"],
-    "eparlib.sansad.in": ["sansad.in"],
-    "loksabha.nic.in": ["sansad.in"],
-    "loksabhadocs.nic.in": ["sansad.in"],
-}
+# VERIFIED mappings only. An unverified rewrite is worse than none: it turns a
+# clear "this host disallows us" into a confusing 404 from a host that never had
+# the document, and the real reason disappears.
+#
+# Tested 2026-09-10 and REMOVED because they do not resolve: eparlib.sansad.in
+# and cms.rajyasabha.nic.in are DSpace-style repositories serving
+# /bitstream/<id>/<n>/<file>.pdf, while sansad.in serves the same questions
+# under /getFile/lsapps/loksabhaquestions/annex/<session>/<QNO>_<hash>.pdf. The
+# documents are the same; the path schemes are not, and the hash cannot be
+# derived. Host rewriting cannot bridge that.
+#
+# The autonomous path for parliamentary records is therefore SEARCH-THEN-FETCH,
+# not path rewriting: a search engine has already indexed the permitted host's
+# PDFs, so searching yields the exact sansad.in URL and our fetcher takes it
+# from there. That is how Unstarred Question 843 was obtained on 2026-09-10 —
+# no human step, and no request to a host that declined us.
+#
+# Add an entry here only after confirming the rewritten URL actually returns
+# the document.
+HOST_ALTERNATES = {}
 
 
 def alternates(url):
@@ -122,7 +135,8 @@ def handoff_for(reason):
     handoff.
     """
     return {
-        "robots": "route to a permitted host serving the same record",
+        "robots": ("search for the same record on a permitted host, then fetch "
+                   "that URL — host rewriting does not work across repositories"),
         "api_key": HANDOFF_API,
         "js": HANDOFF_TIER1,
         "waf": HANDOFF_TIER1,
