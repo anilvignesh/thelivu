@@ -198,6 +198,39 @@ HASHTAGS: <6-10 story-specific tags — brand tags are added by the engine>
 WORD_COUNT: <integer, spoken words only>
 ```
 
+## How deep to investigate, and when to stop
+
+Codified in `shared/evidence.py` so it is one rule, not a fresh judgement per
+story. Two things it settles.
+
+**Depth scales with what a claim costs if it is wrong**, not with how
+interesting it is:
+
+| Claim | Bar |
+|---|---|
+| Names a person or company alongside wrongdoing | Primary source **and** their response or noted dispute |
+| The cold open | Primary — it is the most screenshotted line and travels furthest from its context |
+| Spine (the story collapses without it) | Primary |
+| Supporting colour, a corroborating example | Reporting is fine, if labelled as such |
+
+**Stopping.** An investigation can end for reasons that look the same in a
+transcript and mean opposite things. *Saturated* — more searching returns
+corroboration, not new load-bearing facts — is conclusive. *Blocked* —
+robots.txt disallows us, the host returns 403, the page is JS-rendered — is
+not: it says nothing about whether the evidence exists, only that we could not
+reach it. Record which, and for a non-conclusive stop record what would still
+get it (a browser, an RTI, Tier 1's grounded search). "We stopped" without
+"and here is what would obtain it" is an abandonment, not a handoff.
+
+**Budget:** three fetch attempts per document, two search reformulations per
+question. Then flag it as unobtained and move on.
+
+**The budget does not apply** when two sources disagree on a number (resolve it
+or say plainly it is unresolved — never quietly pick the more striking one),
+when the same figure is being used to mean two different things (the BBMP
+Rs 46,300cr precedent: total spend versus amount misappropriated), or when
+someone is about to be named. Those get chased regardless of cost.
+
 ## Self-check before output
 
 1. **Word count is real.** Count the spoken lines. If over 1,500, cut a whole
@@ -213,3 +246,8 @@ WORD_COUNT: <integer, spoken words only>
    dangling after eight minutes is the fastest way to make the time feel wasted.
 6. **No fact is being withheld for suspense.** If a viewer learning the full
    picture would feel the script had held out on them, restructure it.
+7. **Score the claims against the bar above.** Name the cold-open figure, every
+   spine claim, and every person or company named. If one sits on reporting
+   rather than the record, either get the record, downgrade what the script
+   asserts, or say in the script that it is press-reported. Do not publish past
+   a blocker by hoping nobody checks.

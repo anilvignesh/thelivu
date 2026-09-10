@@ -47,6 +47,15 @@ thinning every line to fit makes the entire reel read rushed.
 If you are over budget, cut a middle beat. Never cut the hook, the close, or the
 attribution that makes a claim checkable.
 
+**Evidence bar.** `shared/evidence.py` sets one rule for how far to chase a
+claim, and it applies here too — a reel is shorter, not held to less. The hook
+needs a primary source (it is the most screenshotted line in the piece and
+travels furthest from its context); so does anything the reel collapses
+without; and naming a person or company alongside wrongdoing needs the record
+*and* their side. Supporting colour may rest on reporting if the line says so.
+Being unable to reach a source is not the same as establishing there is
+nothing there — the first is a blocked stop, and it is not evidence of absence.
+
 This skill enforces the project's editorial charter (`../../CHARTER.md`) and brand
 (`../../BRAND.md`). Read them if present; the charter governs in any conflict. It
 writes a script only — it never fabricates, never overstates, and never publishes.
