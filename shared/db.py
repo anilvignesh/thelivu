@@ -3564,3 +3564,17 @@ def rti_overdue(now_iso):
         return _fetchall(cur)
     finally:
         conn.close()
+
+
+def set_digger_candidate_status(candidate_id, status):
+    """new -> promoted | held | rejected, after the batched review."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(f"UPDATE digger_candidates SET status = {ph} WHERE id = {ph}",
+                    (status, candidate_id))
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()

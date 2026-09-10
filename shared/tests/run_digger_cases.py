@@ -30,12 +30,13 @@ from engine.digger import extract, fetch          # noqa: E402
 from engine.digger import robots                  # noqa: E402
 from engine.digger import discover, targets       # noqa: E402
 from engine.digger import routing, prefilter      # noqa: E402
-from engine.digger import datagov                 # noqa: E402
+from engine.digger import datagov, review         # noqa: E402
 from engine.digger import freellm                 # noqa: E402
 from shared.db import (                           # noqa: E402
     init_db, record_digger_candidate, digger_seen_urls,
     start_digger_run, finish_digger_run, digger_candidates,
     propose_digger_target, digger_targets, set_digger_target_status,
+    set_digger_candidate_status,
 )
 
 _fails = []
@@ -972,6 +973,102 @@ def t_dropped_candidates_keep_their_reasons():
 
 
 # --------------------------------------------------------------------------
+# batched review — the seam where free output meets real investigative effort
+# --------------------------------------------------------------------------
+
+def _cands(n=3):
+    return [{"id": i, "target_key": "sebi", "title": f"Finding {i}",
+             "finding": f"A thing happened in 2026 worth {i} crore.",
+             "excerpt": f"quoted text {i}", "agreement": "agree",
+             "source_url": f"https://x/{i}"} for i in range(1, n + 1)]
+
+
+def t_one_call_reviews_the_whole_batch():
+    """Per-candidate calls do not survive volume, and a reviewer seeing them
+    together can spot duplicates and patterns that are invisible one at a time."""
+    calls = []
+    def fake(skill, prompt, **kw):
+        calls.append(prompt)
+        return json.dumps({"decisions": [
+            {"n": 1, "verdict": "promote", "reason": "specific and checkable",
+             "question": "Did the penalty get recovered?"},
+            {"n": 2, "verdict": "reject", "reason": "routine disclosure"},
+            {"n": 3, "verdict": "hold", "reason": "thin", "next_record": "the order itself"}]})
+    decs = review.review_batch(_cands(3), run_skill=fake)
+    check("exactly one model call", len(calls), 1)
+    check("all three candidates in the prompt", calls[0].count("[sebi]"), 3)
+    check("excerpt included for the reviewer", "quoted text 2" in calls[0], True)
+    check("three decisions", len(decs), 3)
+    check("verdicts read", [d["verdict"] for d in decs], ["promote", "reject", "hold"])
+
+
+def t_unparseable_response_holds_rather_than_promotes_or_drops():
+    """A malformed reviewer response must not silently promote or silently
+    discard — held candidates come back in the next batch."""
+    for bad in ["", "I could not do that", "{broken json"]:
+        decs = review.parse_decisions(bad, 3)
+        check(f"held on {bad[:12]!r}", [d["verdict"] for d in decs],
+              ["hold", "hold", "hold"])
+        check("reason explains", "parsed" in decs[0]["reason"], True)
+
+
+def t_omitted_candidate_is_held_not_lost():
+    decs = review.parse_decisions(
+        json.dumps({"decisions": [{"n": 1, "verdict": "promote"}]}), 3)
+    check("all three accounted for", len(decs), 3)
+    check("omitted ones held", [d["verdict"] for d in decs[1:]], ["hold", "hold"])
+
+
+def t_unknown_verdict_becomes_hold():
+    decs = review.parse_decisions(
+        json.dumps({"decisions": [{"n": 1, "verdict": "publish it"}]}), 1)
+    check("unknown verdict is not honoured", decs[0]["verdict"], "hold")
+
+
+def t_promotion_opens_a_dig_never_a_topic():
+    """A dig can be advanced, disproved and abandoned. Sending a free-model lead
+    straight at the writing pipeline would skip every step that exists to catch
+    it being wrong."""
+    made = []
+    def fake_create(**kw):
+        made.append(kw); return 100 + len(made)
+    statuses = {}
+    cands = _cands(3)
+    decs = [{"n": 1, "verdict": "promote", "reason": "r", "question": "Q?"},
+            {"n": 2, "verdict": "reject", "reason": "routine"},
+            {"n": 3, "verdict": "hold", "reason": "thin", "next_record": "the order"}]
+    out = review.apply_decisions(cands, decs, create_dig=fake_create,
+                                 set_status=lambda i, s: statuses.__setitem__(i, s))
+    check("one dig opened", len(made), 1)
+    check("dig carries the question", made[0]["question"], "Q?")
+    check("dig starts at scoping", made[0]["status"], "scoping")
+    check("provenance recorded", "auto-digger" in made[0]["owner_note"], True)
+    check("statuses written back", statuses, {1: "promoted", 2: "rejected", 3: "held"})
+    check("summary counts", "1 promoted, 1 held, 1 rejected" in review.summarise(out), True)
+
+
+def t_batch_is_capped_for_judgement_not_cost():
+    """A reviewer asked to weigh sixty at once starts pattern-matching instead
+    of deciding."""
+    seen = {}
+    def fake(skill, prompt, **kw):
+        seen["n"] = prompt.count("[sebi]")
+        return json.dumps({"decisions": []})
+    review.review_batch(_cands(60), run_skill=fake)
+    check("capped at MAX_BATCH", seen["n"], review.MAX_BATCH)
+
+
+def t_candidate_status_round_trips():
+    init_db()
+    record_digger_candidate(target_key="t", title="T", finding="F",
+                            source_url="https://x/rev", excerpt="E")
+    row = [c for c in digger_candidates(status="new") if c["source_url"] == "https://x/rev"][0]
+    set_digger_candidate_status(row["id"], "promoted")
+    check("status written", [c for c in digger_candidates(status="promoted")
+                             if c["id"] == row["id"]][0]["status"], "promoted")
+
+
+# --------------------------------------------------------------------------
 # persistence
 # --------------------------------------------------------------------------
 
@@ -1061,6 +1158,13 @@ def main():
               t_thin_findings_are_dropped,
               t_dedup_collapses_cross_source_duplicates,
               t_dropped_candidates_keep_their_reasons,
+              t_one_call_reviews_the_whole_batch,
+              t_unparseable_response_holds_rather_than_promotes_or_drops,
+              t_omitted_candidate_is_held_not_lost,
+              t_unknown_verdict_becomes_hold,
+              t_promotion_opens_a_dig_never_a_topic,
+              t_batch_is_capped_for_judgement_not_cost,
+              t_candidate_status_round_trips,
               t_records_and_dedups):
         t()
 

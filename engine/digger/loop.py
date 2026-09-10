@@ -174,6 +174,9 @@ def main(argv=None):
     ap.add_argument("--approve", metavar="KEY",
                     help="activate a proposed target (a human decision)")
     ap.add_argument("--reject", metavar="KEY")
+    ap.add_argument("--review", action="store_true",
+                    help="run the batched review over new candidates (step 7)")
+    ap.add_argument("--review-limit", type=int, default=25)
     args = ap.parse_args(argv)
 
     logging.basicConfig(
@@ -211,6 +214,29 @@ def main(argv=None):
                   f"{r['index_url'][:52]}")
             if r.get("validation_error"):
                 print(f"          reason: {r['validation_error'][:100]}")
+        return 0
+
+    if args.review:
+        from engine.digger import prefilter, review
+        from shared import db as _db
+        raw = _db.digger_candidates(status="new", limit=args.review_limit)
+        if not raw:
+            print("no new candidates to review")
+            return 0
+        kept, dropped = prefilter.run(raw)
+        print(prefilter.summarise(kept, dropped))
+        for c, why in dropped:
+            if c.get("id"):
+                _db.set_digger_candidate_status(c["id"], "rejected")
+        if not kept:
+            print("nothing survived the pre-filter")
+            return 0
+        # The review is the ONLY paid step in this tier. Everything before it is
+        # free by design, which is what makes reviewing a batch affordable.
+        decisions = review.review_batch(kept)
+        out = review.apply_decisions(kept, decisions,
+                                     set_status=_db.set_digger_candidate_status)
+        print(review.summarise(out))
         return 0
 
     if args.approve or args.reject:
