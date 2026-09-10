@@ -30,6 +30,7 @@ from engine.digger import extract, fetch          # noqa: E402
 from engine.digger import robots                  # noqa: E402
 from engine.digger import discover, targets       # noqa: E402
 from engine.digger import routing, prefilter      # noqa: E402
+from engine.digger import datagov                 # noqa: E402
 from engine.digger import freellm                 # noqa: E402
 from shared.db import (                           # noqa: E402
     init_db, record_digger_candidate, digger_seen_urls,
@@ -435,6 +436,64 @@ def t_robots_check_raises_with_a_clear_reason():
         check("robots.check raises RobotsDenied", True, True)
         check("reason states it is a decision to respect",
               "respect" in str(e), True)
+
+
+# --------------------------------------------------------------------------
+# data.gov.in — typed rows, and the arithmetic they make possible
+# --------------------------------------------------------------------------
+
+def t_missing_key_says_what_to_do():
+    import os
+    orig = os.environ.pop("DATA_GOV_IN_API_KEY", None)
+    try:
+        datagov.api_key()
+        check("missing key raises", False, True)
+    except datagov.DataGovError as e:
+        check("missing key raises", True, True)
+        check("names the fix", "Register once" in str(e), True)
+    finally:
+        if orig is not None:
+            os.environ["DATA_GOV_IN_API_KEY"] = orig
+
+
+def t_absent_values_are_none_not_zero():
+    """A state with no data is not a state with a zero, and averaging those
+    together is how a table lies."""
+    for blank in ["", "-", "NA", "N/A", "nil", None]:
+        check(f"blank {blank!r} -> None", datagov.to_number(blank), None)
+    check("comma number parsed", datagov.to_number("1,952"), 1952.0)
+    check("real zero survives", datagov.to_number("0"), 0.0)
+    check("junk -> None", datagov.to_number("about twelve"), None)
+
+
+def t_rate_table_ranks_by_performance_not_size():
+    """The error that put Kerala top of a list it is near the bottom of: a raw
+    count ranks by size, a rate ranks by performance."""
+    rows = [
+        {"state": "Big",   "delayed": "59", "projects": "101"},   # 58.4%
+        {"state": "Small", "delayed": "14", "projects": "16"},    # 87.5%
+        {"state": "Kerala", "delayed": "4", "projects": "18"},    # 22.2%
+    ]
+    t = datagov.rate_table(rows, "state", "delayed", "projects", min_denominator=15)
+    check("ranked by rate", [r[0] for r in t], ["Small", "Big", "Kerala"])
+    check("biggest raw count is not top", t[0][0] != "Big", True)
+    check("rate computed", round(t[-1][3], 1), 22.2)
+
+
+def t_tiny_denominators_are_excluded_not_zeroed():
+    """A state with two projects and one delay is not the worst performer in
+    India."""
+    rows = [{"state": "Tiny", "delayed": "1", "projects": "2"},
+            {"state": "Real", "delayed": "4", "projects": "18"}]
+    t = datagov.rate_table(rows, "state", "delayed", "projects", min_denominator=15)
+    check("tiny denominator dropped", [r[0] for r in t], ["Real"])
+
+
+def t_missing_denominator_row_is_skipped():
+    rows = [{"state": "NoData", "delayed": "5", "projects": "NA"},
+            {"state": "Real", "delayed": "4", "projects": "18"}]
+    t = datagov.rate_table(rows, "state", "delayed", "projects")
+    check("row without a denominator skipped", [r[0] for r in t], ["Real"])
 
 
 # --------------------------------------------------------------------------
@@ -970,6 +1029,11 @@ def main():
               t_robots_4xx_means_allowed_per_rfc9309,
               t_robots_5xx_means_back_off,
               t_robots_check_raises_with_a_clear_reason,
+              t_missing_key_says_what_to_do,
+              t_absent_values_are_none_not_zero,
+              t_rate_table_ranks_by_performance_not_size,
+              t_tiny_denominators_are_excluded_not_zeroed,
+              t_missing_denominator_row_is_skipped,
               t_no_unverified_host_rewrites,
               t_api_key_is_used_when_held_and_absent_otherwise,
               t_every_block_gets_a_door_or_an_honest_handoff,
