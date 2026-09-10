@@ -23,10 +23,21 @@ never publishes.
 
 ## When a story earns this format
 
-Route here only if at least one is true:
+**A published reel does not close a topic.** These are not alternatives. A reel
+that shipped is a reel that fit 225 words, which says nothing about whether the
+material behind it needed more — and the reel format's own overflow rule means
+any reel built from dense material threw something away to fit. What it threw
+away is exactly what long-form carries. If a topic needs more than ninety
+seconds to explain, it gets a long video, whether or not a reel already ran.
+
+Route here if at least one is true:
 
 1. **The reel script still exceeds 225 words after cutting a middle beat** — i.e.
    cutting further would take the hook, the close, or a checkable attribution.
+   This holds whether the reel has shipped or not; if it shipped, the cutting
+   is the evidence.
+1b. **More has been established since the reel ran** — a dig that kept going, an
+   RTI that came back — and the total no longer fits ninety seconds.
 2. **The story turns on a distinction that takes a sentence to state.** The live
    example: the same ₹46,300cr figure is used one way as total road spend that
    produced substandard roads (a quality-failure claim) and another as 75% of

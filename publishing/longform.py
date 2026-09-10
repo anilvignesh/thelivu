@@ -95,11 +95,21 @@ def words_after_cutting_middle_beats(script_text):
 
 
 def should_graduate(script_text, ceiling=REEL_HARD_CEILING_WORDS):
-    """Should this story become long-form instead of a reel?
+    """Does this material need more than 90 seconds to be explained?
+
+    NOT "reel or long-form". Those are not alternatives, and treating them as
+    alternatives was wrong: a topic can have both. Anil, 2026-09-10 — "we are
+    not gonna say, the reel is done, no long video." A reel that shipped is a
+    reel that fit 225 words; it says nothing about whether the material behind
+    it needed more. See also_warrants_longform().
+
+    So a True here means the material exceeds what 90 seconds can carry. The
+    reel still gets made if there is a reel in it — this decides whether a long
+    video is owed as well.
 
     Returns (bool, reason). The reason is recorded rather than just the verdict:
-    a story graduating is an editorial event worth being able to audit later,
-    and "it was 240 words" is a much better record than "True".
+    a story taking the long-form slot is an editorial event worth auditing, and
+    "it was 240 words" is a better record than "True".
     """
     total = spoken_words(script_text)
     if total <= ceiling:
@@ -114,6 +124,44 @@ def should_graduate(script_text, ceiling=REEL_HARD_CEILING_WORDS):
     return True, (
         f"{total} words, still {after} after cutting every middle beat: "
         f"anything further would take the hook, the close, or an attribution"
+    )
+
+
+def also_warrants_longform(reel_script, additional_material_words=0,
+                           ceiling=REEL_HARD_CEILING_WORDS):
+    """Does a topic ALREADY covered by a reel still owe a long video?
+
+    A published reel does not close a topic. The reel format's own overflow
+    rule — cut a middle beat — means every reel built from dense material threw
+    something away to fit, and what it threw away is exactly the qualification,
+    the second data point or the counter-case that long-form exists to carry.
+
+    Two ways a topic qualifies:
+      * the reel script was over the ceiling before it was cut down, so the
+        cutting itself is the evidence; or
+      * more material has since been established than 90 seconds can hold —
+        a dig that kept going after the reel shipped, an RTI that came back.
+
+    Returns (bool, reason).
+    """
+    reel_words = spoken_words(reel_script)
+    total = reel_words + max(0, additional_material_words)
+
+    if total > ceiling:
+        if additional_material_words:
+            return True, (
+                f"the reel carries {reel_words} words; {additional_material_words} "
+                f"further words of established material exist ({total} total). "
+                "That does not fit 90 seconds and should not be compressed into it."
+            )
+        return True, (
+            f"the reel script ran to {reel_words} words against a {ceiling} "
+            "ceiling — it shipped by cutting, and what was cut is what long-form "
+            "carries"
+        )
+    return False, (
+        f"{total} words of material — the reel already holds it; a long video "
+        "would be the same story said more slowly"
     )
 
 
@@ -218,3 +266,90 @@ def budget_check(parsed_or_words):
         return True, (f"under target but allowed: {human}. If it fits a reel, "
                       "it should have been one.")
     return True, human
+
+
+# ---------------------------------------------------------------------------
+# Weekly cadence — at most one, Saturday morning
+#
+# "At most" is doing the work in that sentence. A weekly slot that must be
+# filled will eventually publish something that did not clear the evidence bar,
+# because the alternative is an empty slot — and that is precisely the pressure
+# shared/evidence.py exists to remove. Skipping a week is a normal outcome
+# here, not a failure state, and the code says so rather than leaving it to
+# whoever is looking at the queue on a Friday night.
+#
+# The point of a week is that a story has time to become provable. If it has
+# not, the honest thing is to let it keep digging and take the following slot.
+# ---------------------------------------------------------------------------
+
+PUBLISH_WEEKDAY = 5          # Saturday (Monday=0)
+PUBLISH_HOUR = 8             # local morning
+REVIEW_BUFFER_HOURS = 12     # a human should be able to read it before it ships
+RENDER_OVERHEAD_MIN = 25     # illustration + assembly, on top of narration
+
+
+def next_slot(now):
+    """The next Saturday-morning publication slot at or after `now`."""
+    from datetime import datetime, timedelta
+    target = now.replace(hour=PUBLISH_HOUR, minute=0, second=0, microsecond=0)
+    days = (PUBLISH_WEEKDAY - target.weekday()) % 7
+    target = target + timedelta(days=days)
+    if target <= now:
+        target = target + timedelta(days=7)
+    return target
+
+
+def build_deadline(slot, word_count):
+    """When rendering must START to make a slot.
+
+    Narration is the dominant cost and it is not small: at ~7.2x realtime a
+    1,200-word script is about an hour of the reel-worker's only voice server.
+    Working backwards from the slot — rather than starting on Friday and hoping
+    — is what keeps long-form from colliding with the daily reel builds.
+    """
+    from datetime import timedelta
+    _, synth_seconds = synthesis_estimate(word_count)
+    lead = timedelta(seconds=synth_seconds) + timedelta(minutes=RENDER_OVERHEAD_MIN) \
+        + timedelta(hours=REVIEW_BUFFER_HOURS)
+    return slot - lead
+
+
+def slot_decision(candidates, now, assess=None):
+    """Choose what fills the next slot, or decide to skip it.
+
+    `candidates` are dicts with at least {title, claims, word_count}. `assess`
+    defaults to shared.evidence.assess so the publication gate and the
+    investigation rule are the same rule.
+
+    Returns (chosen_or_None, reason). A skip always carries why, because
+    "nothing published this week" should be auditable rather than inferred from
+    silence.
+    """
+    if assess is None:
+        from shared.evidence import assess as _assess
+        assess = _assess
+
+    slot = next_slot(now)
+    if not candidates:
+        return None, f"skip {slot.date()}: nothing in the queue"
+
+    ready, blocked = [], []
+    for c in candidates:
+        ok, blockers = assess(c.get("claims", []))
+        (ready if ok else blocked).append((c, blockers))
+
+    if not ready:
+        detail = "; ".join(
+            f"{c['title'][:40]} ({len(b)} unmet)" for c, b in blocked[:3])
+        return None, (f"skip {slot.date()}: {len(blocked)} candidate(s), none clearing "
+                      f"the evidence bar — {detail}. They keep digging and take a "
+                      "later slot; publishing one early is the failure this "
+                      "cadence exists to avoid.")
+
+    # Among stories that clear, prefer the one that has been waiting longest —
+    # a piece that has held up for two weeks of digging is more certain, not
+    # more stale.
+    chosen = sorted(ready, key=lambda cb: cb[0].get("queued_since", ""))[0][0]
+    deadline = build_deadline(slot, chosen.get("word_count", 0))
+    return chosen, (f"publish {slot.date()}: {chosen['title'][:60]} — "
+                    f"rendering must start by {deadline:%Y-%m-%d %H:%M}")

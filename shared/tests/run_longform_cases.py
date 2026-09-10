@@ -195,6 +195,34 @@ def t_uncuttable_overflow_graduates():
     check("reason names what would be lost", "attribution" in reason, True)
 
 
+def t_a_shipped_reel_does_not_close_a_topic():
+    """Anil, 2026-09-10: "we are not gonna say, the reel is done, no long
+    video." A reel that shipped fit 225 words; that says nothing about whether
+    the material behind it needed more."""
+    long_beat = " ".join(["word"] * 90)
+    dense = _reel(long_beat, [long_beat] * 3, long_beat)
+    ok, reason = longform.also_warrants_longform(dense)
+    check("dense reel still owes a long video", ok, True)
+    check("reason points at what was cut", "cut" in reason, True)
+
+
+def t_new_material_after_the_reel_qualifies_a_topic():
+    """A dig that kept going, or an RTI that came back."""
+    modest = _reel(W20, [W20, W20], W20)         # 80 words, fits fine
+    ok, _ = longform.also_warrants_longform(modest)
+    check("modest reel alone does not qualify", ok, False)
+    ok, reason = longform.also_warrants_longform(modest, additional_material_words=300)
+    check("with new material it qualifies", ok, True)
+    check("reason cites the new material", "further words" in reason, True)
+
+
+def t_thin_topic_is_not_stretched_into_long_form():
+    """A long video that is the same story said more slowly is padding."""
+    ok, reason = longform.also_warrants_longform(_reel(W20, [W20], W20))
+    check("thin topic stays a reel", ok, False)
+    check("reason names the failure mode", "more slowly" in reason, True)
+
+
 def t_two_beat_script_cannot_be_cut_further():
     """With no middle beats there is nothing safe left to remove."""
     long_beat = " ".join(["word"] * 200)
@@ -294,6 +322,9 @@ def main():
               t_short_script_does_not_graduate,
               t_overlong_but_cuttable_does_not_graduate,
               t_uncuttable_overflow_graduates,
+              t_a_shipped_reel_does_not_close_a_topic,
+              t_new_material_after_the_reel_qualifies_a_topic,
+              t_thin_topic_is_not_stretched_into_long_form,
               t_two_beat_script_cannot_be_cut_further,
               t_parses_chapters_in_order,
               t_open_loop_is_parsed_and_not_spoken,
