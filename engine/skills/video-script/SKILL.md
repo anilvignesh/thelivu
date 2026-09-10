@@ -147,6 +147,56 @@ Before final output, self-check spoken lines and captions against
   - BEAT 2/3: the story builds back up to the same fact — "By evening police
     had detained a hundred people, according to the station's own log." — now
     landing with the full context of how it got there, sourced and specific.
+- **Lock-in (BEAT 1, the ~3 seconds after the hook):** the hook buys attention;
+  this is where it is either justified or lost. Most people who leave a reel
+  leave here, right after the claim lands and before any evidence does.
+
+  BEAT 1's job is therefore **two** things at once: restart the story properly
+  (above), *and* answer the question a sceptical viewer is already asking —
+  "says who?" Do both in the same sentence by naming the record **as you begin
+  the telling**, not by restating the hook: "The Road Transport Ministry's own
+  written answer to Parliament sets it out plainly — between 2014 and today…".
+  Not "reports suggest", which answers nothing and sounds like every other
+  account they have scrolled past.
+
+  **This does not license a callback to the hook.** The cold-open rule above
+  still holds: BEAT 1 starts the story at its real beginning and does not
+  reach back to the hook's fact, which returns later in its natural place. The
+  lock-in is *whose record this is*, carried in the opening clause of that
+  restart. Sourcing is not a callback.
+
+  This is one of the rare places where retention and the charter want exactly
+  the same thing. Attribution is already required for every figure; putting it
+  **first** is what converts a claim into something worth staying for. A viewer
+  who knows by second five that this comes from a primary record is a viewer
+  who has a reason to watch the rest.
+
+  - ✗ "Kerala has seen the most highway failures in the country." ← the hook
+    again, louder. Nothing new, nothing sourced.
+  - ✗ "That is the ministry's own count." ← sourced, but it is a callback: it
+    points back at the hook instead of starting the story.
+  - ✓ "The Road Transport Ministry was asked about this in Parliament, and its
+    written answer counts fifty-five such failures nationwide since 2014."
+    ← names the record, and starts the telling at its real beginning.
+
+  Do **not** use this beat to tease ("and what they found next is worse"). A
+  lock-in earns the next beat with evidence, not with a promise.
+
+  Note this adds **no words to the budget** — BEAT 1 already exists. It changes
+  what that beat spends its words on, not how many it gets.
+
+- **Re-hook (the middle beat, in a 5–6 beat reel):** attention sags in the
+  middle of a longer reel. Recover it with a genuine escalation — a second,
+  harder fact, the counter-case, or the figure that reframes the first one —
+  placed deliberately rather than wherever it fell in the telling.
+
+  The line between a re-hook and engagement bait is whether the beat **delivers**
+  something or **promises** something. "The same ministry approved eleven more
+  projects on that stretch the following year" is a re-hook. "But it gets worse"
+  is bait, and this engine does not use it: the 2026-09-08 standing rule is that
+  facts outrank reach. A reel with a flatter middle and a correct figure beats a
+  sharper one carrying a wrong one.
+
 - **Body (3–4 short beats, up to 6 when the extra length is earned):** the key
   fact → the context that reframes it → the evidence → the turn → (if a fifth or
   sixth beat is truly load-bearing) the counter-case, a second data point, or the
