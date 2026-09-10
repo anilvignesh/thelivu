@@ -322,6 +322,48 @@ CREATE TABLE IF NOT EXISTS model_health_checks (
     checked_at  TIMESTAMP DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_model_health_model ON model_health_checks (model, checked_at);
+
+-- Tier-0 digger (docs/plans/07-tier0-digger.md). Deliberately its OWN tables:
+-- free-tier models write here continuously and unreviewed, so they must not
+-- touch pending_topics/digs, which are live in production. Promotion into the
+-- real pipeline happens later, behind the pre-filter and the batched review.
+CREATE TABLE IF NOT EXISTS digger_candidates (
+    id          SERIAL PRIMARY KEY,
+    target_key  TEXT NOT NULL,
+    title       TEXT NOT NULL,
+    finding     TEXT,
+    source_url  TEXT NOT NULL,
+    excerpt     TEXT,
+    model_a     TEXT,
+    model_b     TEXT,
+    answer_a    TEXT,
+    answer_b    TEXT,
+    -- 'agree' | 'differ' | 'single'. 'differ' is a signal to a reviewer, not an
+    -- error: two free models reading the same page differently is exactly the
+    -- extraction slip the cross-check exists to surface.
+    agreement   TEXT DEFAULT 'single',
+    status      TEXT DEFAULT 'new',
+    fetched_at  TIMESTAMP,
+    created_at  TIMESTAMP DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_digger_candidates_status ON digger_candidates (status, created_at);
+CREATE INDEX IF NOT EXISTS idx_digger_candidates_target ON digger_candidates (target_key, created_at);
+
+-- Per-cycle accounting. Kept HERE and not in shared/budget.py on purpose: Tier 0
+-- is free-tier by definition, and a free-provider outage must never trip the
+-- $3/day cap that guards real Claude/Gemini spend.
+CREATE TABLE IF NOT EXISTS digger_runs (
+    id               SERIAL PRIMARY KEY,
+    target_key       TEXT,
+    started_at       TIMESTAMP DEFAULT NOW(),
+    finished_at      TIMESTAMP,
+    ok               BOOLEAN DEFAULT FALSE,
+    docs_fetched     INTEGER DEFAULT 0,
+    candidates_found INTEGER DEFAULT 0,
+    model_calls      INTEGER DEFAULT 0,
+    error            TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_digger_runs_started ON digger_runs (started_at);
 """
 
 # SQLite fallback schema (same structure, SQLite syntax)
@@ -609,6 +651,38 @@ CREATE TABLE IF NOT EXISTS model_health_checks (
     checked_at  TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_model_health_model ON model_health_checks (model, checked_at);
+
+CREATE TABLE IF NOT EXISTS digger_candidates (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    target_key  TEXT NOT NULL,
+    title       TEXT NOT NULL,
+    finding     TEXT,
+    source_url  TEXT NOT NULL,
+    excerpt     TEXT,
+    model_a     TEXT,
+    model_b     TEXT,
+    answer_a    TEXT,
+    answer_b    TEXT,
+    agreement   TEXT DEFAULT 'single',
+    status      TEXT DEFAULT 'new',
+    fetched_at  TEXT,
+    created_at  TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_digger_candidates_status ON digger_candidates (status, created_at);
+CREATE INDEX IF NOT EXISTS idx_digger_candidates_target ON digger_candidates (target_key, created_at);
+
+CREATE TABLE IF NOT EXISTS digger_runs (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    target_key       TEXT,
+    started_at       TEXT DEFAULT (datetime('now')),
+    finished_at      TEXT,
+    ok               INTEGER DEFAULT 0,
+    docs_fetched     INTEGER DEFAULT 0,
+    candidates_found INTEGER DEFAULT 0,
+    model_calls      INTEGER DEFAULT 0,
+    error            TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_digger_runs_started ON digger_runs (started_at);
 """
 
 
@@ -3130,5 +3204,122 @@ def queue_ingest(url, note=""):
             tid = cur.lastrowid
         conn.commit()
         return tid
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Tier-0 digger (docs/plans/07-tier0-digger.md)
+#
+# These write ONLY to digger_* tables. Tier 0 is free-tier models running
+# unattended, so nothing here touches pending_topics/digs — promotion into the
+# live pipeline is a later, reviewed step.
+# ---------------------------------------------------------------------------
+
+def start_digger_run(target_key):
+    """Open a run row and return its id."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        if _is_postgres():
+            cur.execute(
+                f"INSERT INTO digger_runs (target_key) VALUES ({ph}) RETURNING id",
+                (target_key,),
+            )
+            run_id = cur.fetchone()[0]
+        else:
+            cur.execute(
+                f"INSERT INTO digger_runs (target_key) VALUES ({ph})", (target_key,)
+            )
+            run_id = cur.lastrowid
+        conn.commit()
+        return run_id
+    finally:
+        conn.close()
+
+
+def finish_digger_run(run_id, ok, docs_fetched=0, candidates_found=0,
+                      model_calls=0, error=None):
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        now = "NOW()" if _is_postgres() else "datetime('now')"
+        cur.execute(
+            f"""UPDATE digger_runs
+                   SET finished_at = {now}, ok = {ph}, docs_fetched = {ph},
+                       candidates_found = {ph}, model_calls = {ph}, error = {ph}
+                 WHERE id = {ph}""",
+            (bool(ok) if _is_postgres() else int(bool(ok)),
+             docs_fetched, candidates_found, model_calls, error, run_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def record_digger_candidate(target_key, title, finding, source_url, excerpt,
+                            model_a=None, model_b=None, answer_a=None,
+                            answer_b=None, agreement="single", fetched_at=None):
+    """Persist one lead. `source_url` is NOT NULL by design — a candidate that
+    cannot point at the document it came from is exactly the ungrounded output
+    this tier exists to avoid."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cols = ("target_key, title, finding, source_url, excerpt, model_a, "
+                "model_b, answer_a, answer_b, agreement, fetched_at")
+        vals = ", ".join([ph] * 11)
+        if _is_postgres():
+            cur.execute(
+                f"INSERT INTO digger_candidates ({cols}) VALUES ({vals}) RETURNING id",
+                (target_key, title, finding, source_url, excerpt, model_a,
+                 model_b, answer_a, answer_b, agreement, fetched_at),
+            )
+            cand_id = cur.fetchone()[0]
+        else:
+            cur.execute(
+                f"INSERT INTO digger_candidates ({cols}) VALUES ({vals})",
+                (target_key, title, finding, source_url, excerpt, model_a,
+                 model_b, answer_a, answer_b, agreement, fetched_at),
+            )
+            cand_id = cur.lastrowid
+        conn.commit()
+        return cand_id
+    finally:
+        conn.close()
+
+
+def digger_seen_urls(target_key, limit=200):
+    """URLs already recorded for a target — cheap dedup so a rotating loop does
+    not re-report the same document every cycle."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(
+            f"""SELECT source_url FROM digger_candidates
+                 WHERE target_key = {ph}
+                 ORDER BY id DESC LIMIT {ph}""",
+            (target_key, limit),
+        )
+        return {r["source_url"] for r in _fetchall(cur)}
+    finally:
+        conn.close()
+
+
+def digger_candidates(status="new", limit=50):
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(
+            f"""SELECT * FROM digger_candidates WHERE status = {ph}
+                 ORDER BY id DESC LIMIT {ph}""",
+            (status, limit),
+        )
+        return _fetchall(cur)
     finally:
         conn.close()

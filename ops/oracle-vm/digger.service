@@ -1,0 +1,45 @@
+[Unit]
+Description=Thelivu Tier-0 digger — free-tier document extraction, leads only
+After=network-online.target docker.service
+Wants=network-online.target
+# freellmapi runs as a docker container on this same box, bound to 127.0.0.1:3001.
+# Ordering after docker.service is start-order only, not readiness — the loop
+# pings freellmapi itself and sleeps off a miss rather than dying, the same
+# lesson reel-worker learned the hard way on 2026-08-13 (see _wait_for_voice).
+
+[Service]
+Type=simple
+User=opc
+WorkingDirectory=/opt/thelivu
+# /etc, not /home: SELinux is Enforcing on this box and systemd (init_t)
+# cannot read an EnvironmentFile labelled user_home_t — it fails the unit
+# with a bare "Permission denied" (hit 2026-09-10).
+EnvironmentFile=/etc/thelivu/digger.env
+# Code lives in /opt (usr_t) for the same SELinux reason — a service
+# executing an interpreter out of /home is denied under enforcing policy.
+ExecStart=/opt/thelivu/venv/bin/python -m engine.digger.loop
+Restart=on-failure
+RestartSec=60
+
+# HARD memory ceiling. This box is a 945MB E2.1.Micro with no headroom to spare:
+# on 2026-09-10 a docker image pull alone drove it into a swap death-spiral that
+# took sshd down with it for ~15 minutes and needed a console reboot. A runaway
+# digger must fail ITSELF, not the VM. See brain/1GB VM Memory Traps in the vault.
+MemoryHigh=192M
+MemoryMax=256M
+# Same reasoning for CPU: E2.1.Micro is a burstable 1/8-OCPU baseline, and the
+# digger is I/O-bound by design, so it never needs to compete with freellmapi.
+CPUWeight=20
+Nice=10
+
+# Leads only — this service never writes to pending_topics/digs, never publishes,
+# and never posts. Promotion into the live pipeline is a separate reviewed step
+# (docs/plans/07-tier0-digger.md).
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/opt/thelivu
+
+[Install]
+WantedBy=multi-user.target
