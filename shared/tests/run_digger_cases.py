@@ -29,6 +29,7 @@ os.environ["DB_PATH"] = _TMPDB.name
 from engine.digger import extract, fetch          # noqa: E402
 from engine.digger import robots                  # noqa: E402
 from engine.digger import discover, targets       # noqa: E402
+from engine.digger import routing                 # noqa: E402
 from engine.digger import freellm                 # noqa: E402
 from shared.db import (                           # noqa: E402
     init_db, record_digger_candidate, digger_seen_urls,
@@ -395,6 +396,78 @@ def t_robots_check_raises_with_a_clear_reason():
         check("robots.check raises RobotsDenied", True, True)
         check("reason states it is a decision to respect",
               "respect" in str(e), True)
+
+
+# --------------------------------------------------------------------------
+# routing — reaching a record without defeating anyone
+# --------------------------------------------------------------------------
+
+def t_disallowed_host_routes_to_a_permitted_one():
+    """rajyasabha.nic.in disallows us; sansad.in serves the same questions and
+    permits us. Asking the party that said yes is not circumventing the one
+    that said no."""
+    alts = routing.alternates(
+        "https://cms.rajyasabha.nic.in/UploadedFiles/Questions/x.pdf")
+    check("an alternate exists", len(alts), 1)
+    check("routes to sansad.in", "sansad.in" in alts[0], True)
+    check("path preserved", alts[0].endswith("/UploadedFiles/Questions/x.pdf"), True)
+
+
+def t_routing_is_host_only_never_path_guessing():
+    """Guessing paths is crawling blind. We only ever ask a different publisher
+    for the same document."""
+    src = "https://eparlib.sansad.in/bitstream/1/2/3.pdf?a=b"
+    alt = routing.alternates(src)[0]
+    from urllib.parse import urlparse
+    check("path unchanged", urlparse(alt).path, "/bitstream/1/2/3.pdf")
+    check("query preserved", urlparse(alt).query, "a=b")
+
+
+def t_unknown_host_has_no_alternates():
+    check("no invented alternates",
+          routing.alternates("https://example.gov.in/x"), [])
+
+
+def t_api_key_is_used_when_held_and_absent_otherwise():
+    """data.gov.in answers 400, not 403 — it wants a registered key. That is
+    the intended door, and using it is the opposite of a bypass."""
+    import os
+    u = "https://api.data.gov.in/resource/abc"
+    orig = os.environ.pop("DATA_GOV_IN_API_KEY", None)
+    try:
+        out, have = routing.with_api_key(u)
+        check("no key -> url untouched", out, u)
+        check("no key -> reported", have, False)
+        check("missing key surfaced", "data.gov.in" in routing.missing_api_keys(), True)
+
+        os.environ["DATA_GOV_IN_API_KEY"] = "TESTKEY"
+        out, have = routing.with_api_key(u)
+        check("key -> appended", "api-key=TESTKEY" in out, True)
+        check("key -> json requested", "format=json" in out, True)
+        check("key -> reported", have, True)
+        check("key no longer missing",
+              "data.gov.in" in routing.missing_api_keys(), False)
+    finally:
+        os.environ.pop("DATA_GOV_IN_API_KEY", None)
+        if orig is not None:
+            os.environ["DATA_GOV_IN_API_KEY"] = orig
+
+
+def t_every_block_gets_a_door_or_an_honest_handoff():
+    """A non-conclusive stop must carry what would still obtain the record."""
+    cases = {
+        "robots.txt disallows ThelivuDigger at x": "robots",
+        "blocked by bot detection at y":           "captcha",
+        "HTTP 403 for index z":                    "waf",
+        "no document links found at index w":      "js",
+    }
+    for err, want in cases.items():
+        check(f"classified: {want}", routing.classify(err), want)
+        check(f"{want} has a handoff", bool(routing.handoff_for(want)), True)
+    check("captcha is handed to Tier 1, never bypassed",
+          "grounded search" in routing.handoff_for("captcha"), True)
+    check("unpublished records go to RTI",
+          "RTI" in routing.handoff_for("unpublished"), True)
 
 
 # --------------------------------------------------------------------------
@@ -782,6 +855,11 @@ def main():
               t_robots_4xx_means_allowed_per_rfc9309,
               t_robots_5xx_means_back_off,
               t_robots_check_raises_with_a_clear_reason,
+              t_disallowed_host_routes_to_a_permitted_one,
+              t_routing_is_host_only_never_path_guessing,
+              t_unknown_host_has_no_alternates,
+              t_api_key_is_used_when_held_and_absent_otherwise,
+              t_every_block_gets_a_door_or_an_honest_handoff,
               t_crawl_delay_is_actually_enforced,
               t_default_delay_applies_without_robots_rule,
               t_delay_is_per_host_not_global,

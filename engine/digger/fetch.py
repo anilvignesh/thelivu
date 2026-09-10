@@ -16,7 +16,7 @@ import urllib.request
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 
-from engine.digger import robots
+from engine.digger import robots, routing
 
 MAX_BYTES = 2_000_000        # 2MB ceiling per HTML document
 MAX_TEXT_CHARS = 40_000      # what we're willing to hand a model
@@ -89,6 +89,16 @@ def fetch(url, timeout=TIMEOUT, max_bytes=MAX_BYTES):
     or a host without liteparse installed, raises FetchError rather than
     returning empty text that would read as "nothing found".
     """
+    # A host that disallows us may have a sibling that does not serve the same
+    # record under the same permission — asking the party that said yes is not
+    # circumventing the one that said no. See engine/digger/routing.py.
+    if not robots.allowed(url):
+        for alt in routing.alternates(url):
+            if robots.allowed(alt):
+                url = alt
+                break
+    url, _had_key = routing.with_api_key(url)
+
     try:
         robots.check(url)
     except robots.RobotsDenied as e:
