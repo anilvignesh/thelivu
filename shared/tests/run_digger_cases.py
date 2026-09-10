@@ -250,6 +250,33 @@ def t_html_to_text_survives_malformed():
 
 
 # --------------------------------------------------------------------------
+# bot walls — a source that says no
+# --------------------------------------------------------------------------
+
+def t_captcha_page_is_reported_as_refusal_not_parse_error():
+    """RBI answers .PDF URLs with a CAPTCHA page. That must surface as "this
+    source refuses automated access", not as a parse failure that reads like
+    our bug — and it must never be treated as something to work around."""
+    captcha = ("This question is for testing whether you are a human visitor "
+               "and to prevent automated spam submission. What code is in the "
+               "image? Your support ID is: 679480895557810163")
+    try:
+        fetch._reject_if_bot_wall(captcha, "https://rbidocs.rbi.org.in/x.PDF")
+        check("captcha page rejected", False, True)
+    except fetch.FetchError as e:
+        check("captcha page raises FetchError", True, True)
+        check("names bot detection", "bot detection" in str(e), True)
+        check("says not to work around it", "worked around" in str(e), True)
+
+
+def t_ordinary_document_is_not_mistaken_for_a_bot_wall():
+    ok = ("Report of the Comptroller and Auditor General. The audit observed "
+          "irregularities amounting to Rs 1,950 crore across all departments.")
+    fetch._reject_if_bot_wall(ok, "https://cag.gov.in/x")   # must not raise
+    check("ordinary document passes bot-wall check", True, True)
+
+
+# --------------------------------------------------------------------------
 # target rotation
 # --------------------------------------------------------------------------
 
@@ -411,6 +438,8 @@ def main():
               t_cross_check_drops_ungrounded_even_if_both_agree,
               t_html_to_text_strips_scripts_and_style,
               t_html_to_text_survives_malformed,
+              t_captcha_page_is_reported_as_refusal_not_parse_error,
+              t_ordinary_document_is_not_mistaken_for_a_bot_wall,
               t_disabled_targets_are_skipped,
               t_pdf_without_liteparse_is_an_honest_miss,
               t_pdf_with_no_text_layer_is_an_honest_miss,

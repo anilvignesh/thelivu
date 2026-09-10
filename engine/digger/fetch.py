@@ -106,7 +106,14 @@ def fetch(url, timeout=TIMEOUT, max_bytes=MAX_BYTES):
     truncated = len(raw) > cap
     raw = raw[:cap]
 
-    if "pdf" in content_type or final_url.lower().endswith(".pdf"):
+    # Content-Type wins over the URL extension. RBI serves 46KB of HTML from
+    # URLs ending .PDF; trusting the extension sent that to the PDF parser and
+    # surfaced as a confusing "unsupported file format: .html" instead of what
+    # it was (2026-09-10).
+    looks_pdf = "pdf" in content_type or (
+        final_url.lower().endswith(".pdf") and "html" not in content_type
+    )
+    if looks_pdf:
         text = pdf_to_text(raw)
         if len(text) > MAX_TEXT_CHARS:
             text = text[:MAX_TEXT_CHARS]
@@ -133,6 +140,8 @@ def fetch(url, timeout=TIMEOUT, max_bytes=MAX_BYTES):
 
     if not text.strip():
         raise FetchError(f"no extractable text at {final_url}")
+
+    _reject_if_bot_wall(text, final_url)
 
     return {
         "url": url,
@@ -312,3 +321,30 @@ def pdf_to_text(data):
             "on this host by design)"
         )
     return text
+
+# A source that answers with a CAPTCHA has said no to automated access. Detect it
+# and say so plainly: without this, RBI's challenge page arrived as a 46KB "PDF"
+# and surfaced as an unrelated parse error, which reads like our bug rather than
+# their policy. We do not solve these — a source behind bot detection is out of
+# scope for this tier, and belongs to Tier 1's grounded search (which reaches the
+# content through indexes the publisher does permit).
+_BOT_WALL_MARKERS = (
+    "this question is for testing whether you are a human",
+    "prevent automated spam submission",
+    "what code is in the image",
+    "your support id is",
+    "enable javascript and cookies to continue",
+    "verify you are human",
+    "checking your browser before accessing",
+)
+
+
+def _reject_if_bot_wall(text, final_url):
+    low = text[:4000].lower()
+    for marker in _BOT_WALL_MARKERS:
+        if marker in low:
+            raise FetchError(
+                f"blocked by bot detection at {final_url} (matched: {marker!r}). "
+                "This source refuses automated access; it is not a parsing "
+                "failure and must not be worked around."
+            )

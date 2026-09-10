@@ -180,12 +180,16 @@ the key's shape (`freellmapi-` + 48 hex) before writing it.
   the same box gets 200 — it fingerprints the client, and browser-like Accept
   headers did not change it. Not worth chasing for the least valuable target on
   the list; `targets.active_targets()` skips it so it does not burn a cycle.
-- **RBI has no working feed** — the documented RSS endpoints return zero items,
-  and its listing is JS-rendered, so RBI is absent from the rotation despite
-  being beat-monitor category #3. A headless browser would fix it and is
-  explicitly rejected: Chromium needs more memory than this whole box has
-  spare. JS-only sources belong to Tier 1 (Gemini, already search-grounded),
-  not here.
+- **RBI is out of scope, and not for a technical reason.** Its RSS endpoints
+  return zero items, but the real finding (2026-09-10) is that
+  `rbidocs.rbi.org.in` answers `.PDF` URLs with **a CAPTCHA**: "This question is
+  for testing whether you are a human visitor and to prevent automated spam
+  submission." RBI has explicitly refused automated access. That is a policy
+  decision by the publisher, not an obstacle to engineer around, and no browser
+  agent or headless renderer will be pointed at it. `fetch()` now detects bot
+  walls and reports them as a refusal so this never again looks like a parsing
+  bug. RBI content that matters can still be reached by Tier 1's grounded search,
+  through indexes RBI does permit.
 - Agreement so far is mostly `differ`, because these SEBI order pages are ~380
   characters and the two models pick different single facts from them. That is
   the cross-check reporting honestly, not a bug — but it means `agree` will only
