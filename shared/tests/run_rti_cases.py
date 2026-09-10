@@ -9,12 +9,37 @@ as a question. The RTI Act gives access to RECORDS, and a PIO may lawfully
 reject "why was no penalty recovered?" as seeking an opinion. The same
 information is obtainable by asking for the document that would contain it.
 """
+import os
 import sys
+import tempfile
 from datetime import datetime, timedelta, timezone
 
-from publishing import rti
+os.environ.pop("DATABASE_URL", None)
+os.environ.pop("DATABASE_PUBLIC_URL", None)
+_TMPDB = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+_TMPDB.close()
+os.environ["DB_PATH"] = _TMPDB.name
+
+from publishing import rti                       # noqa: E402
+from shared.db import (                          # noqa: E402
+    init_db, save_rti, mark_rti_filed, close_rti, rti_requests, rti_overdue,
+)
 
 _fails = []
+
+
+def _fresh():
+    """Each persistence case starts from an empty table — they share one
+    throwaway SQLite file, and rows carrying over made `[0]` pick up a previous
+    test's row."""
+    init_db()
+    from shared.db import _conn
+    conn = _conn()
+    try:
+        conn.cursor().execute("DELETE FROM rti_requests")
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def check(name, got, want):
@@ -125,6 +150,58 @@ def t_gap_suggestion_is_conservative():
     check("warns that breadth gets refused", "refused as such" in s["note"], True)
 
 
+# --------------------------------------------------------------------------
+# persistence — a tracker that forgets is not a tracker
+# --------------------------------------------------------------------------
+
+def t_request_persists_and_tracks_its_clock():
+    _fresh()
+    body = rti.draft("MoRTH", RECORDS, "Highway penalty recovery")
+    rid = save_rti("MoRTH", "Highway penalty recovery", body,
+                   gap_claim="project-wise recovery breakdown")
+    check("saved as drafted", rti_requests()[0]["status"], rti.DRAFTED)
+
+    d = rti.due_dates("2026-09-10T00:00:00")
+    mark_rti_filed(rid, "2026-09-10T00:00:00", d["reply_by"])
+    row = rti_requests()[0]
+    check("marked filed", row["status"], rti.FILED)
+    check("deadline stored", str(row["reply_by"])[:10], "2026-10-10")
+
+
+def t_overdue_surfaces_silence_as_deemed_refusal():
+    """Leaving these as 'filed' forever is exactly how a deemed refusal — which
+    is appealable, and a story — gets missed."""
+    _fresh()
+    body = rti.draft("NHAI", RECORDS, "Recovery notices")
+    rid = save_rti("NHAI", "Recovery notices", body)
+    mark_rti_filed(rid, "2026-09-10T00:00:00", "2026-10-10")
+
+    check("not overdue before the deadline", rti_overdue("2026-10-01"), [])
+    overdue = rti_overdue("2026-10-20")
+    check("overdue after it", len(overdue), 1)
+
+    status = rti.status_for("2026-09-10T00:00:00",
+                            now=datetime(2026, 10, 20, tzinfo=timezone.utc))
+    lead, why = rti.is_lead(status)
+    close_rti(overdue[0]["id"], status, outcome_note=why, lead_flagged=lead)
+    row = rti_requests()[0]
+    check("closed as deemed refusal", row["status"], rti.DEEMED_REFUSED)
+    check("flagged as a lead", bool(row["lead_flagged"]), True)
+
+
+def t_refusal_records_the_exemption_claimed():
+    """The exemption claimed is a checkable fact, and often the story."""
+    _fresh()
+    rid = save_rti("PIO", "x", rti.draft("PIO", RECORDS, "x"))
+    mark_rti_filed(rid, "2026-09-10T00:00:00", "2026-10-10")
+    lead, why = rti.is_lead(rti.REFUSED, exemption_cited="Section 8(1)(d)")
+    close_rti(rid, rti.REFUSED, exemption_cited="Section 8(1)(d)",
+              outcome_note=why, lead_flagged=lead)
+    row = rti_requests()[0]
+    check("exemption stored", row["exemption_cited"], "Section 8(1)(d)")
+    check("refusal is a lead", bool(row["lead_flagged"]), True)
+
+
 def main():
     print("rti cases")
     for t in (t_questions_are_refused_at_draft_time,
@@ -134,7 +211,10 @@ def main():
               t_deadlines_follow_the_act,
               t_silence_becomes_a_deemed_refusal,
               t_refusals_and_silence_are_themselves_leads,
-              t_gap_suggestion_is_conservative):
+              t_gap_suggestion_is_conservative,
+              t_request_persists_and_tracks_its_clock,
+              t_overdue_surfaces_silence_as_deemed_refusal,
+              t_refusal_records_the_exemption_claimed):
         t()
 
     print("\n" + "=" * 72)

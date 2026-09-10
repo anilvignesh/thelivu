@@ -133,12 +133,48 @@ def extract(doc, brief, model=None, allow_fallback=True):
     return findings, used
 
 
-def _key(finding):
-    """Loose identity for comparing two models' findings — first 8 significant
-    words of the title. Exact-match would call every paraphrase a disagreement."""
+_STOP = {"the", "a", "an", "of", "in", "on", "for", "to", "and", "is", "at",
+         "by", "with", "from", "as", "its", "was", "were", "been", "matter",
+         "respect", "regarding", "concerning", "case", "no"}
+
+
+def _tokens(finding):
     words = re.findall(r"[a-z0-9]+", (finding.get("title") or "").lower())
-    stop = {"the", "a", "an", "of", "in", "on", "for", "to", "and", "is", "at"}
-    return " ".join([w for w in words if w not in stop][:8])
+    return {w for w in words if w not in _STOP and len(w) > 1}
+
+
+def _same_finding(a, b, threshold=0.4):
+    """Do two models' findings describe the same thing?
+
+    Compared by TOKEN OVERLAP, not by a shared prefix. The first version keyed
+    on the first eight significant words of the title and marked everything
+    else a disagreement — which made every candidate in production come back
+    'differ' (all five, 2026-09-10) even where the two models plainly agreed.
+    Live example: "Release Order for Subhasish Roy in Getrise Infotech Pvt Ltd
+    Matter" against "Recovery Certificate Issued to Subhasish Roy". Same
+    document, same finding, no shared prefix.
+
+    Overlap is measured against the SHORTER title, because one model routinely
+    writes a fuller title than the other and containment is agreement, not
+    partial agreement. A shared rare token — a name, a number, a certificate id
+    — is decisive, since two findings naming the same entity are about the same
+    entity whatever else differs.
+    """
+    ta, tb = _tokens(a), _tokens(b)
+    if not ta or not tb:
+        return False
+    shared = ta & tb
+    if not shared:
+        return False
+    # A shared figure or identifier settles it.
+    if any(any(ch.isdigit() for ch in tok) for tok in shared):
+        return True
+    return len(shared) / min(len(ta), len(tb)) >= threshold
+
+
+def _key(finding):
+    """Stable label for a finding, used only for reporting."""
+    return " ".join(sorted(_tokens(finding))[:8])
 
 
 def cross_check(doc, brief, model_a=None, model_b=None):
@@ -165,18 +201,15 @@ def cross_check(doc, brief, model_a=None, model_b=None):
     except freellm.FreeLLMError:
         b_ok = False
 
-    b_keys = {_key(f) for f in findings_b}
-
     out = []
     for f in findings_a:
+        match = next((x for x in findings_b if _same_finding(f, x)), None)
         if not b_ok:
             agreement = "single"
             answer_b = None
-        elif _key(f) in b_keys:
+        elif match is not None:
             agreement = "agree"
-            answer_b = next(
-                (x["finding"] for x in findings_b if _key(x) == _key(f)), None
-            )
+            answer_b = match["finding"]
         else:
             agreement = "differ"
             answer_b = json.dumps([x["title"] for x in findings_b])[:500]

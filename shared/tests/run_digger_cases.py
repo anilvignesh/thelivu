@@ -29,7 +29,7 @@ os.environ["DB_PATH"] = _TMPDB.name
 from engine.digger import extract, fetch          # noqa: E402
 from engine.digger import robots                  # noqa: E402
 from engine.digger import discover, targets       # noqa: E402
-from engine.digger import routing                 # noqa: E402
+from engine.digger import routing, prefilter      # noqa: E402
 from engine.digger import freellm                 # noqa: E402
 from shared.db import (                           # noqa: E402
     init_db, record_digger_candidate, digger_seen_urls,
@@ -166,6 +166,45 @@ def _with_fake(mapping, fn):
         return fn()
     finally:
         freellm.complete = orig
+
+
+def t_agreement_matches_on_overlap_not_prefix():
+    """All five production candidates came back 'differ' (2026-09-10) because
+    matching keyed on the first eight significant words of the title. These are
+    the real pairs; the two models plainly agreed and the code could not see
+    it."""
+    same = [
+        ("Release Order for Subhasish Roy in Getrise Infotech Pvt Ltd Matter",
+         "Recovery Certificate Issued to Subhasish Roy"),
+        ("Recovery proceeding certificate in respect of Sachin Kumar Jhawar HUF",
+         "Recovery Certificate for Sachin Kumar Jhawar HUF"),
+        ("Unresolved audit objections since 1964-65",
+         "Objections unresolved since 1964-65"),
+    ]
+    for a, b in same:
+        check(f"agree: {a[:34]}",
+              extract._same_finding({"title": a}, {"title": b}), True)
+
+    different = [
+        ("Release order for Subhasish Roy", "Penalty imposed on a Gujarat contractor"),
+        ("Rs 1,950 crore in irregularities", "Audit Irregularities in 2024-25"),
+    ]
+    for a, b in different:
+        check(f"differ: {a[:34]}",
+              extract._same_finding({"title": a}, {"title": b}), False)
+
+
+def t_shared_identifier_settles_agreement():
+    """Two findings naming the same certificate number are about the same
+    certificate, whatever else the titles do."""
+    check("shared id decisive",
+          extract._same_finding({"title": "Certificate RC9284 issued"},
+                                {"title": "Order concerning RC9284"}), True)
+
+
+def t_empty_titles_never_match():
+    check("empty does not match",
+          extract._same_finding({"title": ""}, {"title": "anything"}), False)
 
 
 def t_cross_check_agree():
@@ -789,6 +828,91 @@ def t_db_failure_degrades_to_builtin_targets():
 
 
 # --------------------------------------------------------------------------
+# pre-filter — built against what the digger actually produced
+# --------------------------------------------------------------------------
+
+def t_site_furniture_is_dropped():
+    """Two of the first six production candidates were Lok Sabha accessibility
+    pages. The model read them correctly and reported, accurately, that they
+    contained nothing relevant — grounding worked and the finding was still
+    worthless."""
+    for title in ["Screen Reader Access Document", "Accessibility Statement page content",
+                  "Website Policies", "Sitemap"]:
+        v, why = prefilter.classify({"title": title, "finding": "x " * 20})
+        check(f"dropped: {title[:34]}", v, prefilter.DROP)
+        check("reason names it as furniture", "furniture" in why, True)
+
+
+def t_correctly_extracted_nothing_is_dropped():
+    """The most common noise, and nothing upstream catches it: the extractor
+    did its job and there was nothing there."""
+    v, why = prefilter.classify({
+        "title": "Ministry reply",
+        "finding": "The document contains no information about ministries, "
+                   "questions answered, or specific figures."})
+    check("null finding dropped", v, prefilter.DROP)
+    check("reason is explicit", "absence of a finding" in why, True)
+
+
+def t_a_lead_needs_something_checkable():
+    """No figure, date, statute or identifier means a reviewer has nothing to
+    pull on, and the charter's attribution rule could not be met from it."""
+    v, _ = prefilter.classify({
+        "title": "Concerns raised about roads",
+        "finding": "The document discusses various concerns relating to road "
+                   "quality and describes the general situation at length."})
+    check("unanchored finding dropped", v, prefilter.DROP)
+
+    v, _ = prefilter.classify({
+        "title": "Penalty imposed",
+        "finding": "A penalty of Rs 119 crore was imposed on the contractor "
+                   "for premature pavement failure on the section."})
+    check("figure makes it keepable", v, prefilter.KEEP)
+
+    v, _ = prefilter.classify({
+        "title": "Order issued",
+        "finding": "An order was issued under Section 11 of the Act against "
+                   "the entity named in the proceedings."})
+    check("statute reference makes it keepable", v, prefilter.KEEP)
+
+
+def t_thin_findings_are_dropped():
+    check("too short dropped",
+          prefilter.classify({"title": "Order", "finding": "An order in 2026."})[0],
+          prefilter.DROP)
+
+
+def t_dedup_collapses_cross_source_duplicates():
+    """Per-URL dedup in the loop cannot catch this: CAG press releases and CAG
+    audit reports describe the same findings from different URLs."""
+    cands = [
+        {"title": "Recovery certificate RC9284 against Sachin Kumar Jhawar HUF",
+         "finding": "A recovery certificate numbered RC9284 of 2026 was issued in 2026."},
+        {"title": "Order concerning RC9284 for Sachin Kumar Jhawar",
+         "finding": "The recovery proceeding RC9284 of 2026 concerns the same party in 2026."},
+        {"title": "Penalty of Rs 119 crore in Madhya Pradesh",
+         "finding": "A penalty of Rs 119 crore was imposed for pavement failure in 2026."},
+    ]
+    kept, dropped = prefilter.run(cands)
+    check("duplicate collapsed", len(kept), 2)
+    check("distinct finding survives",
+          any("119" in k["title"] for k in kept), True)
+
+
+def t_dropped_candidates_keep_their_reasons():
+    """This is where a pre-filter goes wrong silently: if it starts dropping
+    real leads, the only evidence is what it said about them."""
+    kept, dropped = prefilter.run([
+        {"title": "Accessibility Statement", "finding": "x " * 20},
+        {"title": "Penalty imposed", "finding": "Rs 5 crore was imposed in 2026 on the firm named."},
+    ])
+    check("one kept", len(kept), 1)
+    check("one dropped", len(dropped), 1)
+    check("reason retained", bool(dropped[0][1]), True)
+    check("summary counts them", "1 kept, 1 dropped" in prefilter.summarise(kept, dropped), True)
+
+
+# --------------------------------------------------------------------------
 # persistence
 # --------------------------------------------------------------------------
 
@@ -822,6 +946,9 @@ def main():
               t_grounded_accepts_reflowed_whitespace,
               t_grounded_rejects_invented_figure,
               t_grounded_blanks_unverifiable_short_excerpt,
+              t_agreement_matches_on_overlap_not_prefix,
+              t_shared_identifier_settles_agreement,
+              t_empty_titles_never_match,
               t_cross_check_agree,
               t_cross_check_differ,
               t_second_model_rate_limited_falls_back,
@@ -864,6 +991,12 @@ def main():
               t_validation_rejects_an_index_with_no_documents,
               t_validation_records_failures_with_reasons,
               t_db_failure_degrades_to_builtin_targets,
+              t_site_furniture_is_dropped,
+              t_correctly_extracted_nothing_is_dropped,
+              t_a_lead_needs_something_checkable,
+              t_thin_findings_are_dropped,
+              t_dedup_collapses_cross_source_duplicates,
+              t_dropped_candidates_keep_their_reasons,
               t_records_and_dedups):
         t()
 

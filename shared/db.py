@@ -394,6 +394,32 @@ CREATE TABLE IF NOT EXISTS digger_targets (
     created_at   TIMESTAMP DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_digger_targets_status ON digger_targets (status);
+
+-- RTI applications. The statutory route to records nobody publishes, which is
+-- where the genuinely unavailable material turned out to be (see
+-- publishing/rti.py). Filing is a person's act — identity, fee, address — so
+-- this table drafts, tracks and reminds; it does not file.
+--
+-- `status` distinguishes a written refusal from silence past the 30-day
+-- deadline (deemed_refused). Both are appealable and both are leads: what an
+-- authority declines to disclose, and which exemption it reaches for, is often
+-- more revealing than the record.
+CREATE TABLE IF NOT EXISTS rti_requests (
+    id            SERIAL PRIMARY KEY,
+    authority     TEXT NOT NULL,
+    subject       TEXT NOT NULL,
+    body          TEXT NOT NULL,
+    gap_claim     TEXT,
+    status        TEXT DEFAULT 'drafted',
+    filed_on      TIMESTAMP,
+    reply_by      TIMESTAMP,
+    replied_on    TIMESTAMP,
+    exemption_cited TEXT,
+    outcome_note  TEXT,
+    lead_flagged  BOOLEAN DEFAULT FALSE,
+    created_at    TIMESTAMP DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_rti_status ON rti_requests (status, reply_by);
 """
 
 # SQLite fallback schema (same structure, SQLite syntax)
@@ -735,6 +761,23 @@ CREATE TABLE IF NOT EXISTS digger_targets (
     created_at   TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_digger_targets_status ON digger_targets (status);
+
+CREATE TABLE IF NOT EXISTS rti_requests (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    authority     TEXT NOT NULL,
+    subject       TEXT NOT NULL,
+    body          TEXT NOT NULL,
+    gap_claim     TEXT,
+    status        TEXT DEFAULT 'drafted',
+    filed_on      TEXT,
+    reply_by      TEXT,
+    replied_on    TEXT,
+    exemption_cited TEXT,
+    outcome_note  TEXT,
+    lead_flagged  INTEGER DEFAULT 0,
+    created_at    TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_rti_status ON rti_requests (status, reply_by);
 """
 
 
@@ -3437,5 +3480,87 @@ def set_digger_target_status(key, status, decided_by="owner"):
         )
         conn.commit()
         return cur.rowcount
+    finally:
+        conn.close()
+
+
+def save_rti(authority, subject, body, gap_claim=None):
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cols = "authority, subject, body, gap_claim"
+        vals = ", ".join([ph] * 4)
+        if _is_postgres():
+            cur.execute(f"INSERT INTO rti_requests ({cols}) VALUES ({vals}) RETURNING id",
+                        (authority, subject, body, gap_claim))
+            rid = cur.fetchone()[0]
+        else:
+            cur.execute(f"INSERT INTO rti_requests ({cols}) VALUES ({vals})",
+                        (authority, subject, body, gap_claim))
+            rid = cur.lastrowid
+        conn.commit()
+        return rid
+    finally:
+        conn.close()
+
+
+def mark_rti_filed(rti_id, filed_on, reply_by):
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(
+            f"""UPDATE rti_requests SET status = 'filed', filed_on = {ph},
+                   reply_by = {ph} WHERE id = {ph}""",
+            (filed_on, reply_by, rti_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def close_rti(rti_id, status, exemption_cited=None, outcome_note=None,
+              lead_flagged=False):
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        flag = bool(lead_flagged) if _is_postgres() else int(bool(lead_flagged))
+        cur.execute(
+            f"""UPDATE rti_requests SET status = {ph}, exemption_cited = {ph},
+                   outcome_note = {ph}, lead_flagged = {ph} WHERE id = {ph}""",
+            (status, exemption_cited, outcome_note, flag, rti_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def rti_requests(status=None):
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        if status:
+            cur.execute(f"SELECT * FROM rti_requests WHERE status = {ph} ORDER BY id", (status,))
+        else:
+            cur.execute("SELECT * FROM rti_requests ORDER BY id")
+        return _fetchall(cur)
+    finally:
+        conn.close()
+
+
+def rti_overdue(now_iso):
+    """Filed requests past their reply deadline — deemed refusals waiting to be
+    recognised as such. Silence is appealable and is itself a lead; leaving
+    these as 'filed' forever is how that gets missed."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(
+            f"""SELECT * FROM rti_requests WHERE status = 'filed'
+                 AND reply_by IS NOT NULL AND reply_by < {ph} ORDER BY reply_by""",
+            (now_iso,))
+        return _fetchall(cur)
     finally:
         conn.close()
