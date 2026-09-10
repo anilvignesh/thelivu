@@ -250,6 +250,127 @@ def t_html_to_text_survives_malformed():
 
 
 # --------------------------------------------------------------------------
+# target rotation
+# --------------------------------------------------------------------------
+
+def t_disabled_targets_are_skipped():
+    """A known-broken source (PIB 403s this host) must leave the rotation
+    entirely rather than burn a cycle every few hours."""
+    from engine.digger import targets
+    keys = [t["key"] for t in targets.active_targets()]
+    check("disabled target excluded", "pib-releases" in keys, False)
+    check("active targets remain", len(keys) > 0, True)
+    seen = set()
+    k = None
+    for _ in range(len(keys) * 2):
+        k = targets.next_target(k)["key"]
+        seen.add(k)
+    check("rotation covers every active target", seen == set(keys), True)
+    check("rotation never yields a disabled target", "pib-releases" in seen, False)
+
+
+# --------------------------------------------------------------------------
+# PDF handling — optional dependency, honest failure
+# --------------------------------------------------------------------------
+
+def _with_parser(factory, fn):
+    """Swap the parser factory. Patching the FACTORY (not a cached instance) is
+    deliberate — pdf_to_text builds and closes a parser per call, because
+    letting liteparse reach __del__ at interpreter shutdown core-dumps the
+    process."""
+    orig = fetch._new_parser
+    fetch._new_parser = factory
+    try:
+        return fn()
+    finally:
+        fetch._new_parser = orig
+
+
+class _FakeParser:
+    def __init__(self, result): self._r = result; self.closed = False
+    def parse(self, data): return self._r
+    def close(self): self.closed = True
+
+
+def t_pdf_without_liteparse_is_an_honest_miss():
+    """Without liteparse the PDF path must RAISE, not return empty text. An
+    empty extraction reads downstream as 'nothing found in this document',
+    which is a silent lie about a source we never actually read."""
+    def _boom():
+        raise ImportError("No module named 'liteparse'")
+    try:
+        _with_parser(_boom, lambda: fetch.pdf_to_text(b"%PDF-1.4 fake"))
+        check("missing liteparse raises", False, True)
+    except fetch.FetchError as e:
+        check("missing liteparse raises FetchError", True, True)
+        check("error names the cause", "liteparse" in str(e), True)
+
+
+def t_pdf_with_no_text_layer_is_an_honest_miss():
+    """A scanned PDF yields no text with OCR disabled. That must surface as a
+    miss naming the reason, not as an empty successful parse."""
+    class _R:
+        text = ""
+        pages = []
+    try:
+        _with_parser(lambda: _FakeParser(_R()),
+                     lambda: fetch.pdf_to_text(b"%PDF-1.4"))
+        check("empty text layer raises", False, True)
+    except fetch.FetchError as e:
+        check("empty text layer raises FetchError", True, True)
+        check("error explains scanned/OCR", "text layer" in str(e), True)
+
+
+def t_pdf_prefers_whole_document_text():
+    """`.text` is the accessor, not `.markdown` — which stays empty unless
+    output_format is set and looks exactly like 'no text layer' when misread."""
+    class _R:
+        text = "Audit observed irregularities of Rs 1,950 crore."
+        pages = []
+    out = _with_parser(lambda: _FakeParser(_R()),
+                       lambda: fetch.pdf_to_text(b"%PDF-1.4"))
+    check("whole-document text used", out, "Audit observed irregularities of Rs 1,950 crore.")
+
+
+def t_pdf_falls_back_to_per_page_text():
+    class _P:
+        def __init__(self, i): self.text = f"page{i} content"
+    class _R:
+        text = ""
+        pages = [_P(i) for i in range(500)]
+    out = _with_parser(lambda: _FakeParser(_R()),
+                       lambda: fetch.pdf_to_text(b"%PDF-1.4"))
+    check("per-page fallback used", "page0 content" in out, True)
+    check("page cap honoured", out.count("content"), fetch.MAX_PDF_PAGES)
+    check("beyond-cap page absent", "page499 content" in out, False)
+
+
+def t_pdf_parser_is_always_closed():
+    """The close() is the whole reason this is per-call; if it stops happening
+    the service core-dumps at shutdown instead of exiting."""
+    holder = {}
+    class _R:
+        text = "ok text here"
+        pages = []
+    def _factory():
+        holder["p"] = _FakeParser(_R())
+        return holder["p"]
+    _with_parser(_factory, lambda: fetch.pdf_to_text(b"%PDF-1.4"))
+    check("parser closed on success", holder["p"].closed, True)
+
+    class _Boom(_FakeParser):
+        def parse(self, data): raise RuntimeError("corrupt pdf")
+    def _factory2():
+        holder["p"] = _Boom(_R())
+        return holder["p"]
+    try:
+        _with_parser(_factory2, lambda: fetch.pdf_to_text(b"%PDF-1.4"))
+    except fetch.FetchError:
+        pass
+    check("parser closed even when parse raises", holder["p"].closed, True)
+
+
+# --------------------------------------------------------------------------
 # persistence
 # --------------------------------------------------------------------------
 
@@ -290,6 +411,12 @@ def main():
               t_cross_check_drops_ungrounded_even_if_both_agree,
               t_html_to_text_strips_scripts_and_style,
               t_html_to_text_survives_malformed,
+              t_disabled_targets_are_skipped,
+              t_pdf_without_liteparse_is_an_honest_miss,
+              t_pdf_with_no_text_layer_is_an_honest_miss,
+              t_pdf_prefers_whole_document_text,
+              t_pdf_falls_back_to_per_page_text,
+              t_pdf_parser_is_always_closed,
               t_records_and_dedups):
         t()
 

@@ -12,6 +12,10 @@ press-release listing is ~12k characters of navigation chrome with the actual
 releases loaded by JS, so a model reading the *listing* correctly finds nothing.
 A listing page is not a document.
 
+PDFs are first-class here: most CAG/MOSPI primary records are PDFs, and they are
+parsed via liteparse (see fetch.pdf_to_text). A PDF with no text layer, or one
+PDFium rejects outright, is reported as an honest miss rather than as empty text.
+
 `verified` records whether the index was confirmed to yield real document links
 on 2026-09-10. Unverified targets stay in the rotation deliberately — a cycle
 that fails is logged and slept off, and government sources change format often
@@ -36,7 +40,14 @@ TARGETS = [
         "name": "PIB press releases",
         "index_url": "https://pib.gov.in/RssMain.aspx?ModId=6&Lang=1&Regid=3",
         "link_pattern": r"PressRelease",
-        "verified": True,   # 20 items; NOTE: served in Hindi regardless of Lang
+        # DISABLED 2026-09-10. PIB's WAF returns 403 to urllib from the VM while
+        # curl on the same box gets 200 — so it is fingerprinting the client, not
+        # blocking the IP, and browser-like Accept headers did not change it.
+        # Chasing that is not worth it for the least valuable target on the list
+        # (press releases are promotional; the audit and enforcement records are
+        # where the stories are). Re-enable if a working client is found.
+        "enabled": False,
+        "verified": False,
         "brief": (
             "Any specific allocation, disbursal, completion or beneficiary "
             "figure stated in the release — the kind of claim that can later be "
@@ -48,8 +59,8 @@ TARGETS = [
         "key": "cag-reports",
         "name": "CAG audit reports index",
         "index_url": "https://cag.gov.in/en/audit-report",
-        "link_pattern": r"/audit-report/|/ag[0-9]?/",
-        "verified": False,
+        "link_pattern": r"\.pdf$|/audit-report/|/ag[0-9]?/",
+        "verified": True,   # yields real PDF links; PDFs now parsed via liteparse
         "brief": (
             "Audit findings: the department or scheme audited, the period "
             "covered, and any rupee figure, unresolved objection or compliance "
@@ -85,12 +96,19 @@ TARGETS = [
 BY_KEY = {t["key"]: t for t in TARGETS}
 
 
+def active_targets():
+    """Targets in the rotation. A target may be disabled outright when it is
+    known-broken (see PIB) rather than left to burn a cycle every few hours."""
+    return [t for t in TARGETS if t.get("enabled", True)]
+
+
 def next_target(last_key=None):
-    """Round-robin. Rotating beats 'run everything every cycle' on a box this
-    small, and beats 'one daily pass' for coverage."""
-    if not TARGETS:
+    """Round-robin over the active targets. Rotating beats 'run everything every
+    cycle' on a box this small, and beats 'one daily pass' for coverage."""
+    active = active_targets()
+    if not active:
         return None
-    if last_key is None or last_key not in BY_KEY:
-        return TARGETS[0]
-    idx = next(i for i, t in enumerate(TARGETS) if t["key"] == last_key)
-    return TARGETS[(idx + 1) % len(TARGETS)]
+    keys = [t["key"] for t in active]
+    if last_key is None or last_key not in keys:
+        return active[0]
+    return active[(keys.index(last_key) + 1) % len(active)]

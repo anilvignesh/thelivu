@@ -97,8 +97,13 @@ $SSH "test -x $PY311" || {
 $SSH "test -x $APP_DIR/venv/bin/python || $PY311 -m venv $APP_DIR/venv"
 # Deliberately NOT requirements.txt: that pulls anthropic/openai/Pillow/lxml and
 # a compiler toolchain onto a 945MB box for a service that needs neither. The
-# digger is stdlib-only apart from the Postgres driver.
-$SSH "$APP_DIR/venv/bin/pip install --quiet --upgrade pip 'psycopg2-binary>=2.9'"
+# digger is stdlib-only apart from these two.
+#
+# liteparse parses the PDFs that most CAG/MOSPI primary records come as: a
+# 13.8MB manylinux_2_28 wheel (matches OL8's glibc 2.28) with NO runtime
+# dependencies — Rust + PDFium, no compiler, no system packages. Measured on a
+# real 2.8MB/8-page CAG PDF: 0.06s, 35MB peak RSS.
+$SSH "$APP_DIR/venv/bin/pip install --quiet --upgrade pip 'psycopg2-binary>=2.9' 'liteparse>=2.14'"
 
 # Diff before touching anything — same reasoning as deploy-secrets.sh: this is
 # safe to re-run, and an unconditional restart interrupts an in-flight cycle for
@@ -122,26 +127,32 @@ $SSH "sudo cp $APP_DIR/ops/oracle-vm/digger.service /etc/systemd/system/digger.s
       sudo restorecon -F /etc/systemd/system/digger.service && \
       sudo systemctl daemon-reload && sudo systemctl enable digger"
 
-# Smoke test BEFORE restarting. `--once` returns non-zero only on a hard error,
-# so also require that the run reported no cycle failure: a cycle that fails is
-# caught and logged by design, and letting that pass for a deploy would ship a
-# broken service that merely looks calm in the logs.
-echo "== smoke test: one dry-run cycle, no DB writes =="
+# Smoke test BEFORE restarting, against an EXPLICIT known-good target rather
+# than whatever is next in the rotation. A rotating source being down is normal
+# operation the loop is designed to log and sleep off — failing a deploy on it
+# blocks shipping for reasons unrelated to the change (PIB 403'd a deploy this
+# way on 2026-09-10). What the smoke test must prove is that THIS host can
+# fetch, reach freellmapi, and parse: sebi-enforcement exercises all three.
+SMOKE_TARGET="${SMOKE_TARGET:-sebi-enforcement}"
+echo "== smoke test: one dry-run cycle on $SMOKE_TARGET, no DB writes =="
 SMOKE="$($SSH "cd $APP_DIR && sudo -E env \$(sudo cat $ETC_DIR/digger.env | xargs) \
-  $APP_DIR/venv/bin/python -m engine.digger.loop --once --dry-run" 2>&1)" || true
+  $APP_DIR/venv/bin/python -m engine.digger.loop --once --dry-run --target $SMOKE_TARGET" 2>&1)" || true
 echo "$SMOKE"
 if echo "$SMOKE" | grep -q "cycle failed"; then
   echo "SMOKE TEST FAILED — not restarting the service" >&2
   exit 1
 fi
 
-if [ "${SECRETS_CHANGED:-0}" = "1" ] || ! $SSH "sudo systemctl is-active --quiet digger"; then
-  echo "== (re)starting digger =="
-  $SSH "sudo systemctl restart digger && sleep 5 && \
-        sudo systemctl status digger --no-pager -l | head -18"
-else
-  echo "== nothing changed and digger already running — not restarting =="
-fi
+# ALWAYS restart after a passing smoke test. deploy-secrets.sh deliberately does
+# NOT (a reel-worker restart reloads the TTS model and can interrupt an in-flight
+# render), but that reasoning does not transfer: the digger loads no model, and a
+# restart costs at most one interrupted hourly cycle. Gating the restart on
+# SECRETS_CHANGED shipped code to the box and left the old code running
+# (2026-09-10) — a deploy that reports success while changing nothing is worse
+# than an interrupted cycle.
+echo "== restarting digger =="
+$SSH "sudo systemctl restart digger && sleep 5 && \
+      sudo systemctl status digger --no-pager -l | head -12"
 
 echo "== memory caps actually applied? =="
 $SSH "systemctl show digger -p MemoryHigh -p MemoryMax -p MemoryCurrent"

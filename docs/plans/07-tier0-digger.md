@@ -165,15 +165,27 @@ the key's shape (`freellmapi-` + 48 hex) before writing it.
 
 ## Known gaps (deliberate, not oversights)
 
-- **PDFs are not parsed.** Many CAG/MOSPI primary sources are PDFs. `fetch()`
-  reports them as a known gap rather than returning empty text that would look
-  like "nothing found". Adding a PDF stack to a 945MB box is its own decision.
-- **Only SEBI and PIB indexes are verified.** CAG, CAG-local-bodies and MOSPI
-  are in the rotation but unverified; a failing cycle is logged and slept off.
-- **PIB's feed serves Hindi** regardless of the `Lang` parameter.
+- ~~PDFs are not parsed.~~ **Closed 2026-09-10** — parsed via `liteparse`
+  (13.8MB manylinux wheel, zero runtime deps, Rust + PDFium). Real CAG PDF:
+  0.06s, 35MB peak RSS, 24k chars. `cag-reports` is now a verified target and
+  its `.pdf` links are followed. Two caveats kept honest rather than hidden: a
+  scanned PDF with no text layer raises a miss naming the reason (OCR is
+  disabled on purpose — Tesseract is the memory-hungry path), and a PDF PDFium
+  rejects outright reports as a parse failure. Some CAG scans also carry a poor
+  embedded OCR layer ("COM PTROLLER & ATJDITOR"), which degrades extraction
+  quality but not safety: grounding still matches against that same text.
+- **SEBI and CAG indexes are verified.** CAG-local-bodies and MOSPI are in the
+  rotation but unverified; a failing cycle is logged and slept off.
+- **PIB is disabled.** Its WAF returns 403 to urllib from the VM while curl on
+  the same box gets 200 — it fingerprints the client, and browser-like Accept
+  headers did not change it. Not worth chasing for the least valuable target on
+  the list; `targets.active_targets()` skips it so it does not burn a cycle.
 - **RBI has no working feed** — the documented RSS endpoints return zero items,
-  so RBI is currently absent from the rotation despite being beat-monitor
-  category #3.
+  and its listing is JS-rendered, so RBI is absent from the rotation despite
+  being beat-monitor category #3. A headless browser would fix it and is
+  explicitly rejected: Chromium needs more memory than this whole box has
+  spare. JS-only sources belong to Tier 1 (Gemini, already search-grounded),
+  not here.
 - Agreement so far is mostly `differ`, because these SEBI order pages are ~380
   characters and the two models pick different single facts from them. That is
   the cross-check reporting honestly, not a bug — but it means `agree` will only
