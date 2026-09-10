@@ -398,6 +398,95 @@ def t_robots_check_raises_with_a_clear_reason():
 
 
 # --------------------------------------------------------------------------
+# crawl delay — the half of robots.txt that costs us something
+# --------------------------------------------------------------------------
+
+def t_crawl_delay_is_actually_enforced():
+    """Disallow was honoured and Crawl-delay was not: robots.crawl_delay()
+    existed and nothing called it. Reading a publisher's rules and following
+    only the half that is free is not compliance."""
+    import time as _t
+    robots.reset_cache()
+    fetch._LAST_REQUEST.clear()
+    robots._CACHE["https://slow.gov.in/robots.txt"] = (
+        _t.time(), _rp("User-agent: *\nCrawl-delay: 2"), False)
+
+    slept = []
+    orig_sleep, orig_mono = fetch.time.sleep, fetch.time.monotonic
+    clock = [1000.0]
+    fetch.time.sleep = lambda s: slept.append(s)
+    fetch.time.monotonic = lambda: clock[0]
+    try:
+        fetch._throttle("https://slow.gov.in/a")      # first hit: no wait
+        check("first request does not wait", slept, [])
+        fetch._throttle("https://slow.gov.in/b")      # immediate second hit
+        check("second request waits", len(slept), 1)
+        check("waits the publisher's 2s", round(slept[0]), 2)
+    finally:
+        fetch.time.sleep, fetch.time.monotonic = orig_sleep, orig_mono
+
+
+def t_default_delay_applies_without_robots_rule():
+    """These are government servers, several visibly fragile. One second between
+    requests costs an hourly job nothing."""
+    import time as _t
+    robots.reset_cache()
+    fetch._LAST_REQUEST.clear()
+    robots._CACHE["https://plain.gov.in/robots.txt"] = (_t.time(), None, False)
+    slept = []
+    orig_sleep, orig_mono = fetch.time.sleep, fetch.time.monotonic
+    clock = [500.0]
+    fetch.time.sleep = lambda s: slept.append(s)
+    fetch.time.monotonic = lambda: clock[0]
+    try:
+        fetch._throttle("https://plain.gov.in/a")
+        fetch._throttle("https://plain.gov.in/b")
+        check("default delay applied", round(slept[0]), round(fetch.DEFAULT_CRAWL_DELAY))
+    finally:
+        fetch.time.sleep, fetch.time.monotonic = orig_sleep, orig_mono
+
+
+def t_delay_is_per_host_not_global():
+    """Waiting on host B because we just hit host A would halve throughput for
+    no benefit to anyone."""
+    import time as _t
+    robots.reset_cache()
+    fetch._LAST_REQUEST.clear()
+    for h in ("a.gov.in", "b.gov.in"):
+        robots._CACHE[f"https://{h}/robots.txt"] = (_t.time(), None, False)
+    slept = []
+    orig_sleep, orig_mono = fetch.time.sleep, fetch.time.monotonic
+    fetch.time.sleep = lambda s: slept.append(s)
+    fetch.time.monotonic = lambda: 100.0
+    try:
+        fetch._throttle("https://a.gov.in/x")
+        fetch._throttle("https://b.gov.in/y")
+        check("different host does not wait", slept, [])
+    finally:
+        fetch.time.sleep, fetch.time.monotonic = orig_sleep, orig_mono
+
+
+def t_hostile_crawl_delay_cannot_hang_the_loop():
+    """A Crawl-delay of 86400 is a refusal expressed as a number; respect it by
+    skipping the source, not by parking the service for a day."""
+    import time as _t
+    robots.reset_cache()
+    fetch._LAST_REQUEST.clear()
+    robots._CACHE["https://hostile.gov.in/robots.txt"] = (
+        _t.time(), _rp("User-agent: *\nCrawl-delay: 86400"), False)
+    slept = []
+    orig_sleep, orig_mono = fetch.time.sleep, fetch.time.monotonic
+    fetch.time.sleep = lambda s: slept.append(s)
+    fetch.time.monotonic = lambda: 100.0
+    try:
+        fetch._throttle("https://hostile.gov.in/a")
+        fetch._throttle("https://hostile.gov.in/b")
+        check("wait is capped", slept[0] <= 30.0, True)
+    finally:
+        fetch.time.sleep, fetch.time.monotonic = orig_sleep, orig_mono
+
+
+# --------------------------------------------------------------------------
 # bot walls — a source that says no
 # --------------------------------------------------------------------------
 
@@ -693,6 +782,10 @@ def main():
               t_robots_4xx_means_allowed_per_rfc9309,
               t_robots_5xx_means_back_off,
               t_robots_check_raises_with_a_clear_reason,
+              t_crawl_delay_is_actually_enforced,
+              t_default_delay_applies_without_robots_rule,
+              t_delay_is_per_host_not_global,
+              t_hostile_crawl_delay_cannot_hang_the_loop,
               t_captcha_page_is_reported_as_refusal_not_parse_error,
               t_ordinary_document_is_not_mistaken_for_a_bot_wall,
               t_disabled_targets_are_skipped,

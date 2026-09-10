@@ -10,6 +10,7 @@ death-spiral (see brain/1GB VM Memory Traps in the vault).
 """
 
 import re
+import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -92,6 +93,7 @@ def fetch(url, timeout=TIMEOUT, max_bytes=MAX_BYTES):
         robots.check(url)
     except robots.RobotsDenied as e:
         raise FetchError(str(e)) from e
+    _throttle(url)
 
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
@@ -223,6 +225,7 @@ def fetch_index(url, pattern=None, timeout=TIMEOUT):
         robots.check(url)
     except robots.RobotsDenied as e:
         raise FetchError(str(e)) from e
+    _throttle(url)
 
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
@@ -467,3 +470,38 @@ def body_to_text(body, content_type, final_url):
     if kind == "text":
         return body
     return html_to_text(body)
+
+# ---------------------------------------------------------------------------
+# Politeness between requests
+#
+# robots.txt Disallow was being honoured; Crawl-delay was not — robots.crawl_delay()
+# existed and nothing called it (found 2026-09-10). Meanwhile a cycle fetches an
+# index and then several documents from the same host back to back with no gap.
+# Reading a publisher's rules and then following only the half that costs us
+# nothing is not compliance.
+#
+# A default applies even where robots.txt asks for nothing. These are government
+# servers, several of them visibly fragile, and one second between requests costs
+# an hourly job nothing at all.
+# ---------------------------------------------------------------------------
+
+DEFAULT_CRAWL_DELAY = 1.0
+_LAST_REQUEST = {}
+
+
+def _host(url):
+    from urllib.parse import urlparse
+    return urlparse(url).netloc.lower()
+
+
+def _throttle(url):
+    """Sleep long enough to respect this host's crawl delay."""
+    host = _host(url)
+    delay = max(robots.crawl_delay(url, default=DEFAULT_CRAWL_DELAY),
+                DEFAULT_CRAWL_DELAY)
+    last = _LAST_REQUEST.get(host)
+    if last is not None:
+        wait = delay - (time.monotonic() - last)
+        if wait > 0:
+            time.sleep(min(wait, 30.0))   # a hostile Crawl-delay must not hang the loop
+    _LAST_REQUEST[host] = time.monotonic()
