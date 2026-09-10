@@ -77,6 +77,71 @@ is room for the **second sentence**: the qualification, the counter-case, the
 "the department disputes this, and here is their number." A chapter that states a
 finding and moves on has used the format's length without using its capability.
 
+## Narrative structure — what holds 5-8 minutes together
+
+Chapters keep a long script organised. They do not, on their own, make it worth
+watching to the end. Three techniques do most of that work, and each has a
+charter-safe form and an unsafe one.
+
+### Arcs — tension that rises and releases
+
+Do not lay the story out in the order you found it. Order the chapters so each
+one raises a question the next one answers, and end each chapter slightly short
+of resolution. The BBMP example: chapter one establishes the audited figure,
+which raises "so where did the bigger number come from?"; chapter two answers
+that and immediately raises "then which reading is right?".
+
+**The safe form:** the tension comes from the evidence genuinely being
+incomplete or contested. **The unsafe form:** withholding a fact you already
+have, to manufacture suspense. That is the charter's overstatement rule wearing
+a storytelling hat — if the viewer would feel misled on learning you knew all
+along, do not do it.
+
+### Loops — open a question early, close it late
+
+Name a specific unresolved thing in the cold open, then close it explicitly by
+name in the final chapter. "Fourteen thousand crore in objections, some from
+1964" opens a loop; the close has to return to it, not drift off. An opened loop
+that never closes is the single fastest way to make a viewer feel cheated, and
+it is worse in long-form than in a reel because they have paid more attention
+for it.
+
+**Close every loop you open.** If the record cannot close one, say so plainly —
+"this is what would settle it, and it has not been published" is a closed loop.
+An unanswered question is only a failure when you pretend it was answered.
+
+### Stakes — who this actually lands on
+
+Facts alone do not tell a viewer why to care. State who bears the consequence,
+**from the record**: the people on the road that was resurfaced three times, the
+department whose budget absorbed it, the objections still unsettled sixty years
+on.
+
+**The safe form:** consequences that are documented or directly implied by the
+figures. **The unsafe form:** inventing a representative person, dramatising an
+individual case you have not verified, or attributing feelings to people you did
+not speak to. The charter's no-fabrication rule does not relax because a story
+would be more moving with a character in it.
+
+### Clarity — the viewer is never lost
+
+Long-form carries figures across minutes, so a number stated in chapter one is
+being *recalled* by chapter four, not read. Restate it when you use it again
+("that same 1,950 crore figure"). Never introduce two large numbers in one
+breath. Say units and periods every time — "crore", "in 2024-25" — even when it
+feels repetitive on the page, because it is not repetitive to someone hearing it
+once.
+
+### What NOT to import from retention-optimised storytelling advice
+
+Advice written for engagement tells you to add hooks throughout, and to develop
+a signature style that makes the story yours. Take the first only where the hook
+is a real fact you were going to state anyway, moved earlier. Decline the second
+here: this engine's decision on 2026-09-08 was that **facts outrank reach** — a
+correct piece with narrower reach beats a sharper one carrying a wrong number —
+and Thelivu's voice is already fixed by CHARTER.md and BRAND.md. Personality is
+not the variable being tuned in a story about public money.
+
 ## Hard rules
 
 These carry over from the reel skill unchanged, because they are charter rules,
@@ -118,6 +183,7 @@ PLACE: <where the story happens — "Karnataka, India". Never spoken; it anchors
 WHY_LONG_FORM: <one sentence naming which of the three triggers above this story meets>
 COLD_OPEN: <spoken opening, 1-3 lines>
 COLD_OPEN_IMAGE: <one-sentence conceptual illustration>
+OPEN_LOOP: <the specific unresolved question the cold open raises, in one line. The close must answer this by name, or state what would settle it. Never spoken — it is the contract the script holds itself to.>
 CHAPTER 1 TITLE: <4-8 words, plain>
 CHAPTER 1: <spoken lines, 150-300 words>
 CHAPTER 1 IMAGE: <one-sentence conceptual illustration, or the document to hold on screen>
@@ -125,7 +191,7 @@ CHAPTER 2 TITLE: <...>
 CHAPTER 2: <...>
 CHAPTER 2 IMAGE: <...>
 ...
-CLOSE: <spoken closing, 2-4 lines: what is unknown, and what would settle it>
+CLOSE: <spoken closing, 2-4 lines. Must close OPEN_LOOP by name: either answer it, or say what would settle it and that it has not been published.>
 CLOSE_IMAGE: <one-sentence conceptual illustration>
 DESCRIPTION: <2-4 sentences for the video description, with the primary sources named>
 HASHTAGS: <6-10 story-specific tags — brand tags are added by the engine>
@@ -142,3 +208,8 @@ WORD_COUNT: <integer, spoken words only>
    it and say the script is shorter.
 4. **WHY_LONG_FORM is honest.** If you cannot name a trigger, this should have
    been a reel — say so instead of producing the script.
+5. **Every loop opened in the cold open is closed by name in the close.** If the
+   record cannot close one, the close says what would settle it. A question left
+   dangling after eight minutes is the fastest way to make the time feel wasted.
+6. **No fact is being withheld for suspense.** If a viewer learning the full
+   picture would feel the script had held out on them, restructure it.

@@ -211,6 +211,7 @@ PLACE: Karnataka, India
 WHY_LONG_FORM: The same figure is used two different ways by two sources.
 COLD_OPEN: Forty six thousand crore rupees of road work. One complaint says most of it never reached the road.
 COLD_OPEN_IMAGE: A road cross-section with a hollow beneath the asphalt.
+OPEN_LOOP: Was the money spent badly, or was it taken?
 CHAPTER 1 TITLE: What the audit actually found
 CHAPTER 1: The comptroller and auditor general put irregularities at one thousand nine hundred and fifty crore rupees for the year, across every department of the corporation.
 CHAPTER 1 IMAGE: The audit paragraph held on screen.
@@ -235,6 +236,15 @@ def t_parses_chapters_in_order():
     check("chapter title", p["chapters"][0]["title"], "What the audit actually found")
     check("chapter image kept", bool(p["chapters"][1]["image"]), True)
     check("hashtags stripped of #", p["hashtags"][0], "BBMP")
+
+
+def t_open_loop_is_parsed_and_not_spoken():
+    """OPEN_LOOP is the contract the script holds itself to — the close must
+    answer it by name. It is never narrated, so it must not inflate the count."""
+    p = longform.parse_script(SCRIPT)
+    check("open loop parsed", p["open_loop"], "Was the money spent badly, or was it taken?")
+    check("open loop not counted as spoken",
+          longform.spoken_words("OPEN_LOOP: " + " ".join(["word"] * 30)), 0)
 
 
 def t_parses_fenced_output():
@@ -286,6 +296,7 @@ def main():
               t_uncuttable_overflow_graduates,
               t_two_beat_script_cannot_be_cut_further,
               t_parses_chapters_in_order,
+              t_open_loop_is_parsed_and_not_spoken,
               t_parses_fenced_output,
               t_chapter_timestamps_start_at_zero_and_ascend,
               t_budget_check_rejects_over_ceiling,

@@ -38,7 +38,7 @@ _SPOKEN_PREFIXES = ("HOOK:", "BEAT", "CLOSE:", "COLD_OPEN:", "CHAPTER")
 # six-beat reel by a dozen words and graduating stories that fit the format
 # fine — a bug whose only symptom is long-form videos nobody asked for.
 _NON_SPOKEN = re.compile(
-    r"^(TITLE|PLACE|HASHTAGS|DESCRIPTION|WORD_COUNT|WHY_LONG_FORM"
+    r"^(TITLE|PLACE|HASHTAGS|DESCRIPTION|WORD_COUNT|WHY_LONG_FORM|OPEN_LOOP"
     r"|[A-Z0-9_ ]*CAPTION|[A-Z0-9_ ]*IMAGE|CHAPTER\s+\d+\s+TITLE)\s*:", re.I
 )
 
@@ -126,7 +126,7 @@ def parse_script(text):
     """
     out = {
         "title": "", "place": "", "why_long_form": "", "cold_open": "",
-        "cold_open_image": "", "close": "", "close_image": "",
+        "cold_open_image": "", "open_loop": "", "close": "", "close_image": "",
         "description": "", "hashtags": [], "chapters": [],
     }
     if not text:
@@ -139,6 +139,7 @@ def parse_script(text):
         "why_long_form": r"^WHY_LONG_FORM:\s*(.+)$",
         "cold_open": r"^COLD_OPEN:\s*(.+)$",
         "cold_open_image": r"^COLD_OPEN_IMAGE:\s*(.+)$",
+        "open_loop": r"^OPEN_LOOP:\s*(.+)$",
         "close": r"^CLOSE:\s*(.+)$",
         "close_image": r"^CLOSE_IMAGE:\s*(.+)$",
         "description": r"^DESCRIPTION:\s*(.+)$",
