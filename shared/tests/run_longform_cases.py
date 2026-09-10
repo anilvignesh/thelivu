@@ -168,6 +168,28 @@ def t_caption_and_image_lines_are_not_spoken():
     check("only spoken words counted", longform.spoken_words(script), 80)
 
 
+def t_metadata_never_counts_as_narration():
+    """A multi-line DESCRIPTION with a numbered source list pushed a 1,298-word
+    script to 1,661 and over the hard ceiling. The counter is an allowlist now:
+    only narration counts, and anything unrecognised counts as nothing."""
+    script = "\n".join([
+        "TITLE: t", "PLACE: India",
+        "COLD_OPEN: one two three",
+        "COLD_OPEN_IMAGE: a picture of something",
+        "CHAPTER 1 TITLE: A chapter title with several words",
+        "CHAPTER 1: four five",
+        "CHAPTER 1 IMAGE 1: another picture entirely",
+        "CHAPTER 1 IMAGE 2: and a third picture here",
+        "CLOSE: six",
+        "DESCRIPTION: a description that runs on",
+        "Sources:",
+        "1. A long source citation with a great many words in it",
+        "2. Another long source citation, equally wordy",
+        "HASHTAGS: A B C", "WORD_COUNT: 0",
+    ])
+    check("only narration counted", longform.spoken_words(script), 6)
+
+
 def t_short_script_does_not_graduate():
     ok, reason = longform.should_graduate(_reel(W20, [W20, W20], W20))
     check("short script stays a reel", ok, False)
@@ -242,7 +264,9 @@ COLD_OPEN_IMAGE: A road cross-section with a hollow beneath the asphalt.
 OPEN_LOOP: Was the money spent badly, or was it taken?
 CHAPTER 1 TITLE: What the audit actually found
 CHAPTER 1: The comptroller and auditor general put irregularities at one thousand nine hundred and fifty crore rupees for the year, across every department of the corporation.
-CHAPTER 1 IMAGE: The audit paragraph held on screen.
+CHAPTER 1 IMAGE 1: The audit paragraph held on screen.
+CHAPTER 1 IMAGE 2: A ledger with two columns of very different heights.
+CHAPTER 1 RECORD: LS Unstarred Q843, 23 July 2026 | https://sansad.in/x.pdf | 2,732 crore
 CHAPTER 2 TITLE: Where the bigger number comes from
 CHAPTER 2: A separate enforcement complaint uses a much larger figure, and uses it differently: as the total spent, not as the amount misappropriated.
 CHAPTER 2 IMAGE: Two documents side by side with the same number circled.
@@ -280,6 +304,45 @@ def t_parses_fenced_output():
     check("fenced script still parses", len(p["chapters"]), 2)
 
 
+def t_record_lines_are_parsed_as_evidence_not_illustration():
+    """A RECORD is a real document page, a different asset class from a
+    generated IMAGE — it IS the evidence rather than an image that might be
+    mistaken for it, and the third field is what makes it evidence rather than
+    a prop: the page shown must contain that phrase."""
+    p = longform.parse_script(SCRIPT)
+    ch1 = p["chapters"][0]
+    check("record parsed", len(ch1["records"]), 1)
+    r = ch1["records"][0]
+    check("description read", r["description"].startswith("LS Unstarred Q843"), True)
+    check("url read", r["url"].endswith(".pdf"), True)
+    check("locating phrase read", r["quote"], "2,732 crore")
+    check("records kept separate from images", len(ch1["images"]), 2)
+
+
+def t_record_line_is_not_counted_as_narration():
+    check("record contributes no spoken words",
+          longform.spoken_words("CHAPTER 1 RECORD: a doc | http://x | some phrase here"), 0)
+
+
+def t_chapters_carry_multiple_images():
+    """One image per chapter leaves each on screen ~58s against a reel's ~15s,
+    so long-form runs 2-3 per chapter and the parser has to keep them all."""
+    p = longform.parse_script(SCRIPT)
+    ch1 = p["chapters"][0]
+    check("both images kept", len(ch1["images"]), 2)
+    check("order preserved", ch1["images"][0].startswith("The audit paragraph"), True)
+    check("single `image` still points at the first", ch1["image"], ch1["images"][0])
+
+
+def t_unnumbered_image_line_still_works():
+    """The old single-IMAGE form must keep parsing — chapter 2 of the fixture
+    uses it."""
+    p = longform.parse_script(SCRIPT)
+    ch2 = p["chapters"][1]
+    check("unnumbered image parsed", len(ch2["images"]), 1)
+    check("accessible as image", bool(ch2["image"]), True)
+
+
 def t_chapter_timestamps_start_at_zero_and_ascend():
     p = longform.parse_script(SCRIPT)
     marks = longform.estimate_chapter_timestamps(p)
@@ -290,10 +353,30 @@ def t_chapter_timestamps_start_at_zero_and_ascend():
           bool(youtube.format_chapters(marks)), True)
 
 
-def t_budget_check_rejects_over_ceiling():
-    ok, msg = longform.budget_check(longform.LONGFORM_HARD_CEILING + 1)
-    check("over ceiling rejected", ok, False)
-    check("advises cutting a whole chapter", "whole chapter" in msg, True)
+def t_length_alone_never_fails_a_script():
+    """News reporting: the detail is the product. A cap on length is what the
+    reel already has, and cutting load-bearing material to fit one is the
+    failure this format exists to fix."""
+    for words in (1500, 2500, 4000):
+        ok, msg = longform.budget_check(words)
+        check(f"{words}w accepted on length", ok, True)
+    ok, msg = longform.budget_check(2500)
+    check("long scripts get a padding caution, not a rejection",
+          "every chapter still changes" in msg, True)
+
+
+def t_only_machine_time_can_fail_a_script():
+    """And when it does, the answer is to schedule differently, not to cut."""
+    fits, why = longform.fits_window(2500)
+    check("two hours fits an eight-hour window", fits, True)
+    # 8h of synthesis at 7.2x is ~10,000 words, so the threshold is well past
+    # anything editorial — which is the point.
+    fits, why = longform.fits_window(15000)
+    check("very long narration does not fit", fits, False)
+    check("named as a scheduling problem", "scheduling problem" in why, True)
+    check("explicitly not a reason to cut", "Do not cut the story" in why, True)
+    fits, _ = longform.fits_window(15000, hours=24)
+    check("a wider window fits it", fits, True)
 
 
 def t_budget_check_reports_synthesis_cost():
@@ -319,6 +402,7 @@ def main():
               t_invalid_chapter_lists_are_dropped_not_half_written,
               t_chapters_sorted_and_blank_labels_ignored,
               t_caption_and_image_lines_are_not_spoken,
+              t_metadata_never_counts_as_narration,
               t_short_script_does_not_graduate,
               t_overlong_but_cuttable_does_not_graduate,
               t_uncuttable_overflow_graduates,
@@ -329,8 +413,13 @@ def main():
               t_parses_chapters_in_order,
               t_open_loop_is_parsed_and_not_spoken,
               t_parses_fenced_output,
+              t_record_lines_are_parsed_as_evidence_not_illustration,
+              t_record_line_is_not_counted_as_narration,
+              t_chapters_carry_multiple_images,
+              t_unnumbered_image_line_still_works,
               t_chapter_timestamps_start_at_zero_and_ascend,
-              t_budget_check_rejects_over_ceiling,
+              t_length_alone_never_fails_a_script,
+              t_only_machine_time_can_fail_a_script,
               t_budget_check_reports_synthesis_cost):
         t()
 

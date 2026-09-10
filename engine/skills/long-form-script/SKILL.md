@@ -50,21 +50,33 @@ Route here if at least one is true:
 If none holds, go back and write a reel. Say so plainly rather than producing a
 long script nobody needed.
 
-## Word budget
+## Length
 
-| | |
-|---|---|
-| **Target** | **750–1,200 spoken words (~5–8 minutes)** |
-| Hard ceiling — never exceed | 1,500 words (~10 minutes) |
+**There is no word ceiling.** This is news reporting, and the detail is the
+product. A cap on length is what the reel format already has, and cutting
+load-bearing material to fit it is the exact failure this format exists to fix —
+a second ceiling here would recreate it one level up.
 
-Count only SPOKEN lines. Narration is synthesised on a CPU box at roughly **7.2x
-realtime** (measured 2026-09-10), so a 1,200-word script costs about an hour of
-machine time and a 1,500-word one about seventy-five minutes. That is why the
-ceiling is a ceiling: it is not an aesthetic preference, it is the point past
-which one video starves the reel pipeline that runs on the same machine.
+**750–1,200 spoken words (~5–8 minutes) is the usual range**, not a rule. Most
+stories land there. A story with three contested figures, a timeline and a
+counter-case may need two thousand words, and should have them.
 
-The ceiling is not a target. A 900-word script that earns every word beats a
-1,400-word one that repeats itself with more dignity.
+What is real is machine time, and it is a *scheduling* constraint rather than a
+writing one. Narration synthesises at roughly **7.2x realtime** on the CPU box
+(measured 2026-09-10), so 2,500 words is about two hours of the reel-worker's
+only voice server. The question is never "is this script too long" — it is "does
+its narration fit the idle window before the slot". If it does not, the render
+starts a night earlier or the narration splits across two. The story is not cut
+to fit the box.
+
+**What length must still earn.** Every chapter has to change what the viewer
+believes. A script is too long when a chapter only restates — not when it
+crosses a number. Cut on that test and nothing else: a two-thousand-word script
+where every chapter moves is right, and a nine-hundred-word one with a chapter
+that repeats is not.
+
+Count only SPOKEN lines. CAPTION, IMAGE, TITLE and DESCRIPTION are not read
+aloud.
 
 ## Shape
 
@@ -181,11 +193,83 @@ words per minute**; the renderer corrects them against the real audio.
 
 ## Illustration
 
-One IMAGE per chapter, not per line — a long-form video holds a document, a
-chart, or a single conceptual frame on screen while the narration works through
-it. Where the evidence *is* a document (an audit paragraph, an affidavit line),
-say so in the IMAGE line: holding the actual record on screen is stronger than
-illustrating around it.
+**Two to three IMAGE lines per chapter — roughly one per 20–25 seconds of
+narration.** That is the whole decision, and it is arithmetic rather than taste:
+a 1,300-word script runs about nine minutes, so one image per chapter leaves
+each on screen for **58 seconds**, against roughly 15 in a 90-second reel. Four
+times the dwell of the format the audience is used to reads as a stalled video,
+however good the image is. Three per chapter brings it to ~23 seconds. FLUX is
+free on the NVIDIA and Cloudflare keys, so the extra images cost render time,
+not money.
+
+Number them within the chapter: `CHAPTER 2 IMAGE 1`, `CHAPTER 2 IMAGE 2`. Each
+should carry a distinct beat of that chapter's argument — the figure, then the
+comparison, then the consequence — not three angles on one idea.
+
+Where the evidence *is* a document (an audit paragraph, an affidavit line, a
+table of rows), say so in the IMAGE line. Holding the actual record on screen is
+stronger than illustrating around it, and long-form is the format with room to
+let a viewer read it.
+
+Brand rules are unchanged and are not taste: symbolic, never literal or
+photographic; **no text or lettering in the image** (the renderer draws all
+type); no logos; and no recognisable real people or real events depicted as if
+photographed — an image that could be mistaken for evidence undermines the one
+thing Thelivu sells.
+
+## RECORD lines — putting the actual document on screen
+
+Long-form's strongest visual is not an illustration. It is the page itself.
+
+A **RECORD** line names a real document to render on screen: the parliamentary
+answer, the audit paragraph, the table of rows. `publishing/evidence_shot.py`
+fetches the PDF and renders the page that actually carries the quoted line, so
+the viewer sees the sentence being read to them.
+
+This is a *different asset class* from an IMAGE, and the difference matters.
+BRAND.md forbids images that could be mistaken for evidence, and forbids
+lettering in generated images. A rendered page inverts both rather than breaking
+them: it is not an image that might be mistaken for evidence, it **is** the
+evidence, and its text is the reason to show it. An illustration says "imagine a
+ledger"; a record says "here is the ledger, read line twelve."
+
+Never combine them in one frame. Generated art beside a real document is exactly
+the ambiguity the brand rule exists to prevent.
+
+**Use a RECORD wherever a chapter turns on a specific figure or a specific
+wording.** A cold open quoting a number should show the page carrying that
+number. A chapter arguing that a rule was not applied should show the rule.
+
+```
+CHAPTER 1 RECORD: <what the document is> | <its URL> | <the exact phrase the page must contain>
+```
+
+The third field is what makes it evidence rather than a prop: the renderer finds
+the page containing that phrase, so a viewer is never shown page one of a
+five-page answer while the narration quotes the annexure. If the phrase cannot
+be found the renderer falls back to page one and flags it, and a flagged record
+should be fixed rather than shipped.
+
+Cropping to the relevant table is fine. Anything that changes what the page says
+is not.
+
+**Not from the open web.** A photograph of a collapsed flyover found in a search
+result has no provenance, no licence and no guarantee it is the right flyover.
+Real photographs need a real source with rights attached; that is a separate
+decision, and until it is made, records and illustrations are what we have.
+
+## Sources in the description
+
+Every source goes in DESCRIPTION, named and locatable: the parliamentary
+question by number and date, the dataset by title, the order by its number.
+Long-form has a description field that a reel effectively does not, and a viewer
+who wants to check the work should not have to ask.
+
+**This is in addition to spoken attribution, never instead of it.** The charter
+requires every figure to carry its source in the line that says it — "the
+CAG's 2024 audit put it at ₹1,950 crore" — because a viewer hears the claim and
+may never scroll. The description is where they go to verify; the spoken line is
+where they learn it is verifiable at all.
 
 ## Output (exactly this, nothing else)
 ```
@@ -197,14 +281,17 @@ COLD_OPEN_IMAGE: <one-sentence conceptual illustration>
 OPEN_LOOP: <the specific unresolved question the cold open raises, in one line. The close must answer this by name, or state what would settle it. Never spoken — it is the contract the script holds itself to.>
 CHAPTER 1 TITLE: <4-8 words, plain>
 CHAPTER 1: <spoken lines, 150-300 words>
-CHAPTER 1 IMAGE: <one-sentence conceptual illustration, or the document to hold on screen>
+CHAPTER 1 IMAGE 1: <one-sentence conceptual illustration, or the document to hold on screen>
+CHAPTER 1 IMAGE 2: <the chapter's second beat — a different move, not another angle on the first>
+CHAPTER 1 IMAGE 3: <optional third, if the chapter runs long>
+CHAPTER 1 RECORD: <document description> | <url> | <exact phrase the page must contain>   (optional; use wherever the chapter turns on a specific figure or wording)
 CHAPTER 2 TITLE: <...>
 CHAPTER 2: <...>
 CHAPTER 2 IMAGE: <...>
 ...
 CLOSE: <spoken closing, 2-4 lines. Must close OPEN_LOOP by name: either answer it, or say what would settle it and that it has not been published.>
 CLOSE_IMAGE: <one-sentence conceptual illustration>
-DESCRIPTION: <2-4 sentences for the video description, with the primary sources named>
+DESCRIPTION: <2-4 sentences, then a "Sources:" list naming each record so a viewer can find it — parliamentary questions by number and date, datasets by title, orders by number. Mark anything that is press-reported rather than primary.>
 HASHTAGS: <6-10 story-specific tags — brand tags are added by the engine>
 WORD_COUNT: <integer, spoken words only>
 ```
@@ -244,12 +331,14 @@ someone is about to be named. Those get chased regardless of cost.
 
 ## Self-check before output
 
-1. **Word count is real.** Count the spoken lines. If over 1,500, cut a whole
-   chapter — never thin every chapter to fit, which produces a script that reads
-   rushed at every point instead of one that is shorter.
+1. **Every chapter changes what the viewer believes.** That is the length test,
+   not a word count. If a chapter only restates, cut that whole chapter — never
+   thin every chapter to fit, which produces a script that reads rushed at every
+   point instead of one that is shorter.
 2. **Every figure has its attribution in the spoken line.**
-3. **Every chapter changes what the viewer believes.** If one only restates, cut
-   it and say the script is shorter.
+3. **The narration fits the window.** At ~7.2x realtime, check the script's
+   synthesis time against the hours available before the slot. If it does not
+   fit, that is a scheduling note for the render, not a reason to cut.
 4. **WHY_LONG_FORM is honest.** If you cannot name a trigger, this should have
    been a reel — say so instead of producing the script.
 5. **Every loop opened in the cold open is closed by name in the close.** If the

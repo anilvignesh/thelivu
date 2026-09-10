@@ -20,10 +20,20 @@ import re
 # skill file is prose — but if that ceiling ever moves, this must move with it.
 REEL_HARD_CEILING_WORDS = 225
 
-# From engine/skills/long-form-script/SKILL.md.
+# From engine/skills/long-form-script/SKILL.md. TARGETS, not limits.
+#
+# There is deliberately NO hard word ceiling. A cap on length is what the reel
+# format already has, and forcing a story to fit it by cutting load-bearing
+# material is the exact failure long-form exists to fix — imposing a second
+# ceiling one level up would recreate it.
+#
+# What is real is machine time. Narration synthesises at ~7.2x realtime on the
+# reel-worker's single voice server, so a 2,500-word piece occupies it for over
+# two hours. That is a SCHEDULING constraint, not a writing one: the question is
+# never "is this script too long" but "does its narration fit the window before
+# the slot". See fits_window().
 LONGFORM_TARGET_MIN = 750
 LONGFORM_TARGET_MAX = 1200
-LONGFORM_HARD_CEILING = 1500
 
 # Chatterbox on the reel-worker measured at ~7.2x realtime (2026-09-10): 108
 # words of narration took 247s to produce 34.3s of audio. Kept here so the cost
@@ -31,33 +41,29 @@ LONGFORM_HARD_CEILING = 1500
 SYNTH_REALTIME_FACTOR = 7.2
 SPOKEN_WORDS_PER_MINUTE = 150
 
-_SPOKEN_PREFIXES = ("HOOK:", "BEAT", "CLOSE:", "COLD_OPEN:", "CHAPTER")
-# The character class MUST include digits: the reel format labels these
-# "BEAT 1 CAPTION" / "BEAT 1 IMAGE", and a class of [A-Z_ ] silently fails to
-# match them. That counted every caption and image line as spoken, inflating a
-# six-beat reel by a dozen words and graduating stories that fit the format
-# fine — a bug whose only symptom is long-form videos nobody asked for.
-_NON_SPOKEN = re.compile(
-    r"^(TITLE|PLACE|HASHTAGS|DESCRIPTION|WORD_COUNT|WHY_LONG_FORM|OPEN_LOOP"
-    r"|[A-Z0-9_ ]*CAPTION|[A-Z0-9_ ]*IMAGE|CHAPTER\s+\d+\s+TITLE)\s*:", re.I
-)
+# ALLOWLIST, not a denylist. The previous version counted every line except
+# those matching a list of known non-spoken fields, which meant any new field —
+# or any continuation line of a multi-line one — silently counted as narration.
+# A DESCRIPTION carrying a numbered source list pushed a 1,298-word script to
+# 1,661 and over the hard ceiling (2026-09-11). Only lines that ARE narration
+# count, and anything unrecognised counts as nothing.
+_SPOKEN_LINE = re.compile(
+    r"^(HOOK|CLOSE|COLD_OPEN|BEAT\s+\d+|CHAPTER\s+\d+)\s*:\s*(.*)$", re.I)
 
 
 def spoken_words(script_text):
     """Count only the words a viewer hears.
 
-    CAPTION and IMAGE lines are on-screen or generation instructions and are not
-    read aloud — counting them would inflate every script by roughly a third and
-    graduate stories that fit the reel format fine.
+    CAPTION and IMAGE lines are on-screen or generation instructions, TITLE and
+    DESCRIPTION are metadata, and none are read aloud. Counting them would
+    inflate every script and could graduate a story that fits the reel format
+    fine, or fail one that fits long-form.
     """
     total = 0
     for line in (script_text or "").splitlines():
-        line = line.strip()
-        if not line or _NON_SPOKEN.match(line):
-            continue
-        if ":" in line and line.split(":", 1)[0].isupper():
-            line = line.split(":", 1)[1]
-        total += len(line.split())
+        m = _SPOKEN_LINE.match(line.strip())
+        if m:
+            total += len(m.group(2).split())
     return total
 
 
@@ -207,9 +213,24 @@ def parse_script(text):
         if m:
             chapters.setdefault(int(m.group(1)), {})["title"] = m.group(2).strip()
             continue
-        m = re.match(r"^\s*CHAPTER\s+(\d+)\s+IMAGE\s*:\s*(.+)$", line, re.I)
+        # "CHAPTER 2 IMAGE 3:" as well as "CHAPTER 2 IMAGE:" — long-form runs
+        # 2-3 images per chapter, because one per chapter leaves each on screen
+        # for ~58s against a reel's ~15s.
+        m = re.match(r"^\s*CHAPTER\s+(\d+)\s+IMAGE(?:\s+(\d+))?\s*:\s*(.+)$", line, re.I)
         if m:
-            chapters.setdefault(int(m.group(1)), {})["image"] = m.group(2).strip()
+            ch = chapters.setdefault(int(m.group(1)), {})
+            ch.setdefault("images", []).append(m.group(3).strip())
+            ch["image"] = ch["images"][0]
+            continue
+        m = re.match(r"^\s*CHAPTER\s+(\d+)\s+RECORD\s*:\s*(.+)$", line, re.I)
+        if m:
+            # "description | url | phrase the page must contain"
+            bits = [b.strip() for b in m.group(2).split("|")]
+            chapters.setdefault(int(m.group(1)), {}).setdefault("records", []).append({
+                "description": bits[0] if bits else "",
+                "url": bits[1] if len(bits) > 1 else "",
+                "quote": bits[2] if len(bits) > 2 else "",
+            })
             continue
         m = re.match(r"^\s*CHAPTER\s+(\d+)\s*:\s*(.+)$", line, re.I)
         if m:
@@ -217,7 +238,8 @@ def parse_script(text):
 
     out["chapters"] = [
         {"n": n, "title": c.get("title", f"Chapter {n}"),
-         "text": c.get("text", ""), "image": c.get("image", "")}
+         "text": c.get("text", ""), "image": c.get("image", ""),
+         "images": c.get("images", []), "records": c.get("records", [])}
         for n, c in sorted(chapters.items()) if c.get("text")
     ]
     out["word_count"] = spoken_words(text)
@@ -253,18 +275,45 @@ def synthesis_estimate(word_count, factor=SYNTH_REALTIME_FACTOR,
     return audio, audio * factor
 
 
+# The reel-worker sits idle overnight (load 0.00 for 28 days when measured), so
+# this is the window long-form narration can have without competing with the
+# daily reel builds.
+OVERNIGHT_HOURS = 8
+
+
+def fits_window(word_count, hours=OVERNIGHT_HOURS):
+    """(fits, message) — does this script's narration fit an idle window?
+
+    The only length question worth asking. A script is never "too long"; its
+    narration either fits the machine time available before the slot or it does
+    not, and if it does not the answer is to start earlier or split it across
+    two nights — not to cut the story.
+    """
+    _, synth = synthesis_estimate(word_count)
+    budget = hours * 3600
+    if synth <= budget:
+        return True, f"{synth/60:.0f} min of narration fits a {hours}h window"
+    return False, (
+        f"{synth/60:.0f} min of narration exceeds a {hours}h window. This is a "
+        "scheduling problem, not a length problem: start the render a night "
+        "earlier, or split the narration. Do not cut the story to fit the box.")
+
+
 def budget_check(parsed_or_words):
-    """(ok, message) against the long-form budget."""
+    """(ok, message). Length is advisory; only machine time can actually fail."""
     words = (parsed_or_words if isinstance(parsed_or_words, int)
              else parsed_or_words.get("word_count", 0))
     audio, synth = synthesis_estimate(words)
     human = f"{words} words ≈ {audio/60:.1f} min audio ≈ {synth/60:.0f} min to synthesise"
-    if words > LONGFORM_HARD_CEILING:
-        return False, (f"over the hard ceiling: {human}. Cut a whole chapter — "
-                       "thinning every chapter makes the script read rushed throughout.")
+    fits, why = fits_window(words)
+    if not fits:
+        return False, f"{human} — {why}"
     if words < LONGFORM_TARGET_MIN:
-        return True, (f"under target but allowed: {human}. If it fits a reel, "
-                      "it should have been one.")
+        return True, (f"{human}. Under the usual range; if it fits a reel, it "
+                      "should have been one.")
+    if words > LONGFORM_TARGET_MAX:
+        return True, (f"{human}. Longer than usual, which is fine if every "
+                      "chapter still changes what the viewer believes.")
     return True, human
 
 
