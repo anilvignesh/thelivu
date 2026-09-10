@@ -18,7 +18,7 @@ import random
 import sys
 import time
 
-from engine.digger import extract, fetch, freellm, targets
+from engine.digger import extract, fetch, freellm, prefilter, routing, targets
 from shared import db
 
 log = logging.getLogger("digger")
@@ -94,7 +94,16 @@ def run_cycle(target=None, dry_run=False):
         log.info("%d grounded finding(s) from %d doc(s), %d model call(s)",
                  len(candidates), docs, calls)
 
-        for c in candidates:
+        # Pre-filter before writing, not after. A candidate that a reviewer
+        # would never promote costs nothing to drop here and costs a line in
+        # every future batch if it lands in the table.
+        kept, dropped = prefilter.run(candidates)
+        for c, why in dropped:
+            log.info("filtered: %s — %s", c["title"][:60], why[:70])
+        if dropped:
+            log.info("%s", prefilter.summarise(kept, dropped).splitlines()[0])
+
+        for c in kept:
             if c["source_url"] in seen:
                 log.info("skip (already recorded): %s", c["title"][:80])
                 continue
@@ -126,10 +135,18 @@ def run_cycle(target=None, dry_run=False):
     except (fetch.FetchError, freellm.FreeLLMError) as e:
         # Expected, recoverable: a source is down, a PDF, a rate limit. Record
         # and move on to the next target next cycle.
-        log.warning("cycle failed (%s): %s", target["key"], e)
+        #
+        # The reason matters more than the failure: a robots refusal, a WAF and
+        # a JS-rendered page each have a different next step, and recording
+        # only "failed" loses that. See engine/digger/routing.py.
+        reason = routing.classify(str(e))
+        log.warning("cycle failed (%s): %s [%s -> %s]", target["key"], e,
+                    reason, routing.handoff_for(reason))
         if not dry_run:
-            db.finish_digger_run(run_id, ok=False, docs_fetched=docs,
-                                 candidates_found=0, model_calls=calls, error=str(e)[:500])
+            db.finish_digger_run(
+                run_id, ok=False, docs_fetched=docs, candidates_found=0,
+                model_calls=calls,
+                error=f"[{reason}] {e} | next: {routing.handoff_for(reason)}"[:500])
             _kv_set(_LAST_KEY, target["key"])
         return []
     except Exception as e:
