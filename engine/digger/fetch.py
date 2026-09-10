@@ -15,6 +15,8 @@ import urllib.request
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 
+from engine.digger import robots
+
 MAX_BYTES = 2_000_000        # 2MB ceiling per HTML document
 MAX_TEXT_CHARS = 40_000      # what we're willing to hand a model
 TIMEOUT = 45
@@ -86,6 +88,11 @@ def fetch(url, timeout=TIMEOUT, max_bytes=MAX_BYTES):
     or a host without liteparse installed, raises FetchError rather than
     returning empty text that would read as "nothing found".
     """
+    try:
+        robots.check(url)
+    except robots.RobotsDenied as e:
+        raise FetchError(str(e)) from e
+
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -133,7 +140,7 @@ def fetch(url, timeout=TIMEOUT, max_bytes=MAX_BYTES):
         charset = m.group(1)
     html = raw.decode(charset, errors="replace")
 
-    text = html_to_text(html) if "html" in content_type or "<" in html[:200] else html
+    text = body_to_text(html, content_type, final_url)
     if len(text) > MAX_TEXT_CHARS:
         text = text[:MAX_TEXT_CHARS]
         truncated = True
@@ -212,6 +219,11 @@ def fetch_index(url, pattern=None, timeout=TIMEOUT):
     Handles a feed or an HTML listing without the caller caring which — several
     of these sources have quietly switched format before.
     """
+    try:
+        robots.check(url)
+    except robots.RobotsDenied as e:
+        raise FetchError(str(e)) from e
+
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -348,3 +360,110 @@ def _reject_if_bot_wall(text, final_url):
                 "This source refuses automated access; it is not a parsing "
                 "failure and must not be worked around."
             )
+
+# ---------------------------------------------------------------------------
+# Format dispatch
+#
+# Official sources serve whatever they feel like: an OGD resource is JSON or
+# CSV, a statistics office publishes XLSX, a court posts PDFs, a department
+# posts HTML. The point of this tier is reading records, so the fetcher has to
+# cope with the shape rather than the shape deciding what we can investigate.
+#
+# Everything here reduces to PLAIN TEXT, because that is what the grounding
+# check compares against: a finding must quote the fetched bytes verbatim, so
+# whatever we hand the model must be exactly what we keep.
+# ---------------------------------------------------------------------------
+
+MAX_CSV_ROWS = 400
+MAX_JSON_CHARS = MAX_TEXT_CHARS
+
+
+def json_to_text(body):
+    """Pretty-print JSON so a model can read it and excerpts stay quotable."""
+    import json as _json
+    try:
+        obj = _json.loads(body)
+    except Exception:
+        return body  # not actually JSON; hand back the raw text
+    return _json.dumps(obj, indent=2, ensure_ascii=False, sort_keys=False)
+
+
+def csv_to_text(body, max_rows=MAX_CSV_ROWS):
+    """Normalise delimited data to aligned rows.
+
+    Row-capped rather than char-capped so a truncated table still ends on a
+    whole record — half a row invites a model to misread a number, and a
+    misread number is the one thing this tier must not produce.
+    """
+    import csv as _csv
+    import io as _io
+    sample = body[:8000]
+    try:
+        dialect = _csv.Sniffer().sniff(sample, delimiters=",;\t|")
+    except Exception:
+        dialect = _csv.excel
+    out, reader = [], _csv.reader(_io.StringIO(body), dialect)
+    for i, row in enumerate(reader):
+        if i >= max_rows:
+            out.append(f"... [truncated at {max_rows} rows]")
+            break
+        out.append(" | ".join(c.strip() for c in row))
+    return "\n".join(out)
+
+
+def xml_to_text(body):
+    """Strip tags from non-feed XML. Deliberately the same lenient approach as
+    the HTML path — government XML is frequently malformed enough that a strict
+    parser refuses it outright."""
+    body = re.sub(r"<\?xml[^>]*\?>", " ", body)
+    body = re.sub(r"<!\[CDATA\[(.*?)\]\]>", r"\1", body, flags=re.S)
+    body = re.sub(r"<[^>]+>", "\n", body)
+    body = re.sub(r"\n{3,}", "\n\n", body)
+    return body.strip()
+
+
+def _looks_like(body, content_type, final_url):
+    """Best-effort format guess. Content-Type first, then the URL, then sniffing
+    the bytes — because plenty of these servers label a CSV as text/plain, or a
+    JSON API as text/html."""
+    ct = content_type or ""
+    url = (final_url or "").lower().split("?")[0]
+    head = body.lstrip()[:400]
+
+    if "json" in ct or url.endswith(".json"):
+        return "json"
+    # An unambiguous JSON body beats ANY label. OGD endpoints routinely serve
+    # JSON as text/html, and no HTML document begins with { or [ — so this sniff
+    # is safe to run before the Content-Type checks rather than after them.
+    if head[:1] in "{[":
+        return "json"
+    if "csv" in ct or "tab-separated" in ct or url.endswith((".csv", ".tsv")):
+        return "csv"
+    if "html" in ct or url.endswith((".html", ".htm")):
+        return "html"
+    if "xml" in ct or url.endswith(".xml"):
+        return "xml"
+    # Sniff the rest. Order matters: an XML doc and an HTML doc both start "<".
+    if head[:5].lower() == "<?xml" or head[:1] == "<":
+        return "html" if re.search(r"(?i)<(html|body|div|p|a)\b", head) else "xml"
+    if "text/plain" in ct or url.endswith(".txt"):
+        # A .txt that is really delimited data reads far better as a table.
+        first = head.splitlines()[0] if head.splitlines() else ""
+        if first.count(",") >= 2 or first.count("\t") >= 2:
+            return "csv"
+        return "text"
+    return "html"
+
+
+def body_to_text(body, content_type, final_url):
+    """One decoded body -> plain text, whatever shape it arrived in."""
+    kind = _looks_like(body, content_type, final_url)
+    if kind == "json":
+        return json_to_text(body)[:MAX_JSON_CHARS]
+    if kind == "csv":
+        return csv_to_text(body)
+    if kind == "xml":
+        return xml_to_text(body)
+    if kind == "text":
+        return body
+    return html_to_text(body)

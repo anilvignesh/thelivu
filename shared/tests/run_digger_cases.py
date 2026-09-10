@@ -27,6 +27,7 @@ _TMPDB.close()
 os.environ["DB_PATH"] = _TMPDB.name
 
 from engine.digger import extract, fetch          # noqa: E402
+from engine.digger import robots                  # noqa: E402
 from engine.digger import freellm                 # noqa: E402
 from shared.db import (                           # noqa: E402
     init_db, record_digger_candidate, digger_seen_urls,
@@ -47,6 +48,14 @@ DOC = {
         "1964-65.\n"
     ),
 }
+
+
+def _rp(text):
+    """Build a parsed RobotFileParser from literal robots.txt content."""
+    import urllib.robotparser
+    rp = urllib.robotparser.RobotFileParser()
+    rp.parse(text.splitlines())
+    return rp
 
 
 def check(name, got, want):
@@ -250,6 +259,143 @@ def t_html_to_text_survives_malformed():
 
 
 # --------------------------------------------------------------------------
+# format dispatch — official sources serve whatever shape they like
+# --------------------------------------------------------------------------
+
+def t_json_is_readable_and_quotable():
+    body = '{"scheme":"PMAY","allocated_cr":1950,"spent_cr":812}'
+    out = fetch.body_to_text(body, "application/json", "https://x/api")
+    check("json rendered", '"scheme": "PMAY"' in out, True)
+    check("figure preserved verbatim", "1950" in out, True)
+
+
+def t_json_sniffed_when_mislabelled():
+    """OGD endpoints routinely serve JSON as text/html."""
+    body = '[{"a":1}]'
+    out = fetch.body_to_text(body, "text/html", "https://x/resource")
+    check("mislabelled json still parsed", out.strip().startswith("["), True)
+    check("json pretty-printed", "\n" in out, True)
+
+
+def t_csv_becomes_aligned_rows():
+    body = "district,allocated,spent\nWayanad,120,45\nIdukki,90,88"
+    out = fetch.body_to_text(body, "text/csv", "https://x/d.csv")
+    check("header row present", "district | allocated | spent" in out, True)
+    check("data row present", "Wayanad | 120 | 45" in out, True)
+
+
+def t_csv_truncates_on_whole_rows():
+    """Half a row invites a model to misread a number — cap on records, not
+    characters."""
+    rows = "\n".join(f"r{i},{i*10},{i*3}" for i in range(fetch.MAX_CSV_ROWS + 50))
+    out = fetch.body_to_text("a,b,c\n" + rows, "text/csv", "https://x/d.csv")
+    check("truncation is announced", "[truncated at" in out, True)
+    lines = [l for l in out.splitlines() if l and not l.startswith("...")]
+    check("row cap honoured", len(lines), fetch.MAX_CSV_ROWS)
+    check("last kept line is a whole row", lines[-1].count(" | "), 2)
+
+
+def t_tsv_detected_from_plain_text():
+    body = "state\tgsdp\tgrowth\nKerala\t1000\t6.1\nTN\t2000\t7.2"
+    out = fetch.body_to_text(body, "text/plain", "https://x/d.txt")
+    check("tab-delimited read as a table", "Kerala | 1000 | 6.1" in out, True)
+
+
+def t_xml_strips_tags():
+    body = '<?xml version="1.0"?><root><finding>Rs 1,950 crore</finding></root>'
+    out = fetch.body_to_text(body, "application/xml", "https://x/d.xml")
+    check("xml tags stripped", "<finding>" in out, False)
+    check("xml content kept", "Rs 1,950 crore" in out, True)
+
+
+def t_plain_text_passes_through():
+    body = "Audit objections of Rs 14,653 crore remain unresolved."
+    out = fetch.body_to_text(body, "text/plain", "https://x/note.txt")
+    check("plain text unchanged", out, body)
+
+
+def t_html_still_wins_for_html():
+    body = "<html><body><script>BAD</script><p>Real finding</p></body></html>"
+    out = fetch.body_to_text(body, "text/html", "https://x/p.html")
+    check("html path used", "Real finding" in out, True)
+    check("script still stripped", "BAD" in out, False)
+
+
+# --------------------------------------------------------------------------
+# robots.txt — an unattended crawler that ignores it is misbehaving
+# --------------------------------------------------------------------------
+
+def t_robots_disallow_is_respected():
+    robots.reset_cache()
+    robots._CACHE["https://x.gov.in/robots.txt"] = (
+        __import__("time").time(), _rp("User-agent: *\nDisallow: /private/"), False)
+    check("disallowed path refused",
+          robots.allowed("https://x.gov.in/private/doc.pdf"), False)
+    check("other path allowed",
+          robots.allowed("https://x.gov.in/public/doc.pdf"), True)
+
+
+def t_robots_rule_targeting_us_specifically():
+    robots.reset_cache()
+    robots._CACHE["https://y.gov.in/robots.txt"] = (
+        __import__("time").time(),
+        _rp("User-agent: ThelivuDigger\nDisallow: /\n\nUser-agent: *\nAllow: /"), False)
+    check("named exclusion of this crawler honoured",
+          robots.allowed("https://y.gov.in/anything"), False)
+
+
+def t_missing_robots_means_allowed():
+    """RFC 9309: no robots.txt is no restrictions. Refusing here would silently
+    drop most sources for no reason."""
+    robots.reset_cache()
+    robots._CACHE["https://z.gov.in/robots.txt"] = (__import__("time").time(), None, False)
+    check("absent robots.txt allows", robots.allowed("https://z.gov.in/doc"), True)
+
+
+def t_robots_4xx_means_allowed_per_rfc9309():
+    """A 4xx on robots.txt is "unavailable" -> no rules published -> allowed.
+    Treating 403 as a refusal excluded data.gov.in, whose WAF 403s non-browser
+    clients while the platform exists to distribute public data."""
+    import urllib.error
+    robots.reset_cache()
+    orig = robots.urllib.request.urlopen
+    def _403(*a, **k):
+        raise urllib.error.HTTPError("u", 403, "Forbidden", None, None)
+    robots.urllib.request.urlopen = _403
+    try:
+        check("403 on robots.txt allows", robots.allowed("https://w.gov.in/doc"), True)
+    finally:
+        robots.urllib.request.urlopen = orig
+
+
+def t_robots_5xx_means_back_off():
+    """A struggling server is exactly what robots.txt exists to protect."""
+    import urllib.error
+    robots.reset_cache()
+    orig = robots.urllib.request.urlopen
+    def _503(*a, **k):
+        raise urllib.error.HTTPError("u", 503, "Service Unavailable", None, None)
+    robots.urllib.request.urlopen = _503
+    try:
+        check("503 on robots.txt backs off", robots.allowed("https://s.gov.in/doc"), False)
+    finally:
+        robots.urllib.request.urlopen = orig
+
+
+def t_robots_check_raises_with_a_clear_reason():
+    robots.reset_cache()
+    robots._CACHE["https://v.gov.in/robots.txt"] = (
+        __import__("time").time(), _rp("User-agent: *\nDisallow: /"), False)
+    try:
+        robots.check("https://v.gov.in/doc")
+        check("robots.check raises", False, True)
+    except robots.RobotsDenied as e:
+        check("robots.check raises RobotsDenied", True, True)
+        check("reason states it is a decision to respect",
+              "respect" in str(e), True)
+
+
+# --------------------------------------------------------------------------
 # bot walls — a source that says no
 # --------------------------------------------------------------------------
 
@@ -438,6 +584,20 @@ def main():
               t_cross_check_drops_ungrounded_even_if_both_agree,
               t_html_to_text_strips_scripts_and_style,
               t_html_to_text_survives_malformed,
+              t_json_is_readable_and_quotable,
+              t_json_sniffed_when_mislabelled,
+              t_csv_becomes_aligned_rows,
+              t_csv_truncates_on_whole_rows,
+              t_tsv_detected_from_plain_text,
+              t_xml_strips_tags,
+              t_plain_text_passes_through,
+              t_html_still_wins_for_html,
+              t_robots_disallow_is_respected,
+              t_robots_rule_targeting_us_specifically,
+              t_missing_robots_means_allowed,
+              t_robots_4xx_means_allowed_per_rfc9309,
+              t_robots_5xx_means_back_off,
+              t_robots_check_raises_with_a_clear_reason,
               t_captcha_page_is_reported_as_refusal_not_parse_error,
               t_ordinary_document_is_not_mistaken_for_a_bot_wall,
               t_disabled_targets_are_skipped,
