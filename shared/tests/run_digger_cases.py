@@ -28,10 +28,12 @@ os.environ["DB_PATH"] = _TMPDB.name
 
 from engine.digger import extract, fetch          # noqa: E402
 from engine.digger import robots                  # noqa: E402
+from engine.digger import discover, targets       # noqa: E402
 from engine.digger import freellm                 # noqa: E402
 from shared.db import (                           # noqa: E402
     init_db, record_digger_candidate, digger_seen_urls,
     start_digger_run, finish_digger_run, digger_candidates,
+    propose_digger_target, digger_targets, set_digger_target_status,
 )
 
 _fails = []
@@ -544,6 +546,99 @@ def t_pdf_parser_is_always_closed():
 
 
 # --------------------------------------------------------------------------
+# source discovery — the scout nominates, a human activates
+# --------------------------------------------------------------------------
+
+def t_proposal_never_lands_active():
+    """The whole guardrail. A bad story is caught at the verification gate, but
+    a bad SOURCE quietly shapes every story that flows through it — so no code
+    path may put one into the rotation without a person."""
+    init_db()
+    propose_digger_target(
+        key="t-auto", name="Auto", index_url="https://x.gov.in/i",
+        brief="b", robots_ok=True, fetch_ok=True, doc_links=50)
+    rows = {r["key"]: r for r in digger_targets()}
+    check("proposal recorded", "t-auto" in rows, True)
+    check("proposal is NOT active", rows["t-auto"]["status"], "proposed")
+    active = [t["key"] for t in targets.db_targets()]
+    check("proposed target stays out of rotation", "t-auto" in active, False)
+
+    set_digger_target_status("t-auto", "active", decided_by="owner")
+    active = [t["key"] for t in targets.db_targets()]
+    check("activated target enters rotation", "t-auto" in active, True)
+
+
+def t_rejected_target_never_enters_rotation():
+    init_db()
+    propose_digger_target(key="t-bad", name="Bad", index_url="https://y.gov.in/i",
+                          brief="b", robots_ok=True, fetch_ok=True, doc_links=9)
+    set_digger_target_status("t-bad", "rejected", decided_by="owner")
+    check("rejected target excluded",
+          "t-bad" in [t["key"] for t in targets.db_targets()], False)
+
+
+def t_validation_refuses_a_robots_disallowed_source():
+    """A source that has asked not to be crawled must fail validation before we
+    ever fetch its index — probing it anyway is the same discourtesy."""
+    orig = discover.robots.allowed
+    discover.robots.allowed = lambda u, *a, **k: False
+    try:
+        ev = discover.validate("https://no.gov.in/index")
+        check("robots-disallowed source fails validation", ev["ok"], False)
+        check("reason names robots.txt", "robots" in (ev["validation_error"] or ""), True)
+        check("index never fetched", ev["fetch_ok"], False)
+    finally:
+        discover.robots.allowed = orig
+
+
+def t_validation_rejects_an_index_with_no_documents():
+    """An index yielding nothing is a dead end — exactly how the JS-rendered RBI
+    listing looked before we understood it."""
+    orig_r, orig_f = discover.robots.allowed, discover.fetch.fetch_index
+    discover.robots.allowed = lambda u, *a, **k: True
+    discover.fetch.fetch_index = lambda u, p=None: [{"url": "https://a/1", "title": "x"}]
+    try:
+        ev = discover.validate("https://thin.gov.in/index")
+        check("thin index fails validation", ev["ok"], False)
+        check("reason mentions link count",
+              "document link" in (ev["validation_error"] or ""), True)
+    finally:
+        discover.robots.allowed, discover.fetch.fetch_index = orig_r, orig_f
+
+
+def t_validation_records_failures_with_reasons():
+    """'We tried this and it refuses us' is worth keeping, or the next scout run
+    proposes the same dead source again."""
+    init_db()
+    orig = discover.robots.allowed
+    discover.robots.allowed = lambda u, *a, **k: False
+    try:
+        ev = discover.propose("https://blocked.gov.in/i", "Blocked", "brief")
+    finally:
+        discover.robots.allowed = orig
+    row = {r["key"]: r for r in digger_targets()}[ev["key"]]
+    check("failed candidate still recorded", row["status"], "proposed")
+    check("failure reason persisted", bool(row["validation_error"]), True)
+
+
+def t_db_failure_degrades_to_builtin_targets():
+    """Losing Postgres should cost the extra sources, not the whole rotation."""
+    orig = targets.db_targets
+    def _boom():
+        raise RuntimeError("db down")
+    import shared.db as _db
+    orig_q = _db.digger_targets
+    _db.digger_targets = lambda status=None: (_ for _ in ()).throw(RuntimeError("db down"))
+    try:
+        active = targets.active_targets()
+        check("builtin targets survive a DB outage", len(active) > 0, True)
+        check("no db targets during outage",
+              all(t.get("source") != "db" for t in active), True)
+    finally:
+        _db.digger_targets = orig_q
+
+
+# --------------------------------------------------------------------------
 # persistence
 # --------------------------------------------------------------------------
 
@@ -606,6 +701,12 @@ def main():
               t_pdf_prefers_whole_document_text,
               t_pdf_falls_back_to_per_page_text,
               t_pdf_parser_is_always_closed,
+              t_proposal_never_lands_active,
+              t_rejected_target_never_enters_rotation,
+              t_validation_refuses_a_robots_disallowed_source,
+              t_validation_rejects_an_index_with_no_documents,
+              t_validation_records_failures_with_reasons,
+              t_db_failure_degrades_to_builtin_targets,
               t_records_and_dedups):
         t()
 

@@ -364,6 +364,36 @@ CREATE TABLE IF NOT EXISTS digger_runs (
     error            TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_digger_runs_started ON digger_runs (started_at);
+
+-- Candidate record-sources the scout turns up. Mirrors how source-scout already
+-- treats media sources (engine/skills/source-scout/SKILL.md): it NOMINATES and
+-- stops. A source, once trusted, quietly shapes every story that flows through
+-- it, so the bar is higher than for a single story and activation is a human
+-- decision. `status` starts 'proposed' and only a person moves it to 'active'.
+-- The validation columns exist so that decision is well-informed rather than a
+-- guess about a URL.
+CREATE TABLE IF NOT EXISTS digger_targets (
+    id           SERIAL PRIMARY KEY,
+    key          TEXT UNIQUE NOT NULL,
+    name         TEXT NOT NULL,
+    index_url    TEXT NOT NULL,
+    link_pattern TEXT,
+    brief        TEXT NOT NULL,
+    status       TEXT DEFAULT 'proposed',   -- proposed | active | rejected
+    proposed_by  TEXT DEFAULT 'scout',
+    -- validation evidence, filled by engine/digger/discover.py
+    robots_ok    BOOLEAN,
+    fetch_ok     BOOLEAN,
+    doc_links    INTEGER,
+    sample_url   TEXT,
+    doc_format   TEXT,
+    validation_error TEXT,
+    validated_at TIMESTAMP,
+    decided_by   TEXT,
+    decided_at   TIMESTAMP,
+    created_at   TIMESTAMP DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_digger_targets_status ON digger_targets (status);
 """
 
 # SQLite fallback schema (same structure, SQLite syntax)
@@ -683,6 +713,28 @@ CREATE TABLE IF NOT EXISTS digger_runs (
     error            TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_digger_runs_started ON digger_runs (started_at);
+
+CREATE TABLE IF NOT EXISTS digger_targets (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    key          TEXT UNIQUE NOT NULL,
+    name         TEXT NOT NULL,
+    index_url    TEXT NOT NULL,
+    link_pattern TEXT,
+    brief        TEXT NOT NULL,
+    status       TEXT DEFAULT 'proposed',
+    proposed_by  TEXT DEFAULT 'scout',
+    robots_ok    INTEGER,
+    fetch_ok     INTEGER,
+    doc_links    INTEGER,
+    sample_url   TEXT,
+    doc_format   TEXT,
+    validation_error TEXT,
+    validated_at TEXT,
+    decided_by   TEXT,
+    decided_at   TEXT,
+    created_at   TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_digger_targets_status ON digger_targets (status);
 """
 
 
@@ -3321,5 +3373,69 @@ def digger_candidates(status="new", limit=50):
             (status, limit),
         )
         return _fetchall(cur)
+    finally:
+        conn.close()
+
+
+def propose_digger_target(key, name, index_url, brief, link_pattern=None,
+                          proposed_by="scout", **validation):
+    """Record a candidate record-source. Always lands as 'proposed' — the scout
+    nominates, a human activates (same rule source-scout already follows for
+    media sources)."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cols = ("key, name, index_url, link_pattern, brief, proposed_by, "
+                "robots_ok, fetch_ok, doc_links, sample_url, doc_format, "
+                "validation_error, validated_at")
+        vals = ", ".join([ph] * 13)
+        conflict = ("ON CONFLICT (key) DO NOTHING" if _is_postgres()
+                    else "")
+        verb = "INSERT INTO" if _is_postgres() else "INSERT OR IGNORE INTO"
+        robots_ok = validation.get("robots_ok")
+        fetch_ok = validation.get("fetch_ok")
+        if not _is_postgres():
+            robots_ok = None if robots_ok is None else int(bool(robots_ok))
+            fetch_ok = None if fetch_ok is None else int(bool(fetch_ok))
+        cur.execute(
+            f"{verb} digger_targets ({cols}) VALUES ({vals}) {conflict}",
+            (key, name, index_url, link_pattern, brief, proposed_by,
+             robots_ok, fetch_ok, validation.get("doc_links"),
+             validation.get("sample_url"), validation.get("doc_format"),
+             validation.get("validation_error"), validation.get("validated_at")),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def digger_targets(status=None):
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        if status:
+            cur.execute(f"SELECT * FROM digger_targets WHERE status = {ph} ORDER BY id", (status,))
+        else:
+            cur.execute("SELECT * FROM digger_targets ORDER BY id")
+        return _fetchall(cur)
+    finally:
+        conn.close()
+
+
+def set_digger_target_status(key, status, decided_by="owner"):
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        now = "NOW()" if _is_postgres() else "datetime('now')"
+        cur.execute(
+            f"""UPDATE digger_targets SET status = {ph}, decided_by = {ph},
+                   decided_at = {now} WHERE key = {ph}""",
+            (status, decided_by, key),
+        )
+        conn.commit()
+        return cur.rowcount
     finally:
         conn.close()

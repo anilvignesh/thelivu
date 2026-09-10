@@ -96,10 +96,49 @@ TARGETS = [
 BY_KEY = {t["key"]: t for t in TARGETS}
 
 
+def db_targets():
+    """Scout-proposed sources a HUMAN has activated (status='active').
+
+    Proposals never reach here on their own — see engine/digger/discover.py.
+    A DB failure returns the built-in list rather than an empty rotation: the
+    digger losing its Postgres connection should degrade to the known-good
+    sources, not stop investigating.
+    """
+    try:
+        from shared import db
+        rows = db.digger_targets(status="active")
+    except Exception:
+        return []
+    out = []
+    for r in rows:
+        if not r.get("index_url") or not r.get("brief"):
+            continue
+        out.append({
+            "key": r["key"],
+            "name": r.get("name") or r["key"],
+            "index_url": r["index_url"],
+            "link_pattern": r.get("link_pattern"),
+            "brief": r["brief"],
+            "verified": bool(r.get("fetch_ok")),
+            "source": "db",
+        })
+    return out
+
+
 def active_targets():
-    """Targets in the rotation. A target may be disabled outright when it is
-    known-broken (see PIB) rather than left to burn a cycle every few hours."""
-    return [t for t in TARGETS if t.get("enabled", True)]
+    """Targets in the rotation: the built-in list plus anything a human has
+    activated. A target may be disabled outright when it is known-broken (see
+    PIB) rather than left to burn a cycle every few hours."""
+    builtin = [t for t in TARGETS if t.get("enabled", True)]
+    known = {t["key"] for t in builtin}
+    return builtin + [t for t in db_targets() if t["key"] not in known]
+
+
+def by_key(key):
+    for t in active_targets():
+        if t["key"] == key:
+            return t
+    return BY_KEY.get(key)
 
 
 def next_target(last_key=None):

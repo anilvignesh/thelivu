@@ -148,6 +148,15 @@ def main(argv=None):
     ap.add_argument("--dry-run", action="store_true",
                     help="do not write to the database")
     ap.add_argument("--list-targets", action="store_true")
+    ap.add_argument("--propose", metavar="URL",
+                    help="validate a candidate record-source and record it as proposed")
+    ap.add_argument("--name", help="human name for --propose")
+    ap.add_argument("--brief", help="extraction brief for --propose")
+    ap.add_argument("--pattern", help="link pattern for --propose")
+    ap.add_argument("--list-proposals", action="store_true")
+    ap.add_argument("--approve", metavar="KEY",
+                    help="activate a proposed target (a human decision)")
+    ap.add_argument("--reject", metavar="KEY")
     args = ap.parse_args(argv)
 
     logging.basicConfig(
@@ -156,16 +165,52 @@ def main(argv=None):
     )
 
     if args.list_targets:
-        for t in targets.TARGETS:
-            print(f"{t['key']:22s} {t['url']}")
+        for t in targets.active_targets():
+            src = t.get("source", "builtin")
+            print(f"{t['key']:24s} [{src}] {t['index_url']}")
         return 0
+
+    if args.propose:
+        from engine.digger import discover
+        if not args.brief:
+            print("--propose needs --brief (what to extract from its documents)",
+                  file=sys.stderr)
+            return 2
+        ev = discover.propose(args.propose, args.name or args.propose,
+                              args.brief, link_pattern=args.pattern)
+        print(discover.describe(ev))
+        print("recorded as PROPOSED — activate with --approve <key> after review")
+        return 0 if ev["ok"] else 1
+
+    if args.list_proposals:
+        from shared import db
+        rows = db.digger_targets()
+        if not rows:
+            print("no proposals")
+        for r in rows:
+            flag = "ok" if r.get("fetch_ok") else "FAIL"
+            print(f"{r['status']:9s} {r['key']:24s} {flag:4s} "
+                  f"links={r.get('doc_links') or 0:3d} fmt={r.get('doc_format') or '-':6s} "
+                  f"{r['index_url'][:52]}")
+            if r.get("validation_error"):
+                print(f"          reason: {r['validation_error'][:100]}")
+        return 0
+
+    if args.approve or args.reject:
+        from shared import db
+        key = args.approve or args.reject
+        status = "active" if args.approve else "rejected"
+        n = db.set_digger_target_status(key, status, decided_by="owner")
+        print(f"{key}: {status}" if n else f"{key}: not found")
+        return 0 if n else 1
 
     target = None
     if args.target:
-        target = targets.BY_KEY.get(args.target)
+        target = targets.by_key(args.target)
         if target is None:
             print(f"unknown target: {args.target}", file=sys.stderr)
-            print(f"known: {', '.join(targets.BY_KEY)}", file=sys.stderr)
+            print(f"known: {', '.join(t['key'] for t in targets.active_targets())}",
+                  file=sys.stderr)
             return 2
 
     if not freellm.ping():
