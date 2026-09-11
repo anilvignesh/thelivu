@@ -217,8 +217,9 @@ def t_hard_evidence_outranks_illustration():
                "records": [{"url": "https://example.gov.in/a.pdf"}],
                "images": ["a ledger", "a stamp", "a door"]}
     kinds = [a["kind"] for a in lfr.plan_assets(chapter)]
+    # Three images declared, one survives — see MAX_IMAGES_PER_UNIT.
     check("declared order within a kind, evidence first", kinds,
-          ["figure", "figure", "record", "image", "image", "image"])
+          ["figure", "figure", "record", "image"])
     # A 40-second chapter buys three shots; those three must be the hard ones,
     # and all three illustrations go unused.
     k = lfr._shot_count(40.0, len(kinds))
@@ -338,6 +339,143 @@ def t_a_shot_moves_and_a_very_short_one_does_not():
           f"scale={lfr.W}:{lfr.H}")
     check("and motion can be switched off", lfr._motion_filter("none", 6.0),
           f"scale={lfr.W}:{lfr.H}")
+
+
+# ------------------------------------------------------- the connective frame
+#
+# Anil, having watched the third sample, asked what "the book" and "the box"
+# were. They were the two surviving generated illustrations, and both were duds
+# in the same way: the model rendered the generic noun and dropped the detail
+# that made the shot worth taking.
+#
+#   "a wide ledger, one column far taller than the other"  -> a blank open book
+#   "a filing drawer, ONE folder left in it"               -> a FULL drawer
+#
+# The second is why this is not a taste question. The close says the record is
+# absent; the picture said the file was full.
+
+def t_the_filler_is_a_line_of_narration_not_a_generated_scene():
+    import tempfile as _t
+    from pathlib import Path as _P
+    from PIL import Image
+
+    text = ("The register shows what action was taken in each case. "
+            "It does not show what money actually arrived afterwards. "
+            "That part of the record has never been published at all.")
+    fill = lfr.quote_fill(text, have=1, want=3)
+    check("fills exactly the gap", len(fill), 2)
+    check("with quote frames", {f["kind"] for f in fill}, {"quote"})
+    check("never the same sentence twice",
+          len({f["text"] for f in fill}), 2)
+    out = lfr.draw_quote_frame(fill[0]["text"], _P(_t.mkdtemp()) / "q.png",
+                               chapter_label="The close")
+    check("the quote frame is landscape", Image.open(out).size, (1920, 1080))
+
+
+def t_quotes_track_what_is_being_said():
+    """Shots run sequentially over one continuous take, so slot j of k should
+    show a sentence from about j/k through the text. No word-level timing, the
+    same approximation plan_cuts already makes about pauses."""
+    text = "Alpha alpha alpha alpha alpha alpha. Beta beta beta beta beta beta. Gamma gamma gamma gamma gamma gamma."
+    fill = lfr.quote_fill(text, have=0, want=3)
+    check("three frames, in narration order",
+          [f["text"].split()[0] for f in fill], ["Alpha", "Beta", "Gamma"])
+
+
+def t_short_connectives_do_not_become_frames():
+    check("a six-word minimum",
+          lfr._sentences("That is real. The ministry told Parliament this in writing."),
+          ["The ministry told Parliament this in writing."])
+
+
+def t_one_illustration_per_unit_at_most():
+    """A measured failure rate, not a style preference. One is atmosphere;
+    three is a slideshow of things that are nearly right."""
+    kinds = [a["kind"] for a in lfr.plan_assets(
+        {"images": ["a ledger", "a stamp", "a door", "a drawer"]})]
+    check("capped at one", kinds, ["image"])
+    check("the cap is stated", lfr.MAX_IMAGES_PER_UNIT, 1)
+
+
+def t_a_unit_can_always_fill_its_shots():
+    """The long-hold problem is gone at the root: there is always a sentence to
+    cut to, so a chapter never sits on one frame because the writer was thin."""
+    text = " ".join(f"Sentence number {i} runs long enough to be a frame." 
+                    for i in range(1, 9))
+    assets = lfr.plan_assets({"figures": [{"value": "1"}]})
+    want = 6
+    filled = assets + lfr.quote_fill(text, len(assets), want)
+    check("budget filled", len(filled), want)
+
+
+# ----------------------------------------------------------- real photographs
+#
+# Anil: "can we use images from google? like find related images and show them?
+# or will that be a risk... if we can properly and safely execute it, it would
+# be great."
+#
+# Google Images is an index of other people's copyrighted photographs; it
+# returns no licence, no author, and no assertion about what the picture shows.
+# publishing/photos.py searches repositories that publish a licence as
+# STRUCTURED DATA instead. The licence half is then machine-checkable. The other
+# half is not, and these cases are mostly about that.
+
+def t_only_licences_attribution_settles_are_accepted():
+    from publishing.photos import usable
+
+    for lic in ("CC BY-SA 4.0", "CC0", "Public domain", "CC BY 2.0"):
+        check(f"accepted: {lic}", usable(lic)[0], True)
+
+    # NonCommercial and NoDerivatives both bite HERE specifically: the channel
+    # carries ads, and every frame is cropped and composited onto the ink
+    # ground. Neither is a licence we can honour, however open it looks.
+    for lic in ("CC BY-NC 4.0", "CC BY-ND 4.0", "CC BY-NC-SA 3.0"):
+        ok, why = usable(lic)
+        check(f"refused: {lic}", ok, False)
+        check(f"  and says why: {lic}", "NonCommercial" in why or "NoDeriv" in why, True)
+
+    check("an unrecognised licence is refused, not guessed",
+          usable("All rights reserved")[0], False)
+    check("no licence at all is refused", usable("")[0], False)
+
+
+def t_a_correct_licence_does_not_make_a_true_caption():
+    """The case that has to be a human's, demonstrated live on 2026-09-11: a
+    Commons search for "Indian highway construction" returns, correctly
+    licensed under public domain, 1900s photographs of the Wind River Indian
+    Reservation in Wyoming. No API can tell you that is the wrong continent.
+
+    So every photo raises a gate-1 line, every time — not only the doubtful
+    ones. A blocker that appears sometimes trains a reviewer to skim."""
+    from publishing.longform_script import mechanical_blockers
+
+    parsed = longform.parse_script(
+        "TITLE: t\nCOLD_OPEN: x\nCHAPTER 1 TITLE: A\n"
+        "CHAPTER 1: Words words words words words words words words.\n"
+        "CHAPTER 1 PHOTO: The NH-66 stretch at Kooriyad | https://x/y.jpg"
+        " | CC BY-SA 4.0, someone | 2016-01-31\nCLOSE: y\n")
+    flags = mechanical_blockers(parsed)
+    confirm = [f for f in flags if "CONFIRM IT SHOWS THIS" in f]
+    check("the reviewer is asked to confirm the subject", len(confirm), 1)
+    check("and the date is put in front of them", "2016-01-31" in confirm[0], True)
+    check("while the licence is not questioned",
+          "Licence is fine" in confirm[0], True)
+
+
+def t_an_unusable_photo_never_reaches_a_frame():
+    kinds = [a["kind"] for a in lfr.plan_assets({
+        "photos": [{"shows": "a", "src": "u", "licence": "CC BY-SA 4.0"},
+                   {"shows": "b", "src": "u", "licence": "CC BY-NC 4.0"},
+                   {"shows": "c", "src": "u", "licence": ""}]})]
+    check("only the open-licensed photo is planned", kinds, ["photo"])
+
+
+def t_a_photo_ranks_above_a_generated_scene():
+    """A real picture of the thing beats a generated picture of the idea of it."""
+    kinds = [a["kind"] for a in lfr.plan_assets({
+        "photos": [{"shows": "a", "src": "u", "licence": "CC0"}],
+        "images": ["a symbolic ledger"]})]
+    check("photo first", kinds, ["photo", "image"])
 
 
 # ------------------------------------------------------------------ footage
@@ -882,7 +1020,16 @@ def main():
               t_credit_is_the_condition_on_some_licences_and_not_on_others,
               t_fair_dealing_renders_but_goes_to_a_human,
               t_an_unlicensed_clip_never_reaches_a_frame,
-              t_the_caption_carries_all_three_things):
+              t_the_caption_carries_all_three_things,
+              t_the_filler_is_a_line_of_narration_not_a_generated_scene,
+              t_quotes_track_what_is_being_said,
+              t_short_connectives_do_not_become_frames,
+              t_one_illustration_per_unit_at_most,
+              t_a_unit_can_always_fill_its_shots,
+              t_only_licences_attribution_settles_are_accepted,
+              t_a_correct_licence_does_not_make_a_true_caption,
+              t_an_unusable_photo_never_reaches_a_frame,
+              t_a_photo_ranks_above_a_generated_scene):
         t()
     for t in (t_the_whole_chain_renders,
               t_the_file_is_as_long_as_the_plan_says,

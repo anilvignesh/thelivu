@@ -39,6 +39,7 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path
+from urllib.parse import urlparse
 
 from PIL import Image, ImageDraw
 
@@ -61,6 +62,7 @@ CHAPTER_CARD_SECONDS = 2.5
 # footage is a repost. The cap is on the DOWNLOAD, so a 2GB source file
 # cannot take the box down on a render that runs monthly.
 MAX_CLIP_BYTES = 120_000_000
+MAX_PHOTO_BYTES = 25_000_000
 
 
 def _scrim(base):
@@ -187,6 +189,64 @@ def draw_data_card(figure, out_png, chapter_label=""):
         # The source line is what separates a figure from a poster. Small, always
         # present, never the same colour as the number.
         d.text((120, H - 120), source.upper()[:90],
+               font=_font(MONO, 28), fill=MUTED)
+    img.save(out_png)
+    return out_png
+
+
+def draw_quote_frame(text, out_png, chapter_label="", attribution=""):
+    """The sentence being spoken, as type. The default connective frame.
+
+    Replaces the generated illustration as the thing that fills a shot with
+    nothing else to show, because generated illustrations kept being worse than
+    nothing. Measured on the first three samples, every time the same way:
+    diffusion renders the generic NOUN and drops the distinguishing detail that
+    made the shot worth taking.
+
+      "a wide ledger, one column far taller than the other"  -> a blank book
+      "a filing drawer, ONE folder left in it"               -> a full drawer
+      "a large invoice stamped PAID IN FULL"                 -> a broken column
+
+    The middle one is the argument for this frame. The close says the record is
+    absent; the picture said the file was full. A frame that contradicts the
+    narration is not decoration, it is a false statement in the most-watched
+    part of the video.
+
+    A line of narration cannot do that. It IS the narration, it is always
+    legible, always relevant, and costs no model call. Anil, 2026-09-11: "there
+    should be things valid on the screen, its a video at the end of the day."
+    """
+    img = Image.open(_ground(out_png.with_name(out_png.stem + "_bg.png"),
+                             variant=1)).convert("RGB")
+    d = ImageDraw.Draw(img)
+    d.text((120, 96), "THELIVU", font=_font(MONO_BOLD, 38), fill=ACCENT)
+    if chapter_label:
+        d.text((120, 148), chapter_label.upper()[:60],
+               font=_font(MONO, 30), fill=MUTED)
+
+    text = (text or "").strip()
+    if not text:
+        img.save(out_png)
+        return out_png
+
+    # Fit rather than truncate: a sentence cut mid-clause on screen while the
+    # voice says the rest of it is the worst of both.
+    size, lines = 84, []
+    while size > 34:
+        f = _font(SERIF_BOLD, size)
+        lines = _wrap(d, text, f, W - 300)
+        if len(lines) * int(size * 1.34) <= H - 460:
+            break
+        size -= 4
+    f = _font(SERIF_BOLD, size)
+    lead = int(size * 1.34)
+    y = max(250, (H - len(lines) * lead) // 2 - 30)
+    d.line([(120, y - 46), (300, y - 46)], fill=ACCENT, width=6)
+    for line in lines:
+        d.text((120, y), line, font=f, fill=PAPER)
+        y += lead
+    if attribution:
+        d.text((120, H - 110), attribution.upper()[:100],
                font=_font(MONO, 28), fill=MUTED)
     img.save(out_png)
     return out_png
@@ -322,7 +382,7 @@ def draw_record_frame(page_png, caption, out_png, chapter_label="", quote=""):
     return out_png
 
 
-def draw_story_frame(image_path, caption, out_png, chapter_label=""):
+def draw_story_frame(image_path, caption, out_png, chapter_label="", credit=""):
     """One illustrated frame with the spoken line beneath it."""
     base = Image.open(image_path).convert("RGB")
     # cover-fit into landscape without distorting the illustration
@@ -346,6 +406,29 @@ def draw_story_frame(image_path, caption, out_png, chapter_label=""):
         for line in lines:
             d.text((120, y), line, font=f, fill=PAPER)
             y += 78
+    if credit:
+        # A licence condition, not a nicety — it is the reason we may show the
+        # picture at all. Held for the whole shot, small, always present.
+        #
+        # Its own scrim band: a real photograph is often bright where a
+        # generated illustration is not, and the first one tested had the
+        # masthead and the credit washing out against a daylit street.
+        band = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        bd = ImageDraw.Draw(band)
+        bd.rectangle([0, 0, W, 210], fill=(0, 0, 0, 140))
+        bd.rectangle([0, H - 120, W, H], fill=(0, 0, 0, 165))
+        img = Image.alpha_composite(img.convert("RGBA"), band).convert("RGB")
+        d = ImageDraw.Draw(img)
+        d.text((120, 96), "THELIVU", font=_font(MONO_BOLD, 38), fill=ACCENT)
+        if chapter_label:
+            d.text((120, 148), chapter_label.upper()[:60],
+                   font=_font(MONO, 30), fill=MUTED)
+        cf = _font(MONO, 26)
+        lines = _wrap(d, credit, cf, W - 240)[:2]
+        y = H - 40 - len(lines) * 34
+        for line in lines:
+            d.text((120, y), line, font=cf, fill=MUTED)
+            y += 34
     img.save(out_png)
     return out_png
 
@@ -500,6 +583,7 @@ def _segment(png, wav, out_mp4, duration, audio_start=0.0, motion="in"):
 # over a 110-second chapter is 22 seconds a frame, no better than three over 66.
 # So the cut rate follows the narration, and the cap is only a safety rail.
 TARGET_SHOT_SECONDS = 13.0
+MAX_IMAGES_PER_UNIT = 1
 MAX_SHOTS_PER_UNIT = 8
 # Below this a shot is a flicker. Lower than the illustration-only 12s, because a
 # number or a quoted line is READ — four or five seconds is enough for a figure
@@ -522,6 +606,43 @@ def _shot_count(duration, available):
     wanted = max(1, round(duration / TARGET_SHOT_SECONDS))
     k = min(available, MAX_SHOTS_PER_UNIT, wanted, int(duration // MIN_SHOT_SECONDS))
     return max(1, k)
+
+
+def _sentences(text):
+    """Narration split into sentences, long ones only. Short connectives ("That
+    figure is real.") are true but make a weak frame."""
+    import re as _re
+    parts = [p.strip() for p in _re.split(r"(?<=[.?!])\s+", (text or "").strip())]
+    return [p for p in parts if len(p.split()) >= 6]
+
+
+def quote_fill(text, have, want):
+    """Quote frames to fill the shots a unit earned but did not declare assets for.
+
+    Position-matched, not arbitrary: shots run sequentially over one continuous
+    narration take, so the frame occupying slot j of k shows a sentence from
+    about j/k of the way through the text. The line on screen therefore tracks
+    what is being said without any word-level timing — the same approximation
+    plan_cuts makes about pauses, and good enough for the same reason.
+    """
+    need = max(0, want - have)
+    sents = _sentences(text)
+    if not need or not sents:
+        return []
+    out, used = [], set()
+    for i in range(need):
+        frac = (have + i + 0.5) / max(1, want)
+        idx = min(len(sents) - 1, int(frac * len(sents)))
+        # Never show the same sentence twice in one unit.
+        while idx in used and idx + 1 < len(sents):
+            idx += 1
+        while idx in used and idx > 0:
+            idx -= 1
+        if idx in used:
+            break
+        used.add(idx)
+        out.append({"kind": "quote", "text": sents[idx]})
+    return out
 
 
 def plan_assets(chapter, fallback_image=None):
@@ -549,11 +670,22 @@ def plan_assets(chapter, fallback_image=None):
     # the idea of it. A clip with no licence is dropped here rather than
     # rendered — see _prepare_clip and BRAND.md.
     clips = [{"kind": "clip", "clip": c} for c in (chapter.get("clips") or [])
-             if clip_licence_status(c)[0]]
+             if media_licence_status(c)[0]]
+    photos = [{"kind": "photo", "photo": ph} for ph in (chapter.get("photos") or [])
+              if media_licence_status(ph)[0]]
     images = [{"kind": "image", "prompt": p} for p in (chapter.get("images") or [])]
     if not images and fallback_image:
         images = [{"kind": "image", "prompt": fallback_image}]
-    return figures + tables + clips + records + images
+    # At most ONE generated illustration per unit, whatever the script declares.
+    # Not a style preference — a measured failure rate. Across three samples the
+    # image model rendered the generic noun and dropped the distinguishing
+    # detail every single time, and once produced a frame that contradicted the
+    # line being spoken (a FULL drawer under "that part has not been published").
+    # One is atmosphere; three is a slideshow of things that are nearly right.
+    # Everything past the first is better spent on a quote frame, which cannot
+    # be wrong about what is being said.
+    return (figures + tables + photos + clips + records
+            + images[:MAX_IMAGES_PER_UNIT])
 
 
 # What makes a clip usable, and which of those needs a human to say yes.
@@ -586,6 +718,30 @@ SETTLED_LICENCES = ("godl", "cc-by", "cc0", "public domain", "licensed", "own",
 FAIR_DEALING_PREFIX = "fair-dealing"
 
 
+def media_licence_status(item):
+    """(ok, needs_human_call, why) for a CLIP or a PHOTO.
+
+    Photographs go through publishing/photos.usable() as well, because the
+    Commons licences have teeth the clip list does not cover: NonCommercial and
+    NoDerivatives both bite here — the channel carries ads, and every frame is
+    cropped and composited onto the house ground.
+    """
+    lic = (item.get("licence") or "").strip()
+    if lic and not lic.lower().startswith(FAIR_DEALING_PREFIX):
+        try:
+            from publishing.photos import usable
+            ok, why = usable(lic)
+            if ok:
+                return True, False, ""
+            # Fall through: the clip list recognises bases photos.py does not
+            # (a commercial licence from an outlet, our own footage).
+            if "NonCommercial" in why or "NoDerivatives" in why:
+                return False, False, why
+        except Exception:
+            pass
+    return clip_licence_status(item)
+
+
 def clip_licence_status(clip):
     """(ok_to_render, needs_human_call, why)."""
     lic = (clip.get("licence") or "").strip().lower()
@@ -613,6 +769,28 @@ def _clip_caption(clip):
     if clip.get("licence"):
         bits.append(clip["licence"].strip())
     return " · ".join(b for b in bits if b)
+
+
+def _prepare_photo(photo, out_dir, stem):
+    """Download a licensed photograph. Same licence gate as a clip."""
+    ok, _needs_call, why = media_licence_status(photo)
+    if not ok:
+        log.warning("photo %r not usable: %s", photo.get("shows"), why)
+        return None
+    src = (photo.get("src") or "").strip()
+    if not src:
+        return None
+    try:
+        if not src.lower().startswith(("http://", "https://")):
+            local = Path(src).expanduser()
+            return local if local.exists() else None
+        from engine.digger import fetch as digfetch
+        suffix = Path(urlparse(src).path).suffix or ".jpg"
+        return digfetch.fetch_file(src, Path(out_dir) / f"{stem}{suffix}",
+                                   max_bytes=MAX_PHOTO_BYTES)
+    except Exception as e:
+        log.warning("photo %s unusable (%s: %s)", src, type(e).__name__, e)
+        return None
 
 
 def _prepare_clip(clip, out_dir, stem):
@@ -757,7 +935,13 @@ def render(parsed, out_mp4, work_dir=None, voice=None, illustrate=True,
         assets = plan_assets(unit, fallback_image=fallback)
         if not assets:
             assets = [{"kind": "image", "prompt": None}]
-        k = _shot_count(dur, len(assets))
+        # Quote frames fill whatever the writer did not declare. Before 2026-09-11
+        # the filler was a generated illustration, and generated illustrations
+        # kept being worse than nothing — see draw_quote_frame. A shot budget is
+        # now always fillable, so a unit never holds one frame for a minute.
+        want = _shot_count(dur, max(len(assets), _shot_count(dur, 99)))
+        assets = assets[:want] + quote_fill(text, len(assets[:want]), want)
+        k = min(want, len(assets)) or 1
         plans.append(list(zip(assets[:k], plan_cuts(dur, k, pauses))))
 
     # 3. Fetch and render the documents. Before illustration, because a record
@@ -776,6 +960,10 @@ def render(parsed, out_mp4, work_dir=None, voice=None, illustrate=True,
                     asset["shot"] = got
             elif asset["kind"] == "clip":
                 got = _prepare_clip(asset["clip"], tmp / "clips", f"u{i}_{j}")
+                if got:
+                    asset["file"] = got
+            elif asset["kind"] == "photo":
+                got = _prepare_photo(asset["photo"], tmp / "photos", f"u{i}_{j}")
                 if got:
                     asset["file"] = got
             else:
@@ -840,6 +1028,11 @@ def render(parsed, out_mp4, work_dir=None, voice=None, illustrate=True,
             png = tmp / f"frame_{i:03d}_{j}.png"
             if asset["kind"] == "figure":
                 draw_data_card(asset["figure"], png, chapter_label=label)
+            elif asset["kind"] == "photo":
+                draw_story_frame(asset["file"], "", png, chapter_label=label,
+                                 credit=_clip_caption(asset["photo"]))
+            elif asset["kind"] == "quote":
+                draw_quote_frame(asset["text"], png, chapter_label=label)
             elif asset["kind"] == "table":
                 draw_table_frame(asset["table"], png, chapter_label=label)
             elif asset["kind"] == "clip":

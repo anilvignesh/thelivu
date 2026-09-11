@@ -206,6 +206,7 @@ There are three kinds of frame, and they are not equal:
 | `FIGURE` | the number, drawn huge, with its label and its source | every figure the argument turns on |
 | `RECORD` | the real page of the real document, with the quoted line beside it | every claim a sceptic would want to see for themselves |
 | `TABLE` | a short ranked list, one row lit up | any claim that is a rank, a comparison or a breakdown |
+| `PHOTO` | a real licensed photograph, credit burned in | when a real picture of the place or thing exists and we may use it |
 | `CLIP` | real footage, letterboxed, attribution burned in | when the event itself was filmed and we can lawfully use it |
 | `IMAGE` | a generated symbolic scene | the connective tissue between those |
 
@@ -262,6 +263,28 @@ should be a TABLE.
 Four to seven rows. The renderer does not sort, compute or round — every number
 on screen is one you wrote and a reviewer approved.
 
+### PHOTO lines — real photographs
+
+```
+CHAPTER 3 PHOTO: <what it shows> | <url> | <licence, author> | <when>
+```
+
+**Not from a web image search.** Google Images is an index of other people's
+copyrighted photographs: no licence, no author, no assertion about the subject.
+`publishing/photos.py` searches Wikimedia Commons instead, which publishes the
+licence and the author as structured data, and refuses anything that is not
+CC-BY / CC-BY-SA / CC0 / public domain. NonCommercial and NoDerivatives are
+refused too — the channel carries ads and every frame is composited.
+
+**The first field is yours and no tool can supply it.** A Commons search for
+"Indian highway construction" returns, correctly licensed, 1900s photographs of
+the Wind River Indian Reservation in Wyoming. Every PHOTO line raises a gate-1
+line asking you to confirm the subject and the date, every time — the licence is
+machine-checked, the truth of the caption is not.
+
+Prefer a photograph to a generated scene wherever a real one exists and we may
+use it. It outranks IMAGE in the shot order for exactly that reason.
+
 ### CLIP lines — real footage
 
 ```
@@ -310,6 +333,21 @@ to something you declared. A chapter with two assets and two minutes of
 narration holds each frame for a minute, and no renderer setting fixes that —
 gate 1 will flag it as *"holds one frame for 60s"*. Roughly **one asset per
 12-15 seconds of narration**, counting all four kinds.
+
+### The default filler is a line of your own narration, not a picture
+
+You do not have to fill every shot. Whatever you do not declare becomes a QUOTE
+frame — a sentence of the narration set as type, position-matched so it tracks
+what is being said. It cannot contradict the voice, because it is the voice.
+
+That exists because generated illustrations kept being worse than nothing.
+Every time, the model rendered the generic noun and dropped the detail that made
+the shot worth taking: *"a wide ledger, one column far taller than the other"*
+came back as a blank open book, and *"a filing drawer, one folder left in it"* —
+under a close whose whole point is that the record is absent — came back as a
+drawer FULL of folders.
+
+**At most one IMAGE per chapter**, whatever you write. One is atmosphere.
 
 ### Never make a picture do a number's job
 

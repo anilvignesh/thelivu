@@ -272,6 +272,30 @@ def parse_script(text):
         # See BRAND.md — licence and verification are separate requirements and
         # both are mandatory, because a correctly licensed clip of the wrong
         # flyover is still a false claim.
+        # "CHAPTER 3 PHOTO: <what it shows> | <url> | <licence, author> | <when>"
+        #
+        # A real photograph, from a repository that publishes a licence as
+        # structured data (publishing/photos.py — Wikimedia Commons). Same four
+        # fields and the same licence rules as CLIP, because it is the same
+        # question: what it shows, where it came from, under what permission,
+        # and when.
+        #
+        # The first field is the one no API can supply. Searching "Indian
+        # highway construction" on Commons returns, correctly licensed, 1900s
+        # photographs of the Wind River Indian Reservation in Wyoming. The
+        # machine establishes what is PERMITTED; a person establishes what is
+        # TRUE, at gate 1.
+        m = re.match(r"^\s*CHAPTER\s+(\d+)\s+PHOTO\s*:\s*(.+)$", line, re.I)
+        if m:
+            bits = [b.strip() for b in m.group(2).split("|")]
+            if len(bits) >= 2:
+                chapters.setdefault(int(m.group(1)), {}).setdefault("photos", []).append({
+                    "shows": bits[0],
+                    "src": bits[1],
+                    "licence": bits[2] if len(bits) > 2 else "",
+                    "provenance": bits[3] if len(bits) > 3 else "",
+                })
+            continue
         m = re.match(r"^\s*CHAPTER\s+(\d+)\s+CLIP\s*:\s*(.+)$", line, re.I)
         if m:
             bits = [b.strip() for b in m.group(2).split("|")]
@@ -335,7 +359,7 @@ def parse_script(text):
          "text": c.get("text", ""), "image": c.get("image", ""),
          "images": c.get("images", []), "records": c.get("records", []),
          "figures": c.get("figures", []), "tables": c.get("tables", []),
-         "clips": c.get("clips", [])}
+         "clips": c.get("clips", []), "photos": c.get("photos", [])}
         for n, c in sorted(chapters.items()) if c.get("text")
     ]
     out["word_count"] = spoken_words(text)

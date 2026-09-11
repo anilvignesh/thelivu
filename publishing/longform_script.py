@@ -167,19 +167,34 @@ def _clip_calls(parsed):
     recognised basis never reaches a frame at all; it is reported here so the
     reviewer knows a line was dropped rather than wondering where it went.
     """
-    from publishing.longform_render import clip_licence_status
+    from publishing.longform_render import media_licence_status
 
     out = []
     for c in parsed.get("chapters", []):
-        for clip in c.get("clips") or []:
-            ok, needs_call, why = clip_licence_status(clip)
-            what = (clip.get("shows") or clip.get("src") or "")[:60]
-            if not ok:
-                out.append(f"Chapter {c['n']} clip DROPPED — {what}: {why}")
-            elif needs_call:
-                out.append(f"Chapter {c['n']} clip needs your call — {what}: "
-                           f"{why}. Credit alone is not permission; Content ID "
-                           f"claims first and asks later.")
+        for kind, items in (("clip", c.get("clips") or []),
+                            ("photo", c.get("photos") or [])):
+            for item in items:
+                ok, needs_call, why = media_licence_status(item)
+                what = (item.get("shows") or item.get("src") or "")[:60]
+                if not ok:
+                    out.append(f"Chapter {c['n']} {kind} DROPPED — {what}: {why}")
+                elif needs_call:
+                    out.append(
+                        f"Chapter {c['n']} {kind} needs your call — {what}: "
+                        f"{why}. Credit alone is not permission; Content ID "
+                        f"claims first and asks later.")
+                elif kind == "photo":
+                    # Every photo, every time. The licence is machine-checked;
+                    # whether the picture shows what the line says it shows is
+                    # not checkable by any API, and a correctly licensed photo
+                    # of the wrong place is a false claim in our own voice.
+                    # Demonstrated live 2026-09-11: a Commons search for
+                    # "Indian highway construction" returns 1900s photographs
+                    # of the Wind River Indian Reservation, Wyoming.
+                    out.append(
+                        f"Chapter {c['n']} photo — CONFIRM IT SHOWS THIS: "
+                        f"\"{what}\" ({item.get('provenance') or 'no date given'}). "
+                        f"Licence is fine; the subject is your call.")
     return out
 
 
