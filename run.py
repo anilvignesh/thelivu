@@ -236,6 +236,30 @@ if service == "thelivu-agent":
         # history is the point, because the API keeps two days of account reach
         # and no follower history at all. If we don't write it down, nobody has
         # it. See docs/reach-analytics.md.
+        # Keep the Instagram token alive BEFORE anything tries to use it.
+        # Meta's long-lived tokens last 60 days and nothing here refreshed them,
+        # so one expired on 2026-09-10 and took every Instagram path down until
+        # a human re-issued it. Refreshing needs a token that is still valid, so
+        # this runs at the 30-day half-life — a 30-day margin in which many
+        # attempts can fail harmlessly. Cheap: one HTTP call, and only when due.
+        try:
+            from engine.agents.ig_token import refresh, refresh_due
+            due, why = refresh_due()
+            if due:
+                result = refresh()
+                log.info("IG token refresh: %s (%s)", result, why)
+                if result.startswith("refresh"):
+                    # "refreshed;" is success — anything else starting "refresh"
+                    # is a rejection or a failed request, and an expiry here has
+                    # no automated recovery.
+                    if not result.startswith("refreshed"):
+                        _sweep_failed("Instagram token refresh", RuntimeError(result))
+                    else:
+                        _sweep_recovered("Instagram token refresh")
+        except Exception as e:
+            log.error("IG token refresh failed: %s", e, exc_info=True)
+            _sweep_failed("Instagram token refresh", e)
+
         try:
             from engine.agents.ig_insights import run_ig_sync, sync_due
             forced_ig = kv_get("force_ig_sync")

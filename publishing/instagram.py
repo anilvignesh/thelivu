@@ -24,6 +24,18 @@ import requests
 
 from shared.config import IG_USER_ID, IG_ACCESS_TOKEN
 
+
+def _token():
+    """The live token. IG_ACCESS_TOKEN is the seed; after the first refresh the
+    current 60-day token lives in kv_store (see engine/agents/ig_token.py), so
+    reading the constant directly would publish with a stale — eventually dead —
+    token while a valid one sat in the database."""
+    try:
+        from engine.agents.ig_token import current_token
+        return current_token() or IG_ACCESS_TOKEN
+    except Exception:
+        return IG_ACCESS_TOKEN
+
 _API = "https://graph.instagram.com/v21.0"
 log = logging.getLogger("instagram")
 
@@ -62,7 +74,7 @@ class IGPublishError(RuntimeError):
 
 
 def _require_config():
-    if not IG_USER_ID or not IG_ACCESS_TOKEN:
+    if not IG_USER_ID or not _token():
         raise IGNotConfigured(
             "IG_USER_ID / IG_ACCESS_TOKEN not set — Instagram publishing isn't "
             "configured yet. The slide is saved; post it manually for now."
@@ -120,7 +132,7 @@ def _graph_get(node_path, params, tries=5):
 
 def _create_container(image_url, caption):
     data = _graph_post(f"{IG_USER_ID}/media",
-                       {"image_url": image_url, "caption": caption, "access_token": IG_ACCESS_TOKEN})
+                       {"image_url": image_url, "caption": caption, "access_token": _token()})
     if "id" not in data:
         raise IGPublishError(f"Container creation failed: {data}")
     return data["id"]
@@ -128,7 +140,7 @@ def _create_container(image_url, caption):
 
 def _create_carousel_item(image_url):
     data = _graph_post(f"{IG_USER_ID}/media",
-                       {"image_url": image_url, "is_carousel_item": "true", "access_token": IG_ACCESS_TOKEN})
+                       {"image_url": image_url, "is_carousel_item": "true", "access_token": _token()})
     if "id" not in data:
         raise IGPublishError(f"Carousel item creation failed: {data}")
     return data["id"]
@@ -139,7 +151,7 @@ def _create_carousel_container(child_ids, caption):
         "media_type": "CAROUSEL",
         "children": ",".join(child_ids),
         "caption": caption,
-        "access_token": IG_ACCESS_TOKEN,
+        "access_token": _token(),
     })
     if "id" not in data:
         raise IGPublishError(f"Carousel container creation failed: {data}")
@@ -151,7 +163,7 @@ def _wait_until_ready(container_id, attempts=10, delay=2):
     publishing anyway — single-image containers are usually ready instantly;
     this just avoids a race on a slow day)."""
     for _ in range(attempts):
-        status = _graph_get(container_id, {"fields": "status_code", "access_token": IG_ACCESS_TOKEN}).get("status_code")
+        status = _graph_get(container_id, {"fields": "status_code", "access_token": _token()}).get("status_code")
         if status == "FINISHED":
             return
         if status == "ERROR":
@@ -179,7 +191,7 @@ def _recent_media_matching(caption, within_secs=600):
     try:
         out = _graph_get(f"{IG_USER_ID}/media",
                          {"fields": "id,caption,timestamp,permalink", "limit": 5,
-                          "access_token": IG_ACCESS_TOKEN})
+                          "access_token": _token()})
     except Exception:
         return None
     now = datetime.now(timezone.utc)
@@ -217,7 +229,7 @@ def _publish_container(container_id, caption=""):
     for attempt in range(4):
         try:
             data = _graph_post(f"{IG_USER_ID}/media_publish",
-                               {"creation_id": container_id, "access_token": IG_ACCESS_TOKEN},
+                               {"creation_id": container_id, "access_token": _token()},
                                tries=1)  # one shot per attempt — we verify between tries
             if "id" in data:
                 return data["id"]
@@ -245,7 +257,7 @@ def _permalink(media_id):
     try:
         r = requests.get(
             f"{_API}/{media_id}",
-            params={"fields": "permalink", "access_token": IG_ACCESS_TOKEN},
+            params={"fields": "permalink", "access_token": _token()},
             timeout=15,
         )
         return r.json().get("permalink", "")
@@ -283,7 +295,7 @@ def publish_reel(video_url, caption="", progress=None):
         "media_type": "REELS",
         "video_url": video_url,
         "caption": caption,
-        "access_token": IG_ACCESS_TOKEN,
+        "access_token": _token(),
     })
     if "id" not in data:
         raise IGPublishError(f"Reel container creation failed: {data}")

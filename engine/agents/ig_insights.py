@@ -52,7 +52,12 @@ MAX_MEDIA = 200
 
 def _cfg():
     import os
-    tok = os.environ.get("IG_ACCESS_TOKEN")
+    # Through ig_token, not straight from the environment: the env value is only
+    # the SEED. After the first refresh the live 60-day token lives in kv_store,
+    # because a process cannot rewrite its own Railway variable and a token held
+    # only in memory dies with the dyno.
+    from engine.agents.ig_token import current_token
+    tok = current_token()
     uid = os.environ.get("IG_USER_ID")
     if not (tok and uid):
         raise RuntimeError("IG_ACCESS_TOKEN / IG_USER_ID not configured")
