@@ -30,6 +30,14 @@ python3 -m venv venv
 venv/bin/pip install --upgrade pip
 venv/bin/pip install -r requirements.txt
 
+# liteparse renders the PDF pages that long-form RECORD frames put on screen
+# (publishing/evidence_shot.py). NOT in requirements.txt: Railway does not
+# render video and does not need a 14MB PDFium wheel on every deploy. Installed
+# here so a rebuilt worker box does not quietly lose its document frames — the
+# renderer demotes a RECORD to an illustration when liteparse is missing, which
+# produces a valid video with the evidence silently removed.
+venv/bin/pip install 'liteparse>=2.14'
+
 echo "== cbx venv (Chatterbox, CPU torch ONLY — do not let this pull CUDA) =="
 cd ~
 python3 -m venv cbx

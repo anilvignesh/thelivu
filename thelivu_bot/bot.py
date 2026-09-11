@@ -141,6 +141,37 @@ async def cmd_topic(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log.info("Topic queued: %s", topic[:80])
 
 
+async def cmd_longform(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/longform <run_id> [why] — ask for a long video of a story.
+
+    The editorial door. The automatic one fires only when a reel is still over
+    the seconds ceiling after a shorter rewrite, which in production has never
+    once been true — so the queue sat empty and there was no way to say "this
+    one needs a long video". Anil, 2026-09-11: "if we find something substantial
+    which needs a long video we do that."
+
+    Queues only. The script is written on the next engine tick and comes back
+    here to read; both human gates are unchanged.
+    """
+    args = context.args or []
+    if not args or not args[0].isdigit():
+        await update.message.reply_text(
+            "Usage: /longform <run_id> [why it needs more than 90s]\n\n"
+            "Example: /longform 214 the penalty-vs-recovery gap needs the "
+            "register and the parliamentary answer side by side")
+        return
+    run_id = int(args[0])
+    why = " ".join(args[1:]).strip()
+    from publishing.longform import request_longform
+    try:
+        ok, msg = request_longform(run_id, why=why, by="telegram")
+    except Exception as e:
+        await update.message.reply_text(f"Could not queue it: {e}")
+        return
+    await update.message.reply_text(("✅ " if ok else "⚠️ ") + msg)
+    log.info("long-form requested for run #%s: %s", run_id, msg)
+
+
 async def cmd_remake(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/remake <reel_id> <notes> — the Telegram analog of the command center's
     remake-suggestion box. This bot has no Chatterbox access (that's the
@@ -1726,6 +1757,7 @@ def main():
     app.add_handler(CommandHandler("cost", cmd_cost))
     app.add_handler(CommandHandler("topic", cmd_topic))
     app.add_handler(CommandHandler("remake", cmd_remake))
+    app.add_handler(CommandHandler("longform", cmd_longform))
     app.add_handler(CommandHandler("runnow", cmd_runnow))
     app.add_handler(CommandHandler("republish", cmd_republish))
     app.add_handler(CommandHandler("held", cmd_held))

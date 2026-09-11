@@ -342,6 +342,54 @@ def parse_script(text):
     return out
 
 
+def request_longform(run_id, why="", by="owner"):
+    """Put a story into the long-form queue by hand. Returns (ok, message).
+
+    The other door, and until 2026-09-11 the only one was
+    `make_reel.queue_longform()` — fired when a reel is STILL over the seconds
+    ceiling after a shorter rewrite. That condition is narrow by design and, in
+    production, has never once been true: `longform_queue` was empty the whole
+    time this pipeline existed.
+
+    Which makes it the wrong and only trigger. Anil, 2026-09-11: "if we find
+    something substantial which needs a long video we do that" — the signal is
+    editorial judgement about the material, and a reel that happened to fit 90
+    seconds says nothing about whether the material behind it did. He had a
+    candidate for the first long video and no way to say so.
+
+    So: a person names a run. Everything downstream is unchanged — the script is
+    written automatically, and both human gates still stand.
+    """
+    from shared.db import get_run, queue_longform, longform_item, longform_queue
+
+    run = get_run(run_id)
+    if not run:
+        return False, f"run #{run_id} not found"
+    if (run.get("draft_text") or "").strip() == "":
+        return False, (f"run #{run_id} has no draft text — long-form is written "
+                       f"from the verified article, so there is nothing to work from")
+
+    existing = [r for r in (longform_queue(status=QUEUED)
+                            + longform_queue(status=SCRIPTED)
+                            + longform_queue(status=SCRIPT_OK)
+                            + longform_queue(status=RENDERED))
+                if r.get("run_id") == run_id]
+    if existing:
+        e = existing[0]
+        return False, (f"run #{run_id} is already long-form #{e['id']} "
+                       f"({e.get('status')})")
+
+    queue_longform(run_id=run_id,
+                   title=(run.get("throughline") or f"run #{run_id}")[:200],
+                   reason=(why or "requested by hand — editorial judgement that "
+                                  "the material needs more than 90 seconds"),
+                   reel_seconds=None)
+    row = [r for r in longform_queue(status=QUEUED) if r.get("run_id") == run_id]
+    qid = row[0]["id"] if row else None
+    return True, (f"run #{run_id} queued as long-form #{qid}. The script is "
+                  f"written on the next engine tick and comes back here to read.")
+
+
 def build_description(parsed):
     """The YouTube description: the writer's blurb, then EVERY source used.
 

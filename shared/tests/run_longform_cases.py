@@ -563,6 +563,61 @@ def t_rendered_item_awaits_watching():
     check("rendered item waits", w[0]["action"], "watch the video")
 
 
+def t_a_person_can_ask_for_a_long_video():
+    """The trigger that was missing. The automatic one fires only when a reel is
+    STILL over the seconds ceiling after a shorter rewrite — narrow by design,
+    and in production never once true: longform_queue was empty for the whole
+    life of this pipeline. So there was no way to say "this one needs a long
+    video", which is the only trigger Anil actually described."""
+    _fresh_db()
+    from publishing.longform import request_longform, QUEUED
+    from shared.db import _conn, longform_queue
+
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if not str(type(conn)).count("sqlite") else "?"
+        cur.execute("INSERT INTO pipeline_runs (id, throughline, draft_text, status) "
+                    "VALUES (901, 'The penalty never collected', 'the article', 'published')")
+        conn.commit()
+    finally:
+        conn.close()
+
+    ok, msg = request_longform(901, why="needs the register and the answer together")
+    check("queued", ok, True)
+    rows = longform_queue(status=QUEUED)
+    check("one item, pointing at the run", [r["run_id"] for r in rows], [901])
+    check("the reason is recorded",
+          "register" in (rows[0].get("reason") or ""), True)
+
+    # Twice is a mistake, not a second video.
+    ok2, msg2 = request_longform(901)
+    check("asking again is refused", ok2, False)
+    check("and it says where it already is", "already" in msg2, True)
+
+
+def t_a_run_with_no_article_cannot_graduate():
+    """Long-form is written FROM the verified article. A run with no draft has
+    nothing to work from, and queueing it would fail later, in the renderer,
+    after a human had already been asked to read something."""
+    _fresh_db()
+    from publishing.longform import request_longform
+    from shared.db import _conn
+
+    conn = _conn()
+    try:
+        conn.cursor().execute(
+            "INSERT INTO pipeline_runs (id, throughline, draft_text, status) "
+            "VALUES (902, 'no draft yet', '', 'investigating')")
+        conn.commit()
+    finally:
+        conn.close()
+    ok, msg = request_longform(902)
+    check("refused", ok, False)
+    check("with the reason", "no draft text" in msg, True)
+    check("a missing run is refused too", request_longform(99999)[0], False)
+
+
 def main():
     print("long-form video cases")
     for t in (t_permalink_is_watch_not_shorts,
@@ -604,7 +659,9 @@ def main():
               t_review_surfaces_agree_on_state,
               t_a_stale_tab_cannot_approve_twice,
               t_rendered_item_awaits_watching,
-              t_budget_check_reports_synthesis_cost):
+              t_budget_check_reports_synthesis_cost,
+              t_a_person_can_ask_for_a_long_video,
+              t_a_run_with_no_article_cannot_graduate):
         t()
 
     print("\n" + "=" * 72)
