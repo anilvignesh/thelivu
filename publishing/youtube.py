@@ -223,6 +223,59 @@ def publish_video(video_bytes, title, description="", tags=None, progress=None,
     return video_id, f"https://youtube.com/watch?v={video_id}"
 
 
+def set_privacy(video_id, privacy):
+    """Flip an already-uploaded video's privacy. Returns the new status.
+
+    This is how a long-form video is *published*. It is uploaded UNLISTED at
+    render time (see publishing/longform_build.py) so that gate 2 — Anil
+    watching it — happens on YouTube's own player rather than off a fileserver
+    streaming a few hundred megabytes, and so the upload's ~20 minutes are
+    spent before the review rather than after it.
+
+    Which means the two halves of publishing run in different places: the
+    reel-worker box has the bytes and no posting credentials, Railway has the
+    credentials and no bytes. A privacy flip needs only the credentials.
+
+    `part=status` with only the fields we mean to change: YouTube's videos.update
+    REPLACES each part it is given, so sending `snippet` here would blank the
+    title and description that were set at upload.
+    """
+    if privacy not in ("public", "unlisted", "private"):
+        raise YouTubePublishError(f"invalid privacy: {privacy!r}")
+    token = _access_token()
+    r = requests.put(
+        "https://www.googleapis.com/youtube/v3/videos?part=status",
+        headers={"Authorization": f"Bearer {token}",
+                 "Content-Type": "application/json; charset=UTF-8"},
+        json={"id": video_id,
+              "status": {"privacyStatus": privacy,
+                         "selfDeclaredMadeForKids": False}},
+        timeout=60)
+    if r.status_code != 200:
+        raise YouTubePublishError(
+            f"Could not set {video_id} to {privacy}: {r.status_code} {r.text[:300]}")
+    return (r.json().get("status") or {}).get("privacyStatus", privacy)
+
+
+def delete_video(video_id):
+    """Remove a video from the channel. Returns True, or raises.
+
+    Only used on the long-form reject path: an unlisted cut staged for review
+    and then turned down should not stay on the channel. Nothing else here
+    deletes anything, and nothing should — a published video is a public record
+    that we corrected rather than removed.
+    """
+    token = _access_token()
+    r = requests.delete(
+        f"https://www.googleapis.com/youtube/v3/videos?id={video_id}",
+        headers={"Authorization": f"Bearer {token}"}, timeout=60)
+    # 204 on success; 404 means it is already gone, which is the desired state.
+    if r.status_code not in (200, 204, 404):
+        raise YouTubePublishError(
+            f"Could not delete {video_id}: {r.status_code} {r.text[:300]}")
+    return True
+
+
 def format_chapters(chapters):
     """[(seconds, label), ...] -> the timestamp block YouTube parses.
 

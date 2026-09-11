@@ -260,6 +260,21 @@ if service == "thelivu-agent":
             log.error("IG token refresh failed: %s", e, exc_info=True)
             _sweep_failed("Instagram token refresh", e)
 
+        # Long-form gate 2, the Railway half. The video is already on YouTube,
+        # unlisted, uploaded by the worker box at render time — this only flips
+        # it public once Anil has watched it and tapped Post. One small HTTP
+        # call, no bytes, which is exactly why it lives here: the box with the
+        # video has no posting credentials and never will.
+        try:
+            from publishing.longform_build import publish_approved
+            result = publish_approved()
+            if result:
+                log.info("Long-form publish: %s", result)
+                _sweep_recovered("Long-form publish")
+        except Exception as e:
+            log.error("Long-form publish failed: %s", e, exc_info=True)
+            _sweep_failed("Long-form publish", e)
+
         try:
             from engine.agents.ig_insights import run_ig_sync, sync_due
             forced_ig = kv_get("force_ig_sync")

@@ -1633,9 +1633,21 @@ async def _handle_longform_post(query, queue_id):
 
 
 async def _handle_longform_drop(query, queue_id):
-    """Reject at either gate. A story can turn out wrong at any point."""
-    from shared.db import set_longform_status
-    set_longform_status(queue_id, "dropped")
+    """Reject at either gate. A story can turn out wrong at any point.
+
+    Goes through longform_build.drop() rather than writing the status
+    directly: by gate 2 there is an UNLISTED video sitting on the channel that
+    only exists to be reviewed, and a "no" that leaves it there is a no that
+    did not take.
+    """
+    try:
+        from publishing.longform_build import drop
+        drop(queue_id)
+    except Exception as e:
+        # The rejection must land even if YouTube is unreachable.
+        log.warning("longform drop #%s fell back to status-only: %s", queue_id, e)
+        from shared.db import set_longform_status
+        set_longform_status(queue_id, "dropped")
     try:
         await query.edit_message_reply_markup(reply_markup=None)
     except Exception:

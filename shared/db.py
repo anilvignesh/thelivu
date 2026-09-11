@@ -435,7 +435,18 @@ CREATE TABLE IF NOT EXISTS longform_queue (
     title       TEXT,
     reason      TEXT,
     reel_seconds REAL,
-    status      TEXT DEFAULT 'queued',   -- queued | drafted | published | dropped
+    -- queued -> scripted -> script_ok -> rendered -> posted (or dropped).
+    -- publishing/longform.py owns the legal moves; this column only stores them.
+    status      TEXT DEFAULT 'queued',
+    -- Where the two artefacts live. They are FILES, not columns: a 1,300-word
+    -- script and an eight-minute MP4 do not belong in a row, and both review
+    -- gates need to hand a human the thing itself, not a database id.
+    script_path TEXT,
+    video_path  TEXT,
+    -- Uploaded UNLISTED at render time so gate 2 can be watched on YouTube
+    -- itself rather than off a fileserver that would have to stream 200MB.
+    -- "Posting" is then a privacy flip, not a second upload.
+    youtube_video_id TEXT,
     queued_at   TIMESTAMP DEFAULT NOW(),
     decided_at  TIMESTAMP
 );
@@ -806,6 +817,9 @@ CREATE TABLE IF NOT EXISTS longform_queue (
     reason      TEXT,
     reel_seconds REAL,
     status      TEXT DEFAULT 'queued',
+    script_path TEXT,
+    video_path  TEXT,
+    youtube_video_id TEXT,
     queued_at   TEXT DEFAULT (datetime('now')),
     decided_at  TEXT
 );
@@ -978,6 +992,16 @@ def init_db():
                     conn.commit()
                 except Exception:
                     conn.rollback()  # column already exists
+            # The script and the rendered video (2026-09-11). longform_queue
+            # predates the renderer, so rows existed that recorded a story owed
+            # a long video with nowhere to put the video once it had one.
+            for col, defn in [("script_path", "TEXT"), ("video_path", "TEXT"),
+                              ("youtube_video_id", "TEXT")]:
+                try:
+                    cur.execute(f"ALTER TABLE longform_queue ADD COLUMN {col} {defn}")
+                    conn.commit()
+                except Exception:
+                    conn.rollback()  # column already exists
             for col, defn in [("notes", "TEXT"),
                               # YouTube Shorts cross-post (2026-08-16) — separate
                               # from ig_media_id/ig_permalink so each platform's
@@ -1076,6 +1100,12 @@ def init_db():
                               ("cache_read_tokens", "INTEGER DEFAULT 0")]:
                 try:
                     cur.execute(f"ALTER TABLE token_usage ADD COLUMN {col} {defn}")
+                except Exception:
+                    pass
+            for col, defn in [("script_path", "TEXT"), ("video_path", "TEXT"),
+                              ("youtube_video_id", "TEXT")]:
+                try:
+                    cur.execute(f"ALTER TABLE longform_queue ADD COLUMN {col} {defn}")
                 except Exception:
                     pass
         conn.commit()
@@ -3651,6 +3681,52 @@ def set_longform_status(queue_id, status):
         now = "NOW()" if _is_postgres() else "datetime('now')"
         cur.execute(f"UPDATE longform_queue SET status = {ph}, decided_at = {now} "
                     f"WHERE id = {ph}", (status, queue_id))
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
+def longform_item(queue_id):
+    """One queue row, or None. The renderer and both review gates need to read
+    an item by id — every other accessor here selects by status."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(f"SELECT * FROM longform_queue WHERE id = {ph}", (queue_id,))
+        rows = _fetchall(cur)
+        return rows[0] if rows else None
+    finally:
+        conn.close()
+
+
+def set_longform_artifact(queue_id, script_path=None, video_path=None,
+                          youtube_video_id=None):
+    """Record where the script or the video landed.
+
+    Deliberately separate from set_longform_status: the file must be on disk
+    BEFORE the state says it is, or a crash between the two leaves an item
+    marked `rendered` with nothing to watch.
+    """
+    sets, vals = [], []
+    ph = "%s" if _is_postgres() else "?"
+    if script_path is not None:
+        sets.append(f"script_path = {ph}")
+        vals.append(str(script_path))
+    if video_path is not None:
+        sets.append(f"video_path = {ph}")
+        vals.append(str(video_path))
+    if youtube_video_id is not None:
+        sets.append(f"youtube_video_id = {ph}")
+        vals.append(str(youtube_video_id))
+    if not sets:
+        return 0
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(f"UPDATE longform_queue SET {', '.join(sets)} WHERE id = {ph}",
+                    (*vals, queue_id))
         conn.commit()
         return cur.rowcount
     finally:

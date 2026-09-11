@@ -329,6 +329,29 @@ def run_once():
         for c in candidates:
             _build_one(c["id"], c.get("slug"))
 
+    # Long-form, when there is any. Runs LAST in the pass on purpose: a
+    # 1,300-word script is about an hour of the same voice server every reel
+    # needs, and the daily format is the one that must not slip. Occasional by
+    # design — most passes find nothing here (Anil, 2026-09-11: "if we find
+    # something substantial which needs a long video we do that").
+    try:
+        from publishing.longform_build import render_pending
+        for res in render_pending():
+            did_something = True
+            if res.get("ok"):
+                log.info("long-form #%s staged for review: %s",
+                         res["id"], res.get("url"))
+            else:
+                log.warning("long-form #%s did not stage: %s",
+                            res["id"], res.get("error"))
+                _tg_post_text(
+                    f"⚠️ Long-form #{res['id']} did not stage for review.\n\n"
+                    f"{str(res.get('error'))[:300]}\n\n"
+                    f"The render is kept, so a retry does not re-narrate it. "
+                    f"Next poll will try again.")
+    except Exception:
+        log.exception("long-form pass failed — reels are unaffected")
+
     if not did_something:
         log.info("nothing to build")
 

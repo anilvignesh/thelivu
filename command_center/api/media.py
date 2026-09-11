@@ -377,7 +377,13 @@ def longform_action(request, data):
 
     try:
         if action == "drop":
-            set_longform_status(qid, longform.DROPPED)
+            # Via longform_build so a rejected gate-2 item's unlisted upload is
+            # removed from the channel too, not just marked dropped here.
+            try:
+                from publishing.longform_build import drop
+                drop(qid)
+            except Exception:
+                set_longform_status(qid, longform.DROPPED)
             return J({"ok": True, "status": longform.DROPPED})
         if action == "script_ok":
             longform.advance(qid, longform.SCRIPTED, longform.SCRIPT_OK, by="dashboard")
