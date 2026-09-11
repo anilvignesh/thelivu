@@ -87,6 +87,20 @@ if service == "thelivu-agent":
         except Exception as e:
             log.warning("Notification send failed: %s", e)
 
+    # A persistent failure must be reported once, not once per retry. The
+    # Instagram token expired on 2026-09-10 and the sync retries about every two
+    # minutes, so the owner's phone took an identical alert every two minutes for
+    # hours. That is worse than silence: a hundred identical alerts train you to
+    # swipe alerts away, and the next one that matters gets swiped with them.
+    _SWEEP_REMIND_AFTER = timedelta(hours=6)
+
+    def _sweep_signature(exc):
+        """What makes two failures 'the same'. Digits are stripped because the
+        expired-token message embeds a live clock — "The current time is ..." —
+        so every retry looked like a brand new error."""
+        import re as _re
+        return _re.sub(r"\d+", "#", f"{type(exc).__name__}:{exc}")[:200]
+
     def _sweep_failed(what, exc):
         """A sweep that raised must leave a row, not just a Railway log line.
 
@@ -94,16 +108,71 @@ if service == "thelivu-agent":
         is correct — one broken sweep must not take the tick down. But the owner
         never reads Railway logs, so a sweep that raises every week is invisible
         from the dashboard and looks exactly like a sweep that had nothing to do.
-        `_notify` records before it posts, so this is the cheap way to make a
-        failure land somewhere the command centre can show it.
+
+        Repeats of the SAME failure are counted, not re-sent, and a reminder goes
+        out at most every six hours carrying the count — which is more useful
+        than the first alert was, because "failing for 6 hours, 180 times" is the
+        thing worth knowing.
         """
+        sig = _sweep_signature(exc)
+        state_key = f"sweep_fail_{what.replace(' ', '_').lower()}"
         try:
-            from engine.agents.orchestrator import _notify
-            _notify(f"⚠️ {what} failed: {exc}\n"
-                    f"The tick carried on; the sweep will be retried on its normal "
-                    f"cadence. Railway logs have the traceback.")
+            raw = kv_get(state_key) or ""
+            prev_sig, first_iso, last_iso, count = "", "", "", 0
+            if raw:
+                parts = raw.split("|", 3)
+                if len(parts) == 4:
+                    prev_sig, first_iso, last_iso, cnt = parts
+                    count = int(cnt or 0)
+            now = datetime.now(timezone.utc)
+
+            if prev_sig != sig:
+                first_iso, count = now.isoformat(), 0      # a genuinely new failure
+            count += 1
+
+            due = True
+            if prev_sig == sig and last_iso:
+                try:
+                    due = now - datetime.fromisoformat(last_iso) >= _SWEEP_REMIND_AFTER
+                except Exception:
+                    due = True
+
+            if due:
+                since = ""
+                if count > 1 and first_iso:
+                    try:
+                        mins = int((now - datetime.fromisoformat(first_iso)).total_seconds() // 60)
+                        since = (f"\nThis has now failed <b>{count} times</b> over "
+                                 f"{mins // 60}h {mins % 60}m — it is not transient.")
+                    except Exception:
+                        since = f"\nThis has now failed {count} times."
+                from engine.agents.orchestrator import _notify
+                _notify(f"⚠️ {what} failed: {exc}{since}\n"
+                        f"The tick carried on; the sweep will be retried on its normal "
+                        f"cadence. Railway logs have the traceback.")
+                last_iso = now.isoformat()
+
+            kv_set(state_key, f"{sig}|{first_iso}|{last_iso}|{count}")
         except Exception as e:
             log.warning("Could not report the %s failure: %s", what, e)
+
+    def _sweep_recovered(what):
+        """Clear a sweep's failure state, and say so if it had been failing.
+
+        Without this a fixed problem is silent, and the owner has no way to tell
+        'I fixed it' from 'the alert cooldown has not expired yet'."""
+        state_key = f"sweep_fail_{what.replace(' ', '_').lower()}"
+        try:
+            raw = kv_get(state_key) or ""
+            if not raw:
+                return
+            kv_set(state_key, "")
+            count = int(raw.split("|", 3)[3] or 0) if raw.count("|") == 3 else 0
+            if count > 1:
+                from engine.agents.orchestrator import _notify
+                _notify(f"✅ {what} is working again after {count} failed attempts.")
+        except Exception as e:
+            log.warning("Could not clear the %s failure state: %s", what, e)
 
     while True:
         now_utc = datetime.now(timezone.utc)
@@ -174,6 +243,7 @@ if service == "thelivu-agent":
                 kv_set("force_ig_sync", "")
             if forced_ig or sync_due(now_utc):
                 log.info("Instagram sync: %s", run_ig_sync())
+                _sweep_recovered("Instagram sync")
         except Exception as e:
             log.error("Instagram sync failed: %s", e, exc_info=True)
             _sweep_failed("Instagram sync", e)
@@ -189,6 +259,7 @@ if service == "thelivu-agent":
                 kv_set("force_yt_sync", "")
             if forced_yt or yt_sync_due(now_utc):
                 log.info("YouTube sync: %s", run_yt_sync())
+                _sweep_recovered("YouTube sync")
         except Exception as e:
             log.error("YouTube sync failed: %s", e, exc_info=True)
             _sweep_failed("YouTube sync", e)
