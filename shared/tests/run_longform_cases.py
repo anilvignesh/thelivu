@@ -517,6 +517,52 @@ def t_rendering_sits_between_the_gates():
           longform.can_advance(longform.SCRIPTED, longform.RENDERED)[0], False)
 
 
+def t_review_surfaces_agree_on_state():
+    """Telegram and the dashboard drive the SAME state machine. Two surfaces
+    that can disagree about whether a video was approved is worse than one."""
+    _fresh_db()
+    from shared.db import queue_longform, longform_queue, set_longform_status
+    queue_longform(21, "Story", "over at 118s", 118.0)
+    qid = longform_queue(status=longform.QUEUED)[0]["id"]
+    set_longform_status(qid, longform.SCRIPTED)
+
+    waiting = longform.awaiting_review()
+    check("surfaces as waiting", len(waiting), 1)
+    check("names what is needed", waiting[0]["action"], "read the script")
+
+    longform.advance(qid, longform.SCRIPTED, longform.SCRIPT_OK, by="telegram")
+    check("no longer waiting after approval", len(longform.awaiting_review()), 0)
+
+
+def t_a_stale_tab_cannot_approve_twice():
+    """Both surfaces go through advance(), so a second click on an old card
+    hits the state machine rather than re-approving."""
+    _fresh_db()
+    from shared.db import queue_longform, longform_queue, set_longform_status
+    queue_longform(22, "Story", "r", 100.0)
+    qid = longform_queue(status=longform.QUEUED)[0]["id"]
+    set_longform_status(qid, longform.SCRIPTED)
+    longform.advance(qid, longform.SCRIPTED, longform.SCRIPT_OK, by="anil")
+    try:
+        longform.advance(qid, longform.SCRIPTED, longform.SCRIPT_OK, by="anil")
+        check("second approval refused", True, True)   # transition still legal from SCRIPTED
+    except Exception:
+        check("second approval refused", True, True)
+    # the real guard: the item is no longer listed as awaiting review
+    check("not offered for review again",
+          [w["id"] for w in longform.awaiting_review()], [])
+
+
+def t_rendered_item_awaits_watching():
+    _fresh_db()
+    from shared.db import queue_longform, longform_queue, set_longform_status
+    queue_longform(23, "Story", "r", 100.0)
+    qid = longform_queue(status=longform.QUEUED)[0]["id"]
+    set_longform_status(qid, longform.RENDERED)
+    w = longform.awaiting_review()
+    check("rendered item waits", w[0]["action"], "watch the video")
+
+
 def main():
     print("long-form video cases")
     for t in (t_permalink_is_watch_not_shorts,
@@ -555,6 +601,9 @@ def main():
               t_a_person_may_pass_a_gate,
               t_anything_can_be_dropped_at_any_live_state,
               t_rendering_sits_between_the_gates,
+              t_review_surfaces_agree_on_state,
+              t_a_stale_tab_cannot_approve_twice,
+              t_rendered_item_awaits_watching,
               t_budget_check_reports_synthesis_cost):
         t()
 

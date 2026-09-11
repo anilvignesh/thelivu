@@ -1231,6 +1231,20 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == "investigate" and payload == "scout":
         await _handle_investigate_scout(query)
         return
+    if action in ("lfscript", "lfpost", "lfdrop"):
+        try:
+            qid = int(payload)
+        except ValueError:
+            await query.message.reply_text("Bad long-form ID.")
+            return
+        if action == "lfscript":
+            await _handle_longform_script_ok(query, qid)
+        elif action == "lfpost":
+            await _handle_longform_post(query, qid)
+        else:
+            await _handle_longform_drop(query, qid)
+        return
+
     if action == "digadv":
         try:
             kv_set("advance_dig_id", str(int(payload)))
@@ -1575,6 +1589,59 @@ async def _handle_reel_approve(query, reel_id, reel):
         await query.message.reply_text(
             f"Instagram publish failed for reel #{reel_id}:\n{res.get('error')}\n\n"
             "Often a transient Meta error — tap Retry.", reply_markup=retry_kb)
+
+
+async def _handle_longform_script_ok(query, queue_id):
+    """GATE 1 — Anil has READ the script against the record.
+
+    This is the gate the pipeline may never pass for itself: a script can be
+    wrong about a fact in a way no amount of watching the finished video
+    reveals. Approving here is what releases ~an hour of narration on the
+    reel-worker's only voice server, which is why it is not spent earlier.
+    """
+    from publishing import longform
+    try:
+        longform.advance(queue_id, longform.SCRIPTED, longform.SCRIPT_OK, by="telegram")
+    except Exception as e:
+        await query.message.reply_text(f"Could not approve: {e}")
+        return
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    await query.message.reply_text(
+        f"✅ Script #{queue_id} approved. Rendering is released — it runs "
+        f"overnight and comes back here to watch before anything is posted.")
+    log.info("Long-form script #%s approved", queue_id)
+
+
+async def _handle_longform_post(query, queue_id):
+    """GATE 2 — Anil has WATCHED the video. This is the only path to YouTube."""
+    from publishing import longform
+    try:
+        longform.advance(queue_id, longform.RENDERED, longform.POSTED, by="telegram")
+    except Exception as e:
+        await query.message.reply_text(f"Could not post: {e}")
+        return
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    kv_set("post_longform_id", str(queue_id))
+    await query.message.reply_text(f"📤 Long-form #{queue_id} queued to publish on YouTube.")
+    log.info("Long-form #%s approved for posting", queue_id)
+
+
+async def _handle_longform_drop(query, queue_id):
+    """Reject at either gate. A story can turn out wrong at any point."""
+    from shared.db import set_longform_status
+    set_longform_status(queue_id, "dropped")
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    await query.message.reply_text(f"Long-form #{queue_id} dropped.")
+    log.info("Long-form #%s dropped", queue_id)
 
 
 async def _handle_reel_kill(query, reel_id):

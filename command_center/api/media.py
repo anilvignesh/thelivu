@@ -337,6 +337,61 @@ def bio_modify(request, data):
     return J({"ok": True})
 
 
+# ---------------------------------------------------------------------------
+# Long-form review — the same two gates as Telegram, on the dashboard.
+#
+# Deliberately the SAME state machine and the same shared helpers, not a
+# parallel path: the reel side already learned that lesson, which is why
+# posting goes through one post_reel_run no matter which surface asked. Two
+# surfaces that can disagree about whether a video was approved is worse than
+# one surface.
+# ---------------------------------------------------------------------------
+
+@endpoint
+def list_longform(request, data):
+    """Everything waiting on a human, newest first."""
+    from publishing.longform import awaiting_review
+    return J({"ok": True, "items": awaiting_review()})
+
+
+@endpoint
+def longform_action(request, data):
+    """Approve or drop at either gate.
+
+    `action` is script_ok | post | drop. The state machine refuses anything
+    illegal, so a stale dashboard tab cannot approve the same item twice or
+    skip a gate.
+    """
+    from publishing import longform
+    from shared.db import set_longform_status, longform_queue
+    qid = int(data.get("id") or 0)
+    action = (data.get("action") or "").strip()
+    if not qid:
+        return J({"ok": False, "error": "missing id"}, 400)
+
+    row = next((r for r in (longform_queue(status=longform.SCRIPTED)
+                            + longform_queue(status=longform.RENDERED))
+                if r["id"] == qid), None)
+    if not row:
+        return J({"ok": False, "error": "not awaiting review"}, 404)
+
+    try:
+        if action == "drop":
+            set_longform_status(qid, longform.DROPPED)
+            return J({"ok": True, "status": longform.DROPPED})
+        if action == "script_ok":
+            longform.advance(qid, longform.SCRIPTED, longform.SCRIPT_OK, by="dashboard")
+            return J({"ok": True, "status": longform.SCRIPT_OK})
+        if action == "post":
+            longform.advance(qid, longform.RENDERED, longform.POSTED, by="dashboard")
+            from shared.db import kv_set
+            kv_set("post_longform_id", str(qid))
+            return J({"ok": True, "status": longform.POSTED})
+    except Exception as e:
+        return J({"ok": False, "error": str(e)}, 400)
+    return J({"ok": False, "error": f"unknown action {action!r}"}, 400)
+
+
 routes = [
     Route("/carousels", list_carousels, methods=["GET"]),
     Route("/carousels", make_carousel, methods=["POST"]),
@@ -349,6 +404,8 @@ routes = [
     Route("/reels/{reel_id:int}/action", reel_action, methods=["POST"]),
     Route("/reels/{reel_id:int}/post", post_reel, methods=["POST"]),
     Route("/reels/{reel_id:int}.mp4", reel_mp4, methods=["GET"]),
+    Route("/longform", list_longform, methods=["GET"]),
+    Route("/longform/{lf_id:int}/action", longform_action, methods=["POST"]),
     Route("/bio", bio_list, methods=["GET"]),
     Route("/bio", bio_add, methods=["POST"]),
     Route("/bio/{link_id:int}", bio_modify, methods=["DELETE", "PATCH"]),

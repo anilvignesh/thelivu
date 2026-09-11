@@ -509,3 +509,77 @@ def slot_decision(candidates, now, assess=None):
     deadline = build_deadline(slot, chosen.get("word_count", 0))
     return chosen, (f"publish {slot.date()}: {chosen['title'][:60]} — "
                     f"rendering must start by {deadline:%Y-%m-%d %H:%M}")
+
+
+# ---------------------------------------------------------------------------
+# Review surfaces
+#
+# Both gates reach Anil the same way the reel pipeline already does — a
+# Telegram card with buttons, and a row the dashboard can list. Reusing that
+# shape rather than inventing a surface means there is one place to look for
+# "what is waiting on me", not two.
+# ---------------------------------------------------------------------------
+
+def notify_script_for_review(queue_id, parsed, blockers=None):
+    """GATE 1 card: the script, its trigger, its sources, and what is unproven.
+
+    The blockers matter more than the script here. A reviewer reading 1,300
+    words of confident prose will not spontaneously remember that one figure
+    came from a newspaper rather than the record — so the card says it, above
+    the fold, every time.
+    """
+    from engine.agents.orchestrator import _notify_card
+    words = parsed.get("word_count", 0)
+    audio, synth = synthesis_estimate(words)
+    chapters = parsed.get("chapters", [])
+
+    lines = [
+        f"📝 <b>Long-form script #{queue_id} — ready to read</b>",
+        f"<b>{parsed.get('title','(untitled)')}</b>",
+        "",
+        f"Why long-form: {parsed.get('why_long_form','(not stated)')}",
+        f"{words} words · ~{audio/60:.0f} min · ~{synth/60:.0f} min to narrate",
+        f"{len(chapters)} chapters:",
+    ]
+    lines += [f"  {c['n']}. {c['title']}" for c in chapters]
+    if parsed.get("open_loop"):
+        lines += ["", f"Opens: {parsed['open_loop']}"]
+    if blockers:
+        lines += ["", "⚠️ <b>Not fully sourced:</b>"]
+        lines += [f"  • {b}" for b in blockers[:5]]
+    else:
+        lines += ["", "✅ Every claim meets its evidence bar."]
+    lines += ["", "Approving releases ~an hour of narration. Read it first."]
+    _notify_card("📝", f"Long-form script #{queue_id} — ready to read",
+                 body="\n".join(lines[1:]),
+                 reply_markup={"inline_keyboard": [[
+                     {"text": "✅ Script OK — render it",
+                      "callback_data": f"lfscript_{queue_id}"},
+                     {"text": "✗ Drop", "callback_data": f"lfdrop_{queue_id}"},
+                 ]]})
+
+
+def notify_video_for_review(queue_id, title, video_url, minutes=None):
+    """GATE 2 card: the finished video, before anything reaches YouTube."""
+    from engine.agents.orchestrator import _notify_card
+    dur = f" · ~{minutes:.0f} min" if minutes else ""
+    _notify_card("🎬", f"Long-form #{queue_id} rendered",
+                 body=(f"<b>{title}</b>{dur}\n\n{video_url}\n\n"
+                       "Watch it before posting. This is the only path to YouTube."),
+                 reply_markup={"inline_keyboard": [[
+                     {"text": "📤 Post to YouTube",
+                      "callback_data": f"lfpost_{queue_id}"},
+                     {"text": "✗ Drop", "callback_data": f"lfdrop_{queue_id}"},
+                 ]]})
+
+
+def awaiting_review():
+    """Everything sitting on a human, for the dashboard's 'waiting on me' view."""
+    from shared.db import longform_queue
+    out = []
+    for state, what in ((SCRIPTED, "read the script"), (RENDERED, "watch the video")):
+        for r in longform_queue(status=state):
+            out.append({"id": r["id"], "title": r.get("title") or f"run #{r.get('run_id')}",
+                        "state": state, "action": what,
+                        "since": str(r.get("queued_at") or "")})
+    return out
