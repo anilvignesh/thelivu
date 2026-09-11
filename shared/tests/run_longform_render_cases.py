@@ -393,6 +393,40 @@ def t_short_connectives_do_not_become_frames():
           ["The ministry told Parliament this in writing."])
 
 
+def t_a_unit_with_no_evidence_still_prefers_its_own_words():
+    """The bug that survived the first fix and shipped anyway.
+
+    `plan_assets` returns evidence only. A leftover line in render() turned an
+    empty result into `[{"kind": "image"}]` BEFORE with_filler ran, so every
+    unit without a figure or a record had a picture injected ahead of the
+    ordering that was supposed to demote pictures. The close declares no
+    CLOSE_FIGURE, so it took that path every time — which is why the closing
+    frame was still a palace after the fix that was meant to stop exactly that.
+
+    Asserted end to end rather than on with_filler alone, because with_filler
+    was already correct: the defect was in what render() handed it.
+    """
+    parsed = longform.parse_script(
+        "TITLE: t\nCOLD_OPEN: The minister said the highway was world class.\n"
+        "COLD_OPEN_IMAGE: a desk\n"
+        "CHAPTER 1 TITLE: A\nCHAPTER 1: Forty of fifty-nine deficiencies were "
+        "closed by the contractor rectifying the work.\n"
+        "CHAPTER 1 IMAGE 1: a ledger\n"
+        "CLOSE: The register shows what action was taken. It does not show what "
+        "money arrived. That part has never been published.\n"
+        "CLOSE_IMAGE: a filing drawer\n")
+
+    for key in ("cold_open", "close"):
+        unit = {"figures": parsed.get(f"{key}_figures") or [],
+                "images": parsed.get(f"{key}_images") or []}
+        assets = lfr.plan_assets(unit, fallback_image=parsed.get(f"{key}_image"))
+        check(f"{key}: no evidence declared", assets, [])
+        filled = lfr.with_filler(assets, parsed[key], want=1,
+                                 images=unit["images"])
+        check(f"{key}: the frame is its own words",
+              [a["kind"] for a in filled], ["quote"])
+
+
 def t_a_picture_never_outranks_the_words():
     """The bug the fourth sample made obvious. The close declares a CLOSE_IMAGE
     and earns exactly ONE shot, so the picture beat the words on the single most
@@ -1047,6 +1081,7 @@ def main():
               t_the_filler_is_a_line_of_narration_not_a_generated_scene,
               t_quotes_track_what_is_being_said,
               t_short_connectives_do_not_become_frames,
+              t_a_unit_with_no_evidence_still_prefers_its_own_words,
               t_a_picture_never_outranks_the_words,
               t_a_unit_can_always_fill_its_shots,
               t_only_licences_attribution_settles_are_accepted,

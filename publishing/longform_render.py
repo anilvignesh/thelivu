@@ -959,8 +959,12 @@ def render(parsed, out_mp4, work_dir=None, voice=None, illustrate=True,
                     "images": parsed.get(f"{key}_images") or []}
             fallback = parsed.get(f"{key}_image")
         assets = plan_assets(unit, fallback_image=fallback)
-        if not assets:
-            assets = [{"kind": "image", "prompt": None}]
+        # NO "if not assets: use an image" here. That line survived the change
+        # that made plan_assets return evidence only, and it silently undid the
+        # whole ordering: any unit without a figure or a record had a picture
+        # injected before with_filler ever ran, so the close — which declares no
+        # CLOSE_FIGURE — took that path every single time. with_filler already
+        # guarantees at least one frame.
         # Quote frames fill whatever the writer did not declare, and a picture
         # gets the last slot only in a unit long enough to spare one. Before
         # 2026-09-11 the filler was a generated illustration and they kept being
