@@ -191,10 +191,71 @@ start at 0:00, have three or more entries, and ascend — otherwise YouTube rend
 none at all. Estimate timestamps from the word budget at roughly **150 spoken
 words per minute**; the renderer corrects them against the real audio.
 
+## What goes on screen — and why illustration is the least of it
+
+A long video is carried by **evidence the viewer can read**, not by pictures of
+the idea of evidence. Anil, 2026-09-11, after watching the first rendered
+sample: *"this only has generated images, which are not great... we need to
+print out numbers, facts, screenshots, evidences. generated images like these
+won't work."*
+
+There are three kinds of frame, and they are not equal:
+
+| line | frame | use it for |
+|---|---|---|
+| `FIGURE` | the number, drawn huge, with its label and its source | every figure the argument turns on |
+| `RECORD` | the real page of the real document, with the quoted line beside it | every claim a sceptic would want to see for themselves |
+| `IMAGE` | a generated symbolic scene | the connective tissue between those |
+
+When a chapter declares more than its narration has room for, **the renderer
+drops IMAGE lines first and keeps the figures and records.** So do not ration
+FIGURE and RECORD lines to make space for illustrations; it is the other way
+round.
+
+Within a kind, they appear in the order you write them. The renderer has no
+word-level timing, so **list your figures in the order the narration says them**
+— that is the only alignment available.
+
+### FIGURE lines
+
+```
+CHAPTER 1 FIGURE: <the number, as it should appear> | <what it is> | <the source>
+```
+
+```
+CHAPTER 1 FIGURE: ₹2,732 crore | imposed in penalties on highway contractors | Lok Sabha Unstarred Question 843, 23 July 2026
+CHAPTER 1 FIGURE: ₹780 crore | actually recovered — under 29% | Lok Sabha Unstarred Question 843, 23 July 2026
+```
+
+Write the value the way a reader should see it — digits, commas and ₹ — even
+though the narration spells it out for the voice. The two are different jobs.
+
+The number is stated explicitly rather than lifted out of your prose by the
+renderer, and that is deliberate: a figure a regex scraped from a sentence is a
+figure nobody checked, rendered at 200pt in the middle of the screen. **The
+third field is not optional.** A number with no source on screen is a poster.
+
+**One to three figures per chapter.** A chapter with five is a chapter that
+should be two.
+
+### Never make a picture do a number's job
+
+An IMAGE line **cannot contain legible text** — brand rule, and diffusion models
+are bad at lettering anyway. So an IMAGE prompt that depends on words being
+readable produces neither the words nor a usable picture: asked for *"a large
+invoice stamped PAID IN FULL"*, the model returned a broken column on cracked
+ground, because the only distinguishing feature of the request had been stripped
+out of it.
+
+If the point is a word or a number, it is a FIGURE or a RECORD. IMAGE lines
+describe **objects, space and scale**: a row of niches, a road as a measuring
+tape, a drawer left open in an empty room.
+
 ## Illustration
 
-**Two to three IMAGE lines per chapter — roughly one per 20–25 seconds of
-narration.** That is the whole decision, and it is arithmetic rather than taste:
+**One to three IMAGE lines per chapter, AFTER the figures and records are
+written — roughly one frame per 20-25 seconds of narration across all three
+kinds.** That is the whole decision, and it is arithmetic rather than taste:
 a 1,300-word script runs about nine minutes, so one image per chapter leaves
 each on screen for **58 seconds**, against roughly 15 in a 90-second reel. Four
 times the dwell of the format the audience is used to reads as a stalled video,
@@ -281,7 +342,8 @@ COLD_OPEN_IMAGE: <one-sentence conceptual illustration>
 OPEN_LOOP: <the specific unresolved question the cold open raises, in one line. The close must answer this by name, or state what would settle it. Never spoken — it is the contract the script holds itself to.>
 CHAPTER 1 TITLE: <4-8 words, plain>
 CHAPTER 1: <spoken lines, 150-300 words>
-CHAPTER 1 IMAGE 1: <one-sentence conceptual illustration, or the document to hold on screen>
+CHAPTER 1 FIGURE: <the number as it should be READ> | <what it is> | <the source>   (one to three; the source field is required)
+CHAPTER 1 IMAGE 1: <one-sentence conceptual illustration — objects, space and scale, never words>
 CHAPTER 1 IMAGE 2: <the chapter's second beat — a different move, not another angle on the first>
 CHAPTER 1 IMAGE 3: <optional third, if the chapter runs long>
 CHAPTER 1 RECORD: <document description> | <url> | <exact phrase the page must contain>   (optional; use wherever the chapter turns on a specific figure or wording)

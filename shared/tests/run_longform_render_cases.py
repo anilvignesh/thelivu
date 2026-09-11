@@ -88,6 +88,7 @@ COLD_OPEN_IMAGE: A ribbon-cutting scissors over fresh tarmac.
 
 CHAPTER 1 TITLE: The register
 CHAPTER 1: Forty of fifty-nine deficiencies were closed by the contractor rectifying the work, and only one of them applied the five per cent rule. The register is public and it has been public the whole time.
+CHAPTER 1 FIGURE: 40 of 59 | closed by the contractor rectifying the work | MoRTH register
 CHAPTER 1 IMAGE 1: A ledger open on a desk.
 CHAPTER 1 IMAGE 2: A rubber stamp resting beside an unsigned page.
 
@@ -122,10 +123,13 @@ def t_shots_never_exceed_the_pictures_available():
 
 
 def t_the_narration_not_the_prompt_count_sets_the_budget():
-    # Three prompts but only 30 seconds: the third would be an eight-second
-    # flash, so it is dropped rather than squeezed in.
-    check("30s with three images", lfr._shot_count(30.0, 3), 2)
-    check("40s with three images", lfr._shot_count(40.0, 3), 3)
+    # The floor moved from 12s to 8s when figures and records joined the
+    # vocabulary: a number or a quoted line is READ, and four or five seconds is
+    # enough for one where a scene needs dwelling on. So 30 seconds now buys
+    # three shots where it used to buy two.
+    check("20s with three assets", lfr._shot_count(20.0, 3), 2)
+    check("30s with three assets", lfr._shot_count(30.0, 3), 3)
+    check("a 10s unit still holds one", lfr._shot_count(10.0, 3), 1)
 
 
 def t_the_cap_holds_however_long_the_chapter_runs():
@@ -196,6 +200,60 @@ def t_frames_are_landscape():
     f = lfr.draw_story_frame(g, "Forty of fifty-nine deficiencies.",
                              os.path.join(d, "f.png"), chapter_label="The register")
     check("story frame is 1920x1080", Image.open(f).size, (1920, 1080))
+
+
+# --------------------------------------------------------- the frame vocabulary
+#
+# Anil, 2026-09-11, after watching the first sample: "this only has generated
+# images, which are not great... we need to print out numbers, facts,
+# screenshots, evidences. generated images like these won't work."
+
+def t_hard_evidence_outranks_illustration():
+    """When a chapter declares more than its narration has room for, the
+    illustrations are what get dropped — never the figure or the document."""
+    chapter = {"figures": [{"value": "40 of 59"}, {"value": "1"}],
+               "records": [{"url": "https://example.gov.in/a.pdf"}],
+               "images": ["a ledger", "a stamp", "a door"]}
+    kinds = [a["kind"] for a in lfr.plan_assets(chapter)]
+    check("declared order within a kind, evidence first", kinds,
+          ["figure", "figure", "record", "image", "image", "image"])
+    # A 30-second chapter buys three shots; those three must be the hard ones.
+    k = lfr._shot_count(30.0, len(kinds))
+    check("a short chapter keeps the evidence", kinds[:k],
+          ["figure", "figure", "record"])
+
+
+def t_a_chapter_with_nothing_declared_still_gets_a_frame():
+    check("falls back to one image",
+          [a["kind"] for a in lfr.plan_assets({}, fallback_image="a desk")],
+          ["image"])
+    check("and to a blank image with no fallback either",
+          [a["kind"] for a in lfr.plan_assets({})], [])
+
+
+def t_a_figure_is_drawn_not_generated():
+    """The number on screen has to be the number the script declared and a
+    reviewer approved — which a generated picture can neither guarantee nor,
+    under BRAND.md, legibly contain."""
+    import tempfile as _t
+    from pathlib import Path as _P
+    from PIL import Image
+
+    d = _P(_t.mkdtemp())
+    out = lfr.draw_data_card(
+        {"value": "\u20b92,732 crore", "label": "imposed in penalties",
+         "source": "Lok Sabha Q843"}, d / "fig.png", chapter_label="Arithmetic")
+    check("the data card is landscape", Image.open(out).size, (1920, 1080))
+
+
+def t_a_record_that_cannot_be_fetched_demotes_instead_of_failing():
+    """A source that is down must cost the frame its evidence, not cost the
+    render an hour of voice already spent."""
+    check("unreachable record returns None",
+          lfr._render_record({"url": "https://nonexistent.invalid/x.pdf"},
+                             tempfile.mkdtemp(), "s"), None)
+    check("a record with no url returns None",
+          lfr._render_record({"url": ""}, tempfile.mkdtemp(), "s"), None)
 
 
 # --------------------------------------------------------------- end to end
@@ -289,16 +347,17 @@ def t_the_chapters_were_actually_cut(state):
     A renderer that silently uses only the first image still produces a valid
     file of the right length, so nothing else in this suite would notice.
 
-    Both chapters here run ~30s, which buys two 12-second shots and not three —
-    so chapter 2's third image goes unused, and that is the intended answer:
-    the shot budget comes from the narration, not from how many prompts the
-    writer happened to supply.
+    Both chapters here run ~30s, which at the 8-second floor buys three shots.
+    Chapter 1 declares a figure and two images; chapter 2 declares three images.
+    The shot budget comes from the narration, not from how many assets the
+    writer happened to supply — a chapter with eight IMAGE lines and twelve
+    seconds of speech still gets one frame.
     """
     res = state["res"]
     if not res.get("ok"):
         return
-    # cold open (1) + card + 2 + card + 2 + close (1) = 8
-    check("shot count", res.get("shots"), 8)
+    # cold open (1) + card + 3 + card + 3 + close (1) = 10
+    check("shot count", res.get("shots"), 10)
 
 
 # ------------------------------------------------------- the chain around it
@@ -605,9 +664,15 @@ def t_a_chapter_with_no_record_is_flagged():
 
     parsed = longform.parse_script(SCRIPT)
     flags = mechanical_blockers(parsed)
-    # SCRIPT carries no RECORD lines at all, so every chapter is flagged.
+    # SCRIPT carries no RECORD lines at all, so every chapter is flagged for that.
     check("every recordless chapter flagged",
-          sum(1 for f in flags if f.startswith("Chapter")), len(parsed["chapters"]))
+          sum(1 for f in flags if "cites no record" in f), len(parsed["chapters"]))
+    # Chapter 2 states figures and declares no FIGURE line — the specific
+    # failure the first rendered sample had. Chapter 1 declares one, so it is
+    # flagged for the missing record only.
+    unshown = [f for f in flags if "puts none on screen" in f]
+    check("the chapter that shows no figure is named",
+          [f.startswith("Chapter 2 ") for f in unshown], [True])
     check("the missing WHY_LONG_FORM is flagged",
           any("WHY_LONG_FORM" in f for f in flags), True)
 
@@ -657,7 +722,11 @@ def main():
               t_the_narration_not_the_prompt_count_sets_the_budget,
               t_the_cap_holds_however_long_the_chapter_runs,
               t_frames_are_landscape,
-              t_illustrations_are_asked_for_in_the_shape_they_are_shown_in):
+              t_illustrations_are_asked_for_in_the_shape_they_are_shown_in,
+              t_hard_evidence_outranks_illustration,
+              t_a_chapter_with_nothing_declared_still_gets_a_frame,
+              t_a_figure_is_drawn_not_generated,
+              t_a_record_that_cannot_be_fetched_demotes_instead_of_failing):
         t()
     for t in (t_the_whole_chain_renders,
               t_the_file_is_as_long_as_the_plan_says,

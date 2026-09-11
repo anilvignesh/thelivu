@@ -222,6 +222,28 @@ def parse_script(text):
             ch.setdefault("images", []).append(m.group(3).strip())
             ch["image"] = ch["images"][0]
             continue
+        # "CHAPTER 3 FIGURE: 2,732 crore | imposed in penalties, 2022-25 | LS Q843"
+        #
+        # The number goes on screen as TYPE, drawn by us, not as a generated
+        # picture. Anil, 2026-09-11, after watching the first sample: "generated
+        # images like these won't work... we need to print out numbers, facts,
+        # screenshots, evidences."
+        #
+        # Explicit rather than scraped out of the narration on purpose. A figure
+        # lifted from prose by a regex is a figure nobody checked, rendered at
+        # 200pt in the middle of the screen — the single worst place in the whole
+        # system to be wrong. The writer states it, and it is reviewable at gate 1
+        # against the source named in the same line.
+        m = re.match(r"^\s*CHAPTER\s+(\d+)\s+FIGURE\s*:\s*(.+)$", line, re.I)
+        if m:
+            bits = [b.strip() for b in m.group(2).split("|")]
+            if bits and bits[0]:
+                chapters.setdefault(int(m.group(1)), {}).setdefault("figures", []).append({
+                    "value": bits[0],
+                    "label": bits[1] if len(bits) > 1 else "",
+                    "source": bits[2] if len(bits) > 2 else "",
+                })
+            continue
         m = re.match(r"^\s*CHAPTER\s+(\d+)\s+RECORD\s*:\s*(.+)$", line, re.I)
         if m:
             # "description | url | phrase the page must contain"
@@ -239,7 +261,8 @@ def parse_script(text):
     out["chapters"] = [
         {"n": n, "title": c.get("title", f"Chapter {n}"),
          "text": c.get("text", ""), "image": c.get("image", ""),
-         "images": c.get("images", []), "records": c.get("records", [])}
+         "images": c.get("images", []), "records": c.get("records", []),
+         "figures": c.get("figures", [])}
         for n, c in sorted(chapters.items()) if c.get("text")
     ]
     out["word_count"] = spoken_words(text)

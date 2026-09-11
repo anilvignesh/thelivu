@@ -16,6 +16,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from html.parser import HTMLParser
+from pathlib import Path
 
 from engine.digger import robots, routing
 
@@ -83,6 +84,59 @@ def html_to_text(html):
 
 class FetchError(RuntimeError):
     pass
+
+
+def fetch_file(url, dest, timeout=TIMEOUT, max_bytes=MAX_PDF_BYTES,
+               _retrying=False):
+    """Save a document to `dest` unparsed. Returns the path.
+
+    `fetch()` exists to turn a URL into text a model can read. This exists
+    because a record has to be SHOWN as well as read: publishing/evidence_shot.py
+    renders the actual page of a parliamentary answer onto a video frame, and it
+    needs the PDF, not its text layer.
+
+    Same robots check, same throttle, same one-shot 5xx path rewrite as fetch()
+    — this is a second thing to do with a permitted fetch, not a second way of
+    fetching. The only difference is that nothing is parsed.
+    """
+    if not robots.allowed(url):
+        for alt in routing.alternates(url):
+            if robots.allowed(alt):
+                url = alt
+                break
+    url, _had_key = routing.with_api_key(url)
+    try:
+        robots.check(url)
+    except robots.RobotsDenied as e:
+        raise FetchError(str(e)) from e
+    _throttle(url)
+
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read(max_bytes + 1)
+    except urllib.error.HTTPError as e:
+        if 500 <= e.code < 600 and not _retrying:
+            for alt in routing.path_variants(url):
+                if robots.allowed(alt):
+                    log.info("HTTP %s — retrying at the current path shape: %s",
+                             e.code, alt)
+                    return fetch_file(alt, dest, timeout=timeout,
+                                      max_bytes=max_bytes, _retrying=True)
+        raise FetchError(f"HTTP {e.code} for {url}") from e
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        raise FetchError(f"fetch failed for {url}: {e}") from e
+
+    if len(raw) > max_bytes:
+        # Truncating a PDF produces a file that opens and is missing pages,
+        # which is worse than not having it: the page we wanted to show may be
+        # one of the missing ones and nothing would say so.
+        raise FetchError(f"{url} is larger than {max_bytes} bytes — not saved "
+                         "truncated, which would silently drop pages")
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(raw)
+    return dest
 
 
 def fetch(url, timeout=TIMEOUT, max_bytes=MAX_BYTES, _retrying=False):

@@ -110,6 +110,149 @@ def draw_chapter_card(n, title, out_png):
     return out_png
 
 
+def _ground(out_png, variant=0):
+    """A landscape inked field. The reel's render_house_ground is 1080x1920 and
+    a transposed crop of it shows a third of a gradient built for a tall frame —
+    the same mistake the illustration aspect ratio made. Small enough to draw
+    here rather than parameterise a renderer the daily path depends on."""
+    import random
+
+    rng = random.Random(9173 + variant)
+    img = Image.new("RGB", (W, H))
+    d = ImageDraw.Draw(img)
+    top, mid, bot = (14, 12, 9), (34, 29, 21), (12, 10, 8)
+    for y in range(H):
+        t = y / H
+        a, b = (top, mid) if t < 0.5 else (mid, bot)
+        k = (t if t < 0.5 else t - 0.5) * 2
+        d.line([(0, y), (W, y)],
+               fill=tuple(int(a[i] + (b[i] - a[i]) * k) for i in range(3)))
+    for _ in range(9000):
+        x, y = rng.randrange(W), rng.randrange(H)
+        v = rng.randint(-9, 9)
+        px = img.getpixel((x, y))
+        img.putpixel((x, y), tuple(max(0, min(255, c + v)) for c in px))
+    img.save(out_png)
+    return out_png
+
+
+def draw_data_card(figure, out_png, chapter_label=""):
+    """The number, as type, at the size it deserves.
+
+    This is the frame the first sample did not have and needed most. A story
+    whose whole argument is 2,732 against 780 cannot put those on screen as a
+    symbolic illustration of a ledger — the viewer has to READ them, and a
+    generated picture is forbidden from containing legible text for good
+    reasons (BRAND.md) and is bad at it anyway.
+
+    Drawn, not generated, so the number on screen is exactly the number the
+    script declared and a reviewer approved.
+    """
+    img = Image.open(_ground(out_png.with_name(out_png.stem + "_bg.png"),
+                             variant=1)).convert("RGB")
+    d = ImageDraw.Draw(img)
+    d.text((120, 96), "THELIVU", font=_font(MONO_BOLD, 38), fill=ACCENT)
+    if chapter_label:
+        d.text((120, 148), chapter_label.upper()[:60],
+               font=_font(MONO, 30), fill=MUTED)
+
+    value = (figure.get("value") or "").strip()
+    # Fit rather than assume: "2,732 crore" and "71%" want very different sizes,
+    # and a fixed size either clips the long one or wastes the frame on the short.
+    size = 220
+    f = _font(SERIF_BOLD, size)
+    while size > 90 and d.textlength(value, font=f) > W - 240:
+        size -= 10
+        f = _font(SERIF_BOLD, size)
+    y = H // 2 - size // 2 - 40
+    d.text((120, y), value, font=f, fill=PAPER)
+    # A serif at 200pt has a deep descender; 1.15 put the label inside it.
+    y += int(size * 1.34)
+    d.line([(120, y), (300, y)], fill=ACCENT, width=6)
+    y += 40
+
+    label = (figure.get("label") or "").strip()
+    if label:
+        lf = _font(SERIF_BOLD, 54)
+        for line in _wrap(d, label, lf, W - 240)[:2]:
+            d.text((120, y), line, font=lf, fill=ACCENT)
+            y += 66
+
+    source = (figure.get("source") or "").strip()
+    if source:
+        # The source line is what separates a figure from a poster. Small, always
+        # present, never the same colour as the number.
+        d.text((120, H - 120), source.upper()[:90],
+               font=_font(MONO, 28), fill=MUTED)
+    img.save(out_png)
+    return out_png
+
+
+def draw_record_frame(page_png, caption, out_png, chapter_label="", quote=""):
+    """The actual page of the actual document, with the line that matters beside it.
+
+    Not an illustration OF a record — the record. evidence_shot.py renders it
+    from the PDF we fetched; this only places it.
+
+    Two columns, because one does not work. A full A4 page letterboxed into 16:9
+    is a narrow strip of unreadable grey with dead space either side, and it
+    tells the viewer nothing about WHICH of the forty lines on it is the point.
+    So the page sits on the right at the largest size the frame allows, and the
+    left carries the sentence the narration is saying — lifted verbatim from
+    that page, never paraphrased. The layout is the argument: here is the claim,
+    and here, beside it, is the document it came off.
+
+    Never cropped to fill. A document page cropped to fit a frame is a document
+    page with its top or bottom cut off, and which part got cut is exactly the
+    question a sceptical viewer is asking.
+    """
+    img = Image.open(_ground(out_png.with_name(out_png.stem + "_bg.png"),
+                             variant=2)).convert("RGB")
+    d = ImageDraw.Draw(img)
+
+    page = Image.open(page_png).convert("RGB")
+    col_w, top, bottom = 620, 170, 90
+    scale = min(col_w / page.width, (H - top - bottom) / page.height)
+    page = page.resize((max(1, int(page.width * scale)),
+                        max(1, int(page.height * scale))))
+    px = W - 120 - page.width
+    py = top + ((H - top - bottom) - page.height) // 2
+    d.rectangle([px - 5, py - 5, px + page.width + 4, py + page.height + 4],
+                fill=(120, 100, 66))
+    img.paste(page, (px, py))
+
+    d.text((120, 96), "THELIVU", font=_font(MONO_BOLD, 38), fill=ACCENT)
+    if chapter_label:
+        d.text((120, 148), chapter_label.upper()[:60],
+               font=_font(MONO, 30), fill=MUTED)
+
+    text_w = px - 240
+    y = 320
+    if quote:
+        # Quotation marks, because this is the document's wording and not ours.
+        qf, size = None, 58
+        while size > 30:
+            qf = _font(SERIF_BOLD, size)
+            lines = _wrap(d, f"\u201c{quote}\u201d", qf, text_w)
+            if len(lines) * int(size * 1.30) <= H - 520:
+                break
+            size -= 4
+        for line in lines:
+            d.text((120, y), line, font=qf, fill=PAPER)
+            y += int(size * 1.30)
+        y += 24
+        d.line([(120, y), (260, y)], fill=ACCENT, width=5)
+        y += 36
+
+    if caption:
+        cf = _font(MONO, 26)
+        for line in _wrap(d, caption, cf, text_w)[:4]:
+            d.text((120, y), line, font=cf, fill=MUTED)
+            y += 36
+    img.save(out_png)
+    return out_png
+
+
 def draw_story_frame(image_path, caption, out_png, chapter_label=""):
     """One illustrated frame with the spoken line beneath it."""
     base = Image.open(image_path).convert("RGB")
@@ -176,21 +319,104 @@ def _segment(png, wav, out_mp4, duration, audio_start=0.0):
     _ffmpeg(args, f"segment {Path(png).name}")
 
 
-# A chapter runs a minute or more. One illustration held that long is a still
-# photograph with a voice-over, so the parser already collects 2-3 IMAGE lines
-# per chapter; this is the cap on how many of them become shots.
-MAX_SHOTS_PER_UNIT = 3
-# Below this a shot is a flicker, not a shot — a short chapter stays on one frame.
-MIN_SHOT_SECONDS = 12.0
+# A chapter runs a minute or more, and now has three kinds of frame to fill it
+# with, so it can hold more cuts than the illustration-only version did.
+MAX_SHOTS_PER_UNIT = 5
+# Below this a shot is a flicker. Lower than the illustration-only 12s, because a
+# number or a quoted line is READ — four or five seconds is enough for a figure
+# where a scene needs dwelling on.
+MIN_SHOT_SECONDS = 8.0
 
 
 def _shot_count(duration, available):
     """How many cuts a unit of `duration` seconds earns, given `available`
-    illustrations. Long enough to need a second picture, or it keeps the first."""
+    assets. Long enough to need a second frame, or it keeps the first."""
     if available <= 1:
         return 1
     k = min(available, MAX_SHOTS_PER_UNIT, int(duration // MIN_SHOT_SECONDS))
     return max(1, k)
+
+
+def plan_assets(chapter, fallback_image=None):
+    """What this unit puts on screen, hardest evidence first.
+
+    Anil, 2026-09-11, after watching the first sample: *"this only has generated
+    images, which are not great... we need to print out numbers, facts,
+    screenshots, evidences. generated images like these won't work."*
+
+    So the order is a policy, not an accident. When a chapter declares more
+    assets than its narration has room for, the ones that get dropped are the
+    illustrations — a symbolic picture of a ledger is the most expendable thing
+    on the list, and the figure and the document page are the reason anyone is
+    still watching at minute six.
+
+    Within a kind, declaration order is kept, so a writer who lists the figures
+    in the order the narration says them gets them in that order. That is the
+    only alignment available without word-level timing, and it is worth saying
+    in the skill rather than pretending the renderer can infer it.
+    """
+    figures = [{"kind": "figure", "figure": f} for f in (chapter.get("figures") or [])]
+    records = [{"kind": "record", "record": r} for r in (chapter.get("records") or [])]
+    images = [{"kind": "image", "prompt": p} for p in (chapter.get("images") or [])]
+    if not images and fallback_image:
+        images = [{"kind": "image", "prompt": fallback_image}]
+    return figures + records + images
+
+
+def _render_record(record, out_dir, stem):
+    """Fetch a RECORD's document and render the page that carries its quote.
+
+    Returns {path, caption} or None. Never raises: a source that is down, a URL
+    that moved, a PDF with no text layer — none of those are worth failing a
+    render that has already spent an hour of the voice server. The shot is
+    demoted to an illustration and the video is one frame weaker, which is a
+    thing a reviewer can see at gate 2.
+    """
+    url = (record.get("url") or "").strip()
+    if not url:
+        return None
+    try:
+        from engine.digger import fetch as digfetch
+        from publishing import evidence_shot
+
+        out_dir = Path(out_dir)
+        pdf = digfetch.fetch_file(url, out_dir / f"{stem}.pdf")
+        pages = _page_texts(pdf)
+        shots = evidence_shot.from_source(
+            pdf, out_dir, url, record.get("description") or "",
+            quote=record.get("quote") or "", pdf_text_by_page=pages, stem=stem)
+        return shots[0] if shots else None
+    except Exception as e:
+        log.warning("record %s could not be shown (%s: %s)", url, type(e).__name__, e)
+        return None
+
+
+def _page_texts(pdf_path):
+    """Per-page text, so find_pages() can put the RIGHT page on screen.
+
+    The digger's pdf_to_text returns one blob, which makes every quote land on
+    page 1 — evidence_shot says so out loud rather than showing the wrong page
+    silently, but "page 1 of a five-page answer while the narration quotes the
+    annexure" is a prop, not evidence. Returns [] when per-page text is not
+    available, which is the same honest fallback.
+    """
+    try:
+        import liteparse
+        lp = liteparse.LiteParse(ocr_enabled=False, num_workers=1, pool_size=1,
+                                 quiet=True, parse_timeout=90)
+        try:
+            result = lp.parse(str(pdf_path))
+            pages = getattr(result, "pages", None) or []
+            return [(getattr(pg, "text", "") or "") for pg in pages]
+        finally:
+            try:
+                lp.close()
+            except Exception:
+                pass
+    except Exception as e:
+        log.info("no per-page text for %s (%s) — quotes will fall back to page 1",
+                 pdf_path, type(e).__name__)
+        return []
 
 
 def render(parsed, out_mp4, work_dir=None, voice=None, illustrate=True,
@@ -232,29 +458,52 @@ def render(parsed, out_mp4, work_dir=None, voice=None, illustrate=True,
     voiced = synth_beats([(text, "") for _k, _c, text in units],
                          "chatterbox", tmp / "vo", voice=voice)
 
-    # 2. Plan the shots against those real durations, then illustrate all of
-    #    them in ONE batched call — generate_beat_images() warms up once and
-    #    walks illustrate.prompt_ladder per scene, so a scene FLUX refuses costs
-    #    a few rungs and comes back None rather than failing the render.
-    plans = []          # per unit: [(scene_prompt, seconds)]
+    # 2. Plan what each unit puts on screen, against those real durations.
+    #    Figures and records first, illustrations last — see plan_assets.
+    plans = []          # per unit: [(asset, seconds)]
     for (key, chap, text), (_wav, dur, pauses) in zip(units, voiced):
-        imgs = list((chap or {}).get("images") or [])
-        if not imgs:
-            one = (parsed.get("cold_open_image") if key == "cold_open"
-                   else parsed.get("close_image") if key == "close" else None)
-            imgs = [one] if one else []
-        k = _shot_count(dur, len(imgs))
-        parts = plan_cuts(dur, k, pauses)
-        prompts = (imgs[:k] if imgs else [None] * k)
-        plans.append(list(zip(prompts, parts)))
+        fallback = (parsed.get("cold_open_image") if key == "cold_open"
+                    else parsed.get("close_image") if key == "close" else None)
+        assets = plan_assets(chap or {}, fallback_image=fallback)
+        if not assets:
+            assets = [{"kind": "image", "prompt": None}]
+        k = _shot_count(dur, len(assets))
+        plans.append(list(zip(assets[:k], plan_cuts(dur, k, pauses))))
 
-    _p(0.35, f"Illustrating {sum(len(pl) for pl in plans)} shots…")
+    # 3. Fetch and render the documents. Before illustration, because a record
+    #    that fails to fetch demotes its shot to an illustration and that has to
+    #    be known before the batch is sent — one batched FLUX call is the whole
+    #    reason illustration is cheap.
+    n_rec = sum(1 for pl in plans for a, _ in pl if a["kind"] == "record")
+    if n_rec:
+        _p(0.20, f"Fetching {n_rec} record(s)…")
+    for i, pl in enumerate(plans):
+        for j, (asset, _secs) in enumerate(pl):
+            if asset["kind"] != "record":
+                continue
+            shot = _render_record(asset["record"], tmp / "records", f"u{i}_{j}")
+            if shot:
+                asset["shot"] = shot
+            else:
+                # Demote rather than fail. A missing document costs the frame
+                # its evidence, not the video its render.
+                asset["kind"] = "image"
+                asset["prompt"] = None
+
+    # 4. Illustrate every remaining image shot in ONE batched call —
+    #    generate_beat_images() warms up once and walks illustrate.prompt_ladder
+    #    per scene, so a scene FLUX refuses costs a few rungs and comes back
+    #    None rather than failing the render.
+    img_slots = [(i, j) for i, pl in enumerate(plans)
+                 for j, (a, _s) in enumerate(pl) if a["kind"] == "image"]
+    _p(0.35, f"Illustrating {len(img_slots)} of "
+             f"{sum(len(pl) for pl in plans)} shots…")
     from publishing.illustrate import (LANDSCAPE, STYLE, generate_beat_images,
                                        scene_from_beat)
-    scenes = [pr or scene_from_beat("", units[i][2][:120])
-              for i, pl in enumerate(plans) for pr, _sec in pl]
+    scenes = [plans[i][j][0].get("prompt") or scene_from_beat("", units[i][2][:120])
+              for i, j in img_slots]
     arts = [None] * len(scenes)
-    if illustrate:
+    if illustrate and scenes:
         try:
             # LANDSCAPE, not the reel default. A portrait illustration
             # cover-cropped into 1920x1080 shows only the middle third of a
@@ -268,13 +517,15 @@ def render(parsed, out_mp4, work_dir=None, voice=None, illustrate=True,
         except Exception as e:
             log.warning("illustration batch failed (%s) — falling back to grounds", e)
             arts = [None] * len(scenes)
+    for (i, j), art in zip(img_slots, arts):
+        plans[i][j][0]["art"] = art
 
-    # 3. Compose frames and assemble: chapter card, then the chapter's shots.
+    # 5. Compose frames and assemble: chapter card, then the chapter's shots.
     _p(0.6, "Assembling…")
-    from publishing.reel_illustrated import render_house_ground
 
-    segs, marks, clock, n = [], [], 0.0, 0
+    segs, marks, clock = [], [], 0.0
     for i, ((key, chap, _t), (wav, _dur, _pauses)) in enumerate(zip(units, voiced)):
+        label = (chap or {}).get("title", "")
         if chap:
             card = draw_chapter_card(chap["n"], chap["title"],
                                      tmp / f"card_{i:03d}.png")
@@ -289,15 +540,19 @@ def render(parsed, out_mp4, work_dir=None, voice=None, illustrate=True,
             marks.append((0, "Introduction"))
 
         offset = 0.0
-        for j, (_prompt, secs) in enumerate(plans[i]):
-            art = arts[n] if n < len(arts) else None
-            n += 1
-            if not art:
-                art = render_house_ground(str(tmp / f"ground_{i:03d}_{j}.png"),
-                                          variant=(i + j) % 3)
+        for j, (asset, secs) in enumerate(plans[i]):
             png = tmp / f"frame_{i:03d}_{j}.png"
-            draw_story_frame(art, "", png,
-                             chapter_label=(chap or {}).get("title", ""))
+            if asset["kind"] == "figure":
+                draw_data_card(asset["figure"], png, chapter_label=label)
+            elif asset["kind"] == "record":
+                shot = asset["shot"]
+                draw_record_frame(shot["path"], shot["caption"], png,
+                                  chapter_label=label,
+                                  quote=asset["record"].get("quote", ""))
+            else:
+                art = asset.get("art") or _ground(
+                    tmp / f"ground_{i:03d}_{j}.png", variant=(i + j) % 3)
+                draw_story_frame(art, "", png, chapter_label=label)
             seg = tmp / f"seg_{i:03d}_{j}.mp4"
             _segment(png, wav, seg, secs, audio_start=offset)
             segs.append(seg)

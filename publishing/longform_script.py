@@ -130,9 +130,18 @@ def mechanical_blockers(parsed):
 
     out = []
     for c in parsed.get("chapters", []):
+        states_figures = bool(_FIGURE.search(c.get("text") or ""))
+        # A chapter that says a number and never puts it on screen is the
+        # specific failure the first sample had: the argument turned on 2,732
+        # against 780 and the viewer saw a symbolic ledger. Separate from the
+        # record check, because they fail for different reasons and a reviewer
+        # fixes them differently — one needs a FIGURE line, the other a source.
+        if states_figures and not c.get("figures"):
+            out.append(f"Chapter {c['n']} ({c['title']}) states figures but puts "
+                       f"none on screen — no FIGURE line")
         if c.get("records"):
             continue
-        if _FIGURE.search(c.get("text") or ""):
+        if states_figures:
             out.append(f"Chapter {c['n']} ({c['title']}) states figures and cites "
                        f"no record")
         else:
