@@ -217,9 +217,10 @@ def t_hard_evidence_outranks_illustration():
                "records": [{"url": "https://example.gov.in/a.pdf"}],
                "images": ["a ledger", "a stamp", "a door"]}
     kinds = [a["kind"] for a in lfr.plan_assets(chapter)]
-    # Three images declared, one survives — see MAX_IMAGES_PER_UNIT.
+    # plan_assets returns EVIDENCE only. Pictures rank below quote frames and
+    # are added by with_filler, and only where a unit can spare a slot.
     check("declared order within a kind, evidence first", kinds,
-          ["figure", "figure", "record", "image"])
+          ["figure", "figure", "record"])
     # A 40-second chapter buys three shots; those three must be the hard ones,
     # and all three illustrations go unused.
     k = lfr._shot_count(40.0, len(kinds))
@@ -228,11 +229,15 @@ def t_hard_evidence_outranks_illustration():
 
 
 def t_a_chapter_with_nothing_declared_still_gets_a_frame():
-    check("falls back to one image",
-          [a["kind"] for a in lfr.plan_assets({}, fallback_image="a desk")],
-          ["image"])
-    check("and to a blank image with no fallback either",
-          [a["kind"] for a in lfr.plan_assets({})], [])
+    """plan_assets returns evidence only, so an empty chapter has none. The
+    frame comes from with_filler, which never returns nothing — a unit with no
+    evidence, no narration worth quoting and no picture still needs one frame
+    or the concat has a hole in it."""
+    check("no evidence means no evidence", lfr.plan_assets({}), [])
+    only = lfr.with_filler([], "", want=1, images=["a desk"])
+    check("but a frame is always produced", [a["kind"] for a in only], ["image"])
+    check("even with nothing at all to draw",
+          len(lfr.with_filler([], "", want=1)), 1)
 
 
 def t_a_figure_is_drawn_not_generated():
@@ -289,7 +294,7 @@ def t_a_table_ranks_with_the_figures_not_the_pictures():
     kinds = [a["kind"] for a in lfr.plan_assets(
         {"figures": [{"value": "1"}], "tables": [{"title": "t"}],
          "records": [{"url": "u"}], "images": ["a"]})]
-    check("evidence order", kinds, ["figure", "table", "record", "image"])
+    check("evidence order", kinds, ["figure", "table", "record"])
 
 
 def t_every_source_on_screen_reaches_the_description():
@@ -388,13 +393,31 @@ def t_short_connectives_do_not_become_frames():
           ["The ministry told Parliament this in writing."])
 
 
-def t_one_illustration_per_unit_at_most():
-    """A measured failure rate, not a style preference. One is atmosphere;
-    three is a slideshow of things that are nearly right."""
-    kinds = [a["kind"] for a in lfr.plan_assets(
-        {"images": ["a ledger", "a stamp", "a door", "a drawer"]})]
-    check("capped at one", kinds, ["image"])
-    check("the cap is stated", lfr.MAX_IMAGES_PER_UNIT, 1)
+def t_a_picture_never_outranks_the_words():
+    """The bug the fourth sample made obvious. The close declares a CLOSE_IMAGE
+    and earns exactly ONE shot, so the picture beat the words on the single most
+    important frame in the video: the line was "that part has not been
+    published" and the screen showed a filing cabinet.
+
+    A generated scene is atmosphere, and atmosphere is what you add once the
+    argument is already on screen."""
+    text = ("The register shows what action was taken in every single case. "
+            "It does not show what money actually arrived afterwards.")
+    one = lfr.with_filler([], text, want=1, images=["a filing drawer"])
+    check("a one-shot unit says the line", [a["kind"] for a in one], ["quote"])
+
+    three = lfr.with_filler([], text, want=3, images=["a", "b", "c"])
+    check("three shots still has no room for atmosphere",
+          {a["kind"] for a in three}, {"quote"})
+
+    long_text = " ".join(f"Sentence number {i} is long enough to be a frame."
+                         for i in range(1, 9))
+    four = lfr.with_filler([], long_text, want=4, images=["a", "b", "c"])
+    check("a long unit spares exactly one slot",
+          [a["kind"] for a in four].count("image"), 1)
+    check("and it goes last", four[-1]["kind"], "image")
+    check("the thresholds are stated",
+          (lfr.MAX_IMAGES_PER_UNIT, lfr.MIN_SHOTS_FOR_IMAGE), (1, 4))
 
 
 def t_a_unit_can_always_fill_its_shots():
@@ -403,9 +426,8 @@ def t_a_unit_can_always_fill_its_shots():
     text = " ".join(f"Sentence number {i} runs long enough to be a frame." 
                     for i in range(1, 9))
     assets = lfr.plan_assets({"figures": [{"value": "1"}]})
-    want = 6
-    filled = assets + lfr.quote_fill(text, len(assets), want)
-    check("budget filled", len(filled), want)
+    filled = lfr.with_filler(assets, text, want=6)
+    check("budget filled", len(filled), 6)
 
 
 # ----------------------------------------------------------- real photographs
@@ -471,11 +493,12 @@ def t_an_unusable_photo_never_reaches_a_frame():
 
 
 def t_a_photo_ranks_above_a_generated_scene():
-    """A real picture of the thing beats a generated picture of the idea of it."""
-    kinds = [a["kind"] for a in lfr.plan_assets({
-        "photos": [{"shows": "a", "src": "u", "licence": "CC0"}],
-        "images": ["a symbolic ledger"]})]
-    check("photo first", kinds, ["photo", "image"])
+    """A real picture of the thing beats a generated picture of the idea of it,
+    and unlike the generated one it counts as evidence."""
+    check("the photo is planned as evidence",
+          [a["kind"] for a in lfr.plan_assets({
+              "photos": [{"shows": "a", "src": "u", "licence": "CC0"}],
+              "images": ["a symbolic ledger"]})], ["photo"])
 
 
 # ------------------------------------------------------------------ footage
@@ -524,7 +547,7 @@ def t_an_unlicensed_clip_never_reaches_a_frame():
                   {"shows": "b", "src": "u", "licence": ""},
                   {"shows": "c", "src": "u", "licence": "Some News Channel"}],
         "images": ["x"]})]
-    check("only the licensed clip is planned", kinds, ["clip", "image"])
+    check("only the licensed clip is planned", kinds, ["clip"])
     check("and the download refuses it too",
           lfr._prepare_clip({"src": "https://x/y.mp4", "licence": ""},
                             tempfile.mkdtemp(), "s"), None)
@@ -1024,7 +1047,7 @@ def main():
               t_the_filler_is_a_line_of_narration_not_a_generated_scene,
               t_quotes_track_what_is_being_said,
               t_short_connectives_do_not_become_frames,
-              t_one_illustration_per_unit_at_most,
+              t_a_picture_never_outranks_the_words,
               t_a_unit_can_always_fill_its_shots,
               t_only_licences_attribution_settles_are_accepted,
               t_a_correct_licence_does_not_make_a_true_caption,

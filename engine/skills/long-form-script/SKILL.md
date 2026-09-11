@@ -347,7 +347,7 @@ came back as a blank open book, and *"a filing drawer, one folder left in it"* �
 under a close whose whole point is that the record is absent — came back as a
 drawer FULL of folders.
 
-**At most one IMAGE per chapter**, whatever you write. One is atmosphere.
+**IMAGE ranks below the quote frames**, and a chapter gets at most one — only if it has four shots or more. Atmosphere is what you add once the argument is already on screen; a short chapter has nothing to spare. In practice most chapters will have no generated picture at all, and that is the intended outcome.
 
 ### Never make a picture do a number's job
 

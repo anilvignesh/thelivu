@@ -584,6 +584,8 @@ def _segment(png, wav, out_mp4, duration, audio_start=0.0, motion="in"):
 # So the cut rate follows the narration, and the cap is only a safety rail.
 TARGET_SHOT_SECONDS = 13.0
 MAX_IMAGES_PER_UNIT = 1
+# A unit shorter than this has no slot to spare on atmosphere.
+MIN_SHOTS_FOR_IMAGE = 4
 MAX_SHOTS_PER_UNIT = 8
 # Below this a shot is a flicker. Lower than the illustration-only 12s, because a
 # number or a quoted line is READ — four or five seconds is enough for a figure
@@ -676,16 +678,40 @@ def plan_assets(chapter, fallback_image=None):
     images = [{"kind": "image", "prompt": p} for p in (chapter.get("images") or [])]
     if not images and fallback_image:
         images = [{"kind": "image", "prompt": fallback_image}]
-    # At most ONE generated illustration per unit, whatever the script declares.
-    # Not a style preference — a measured failure rate. Across three samples the
-    # image model rendered the generic noun and dropped the distinguishing
-    # detail every single time, and once produced a frame that contradicted the
-    # line being spoken (a FULL drawer under "that part has not been published").
-    # One is atmosphere; three is a slideshow of things that are nearly right.
-    # Everything past the first is better spent on a quote frame, which cannot
-    # be wrong about what is being said.
-    return (figures + tables + photos + clips + records
-            + images[:MAX_IMAGES_PER_UNIT])
+    # Generated illustrations are NOT returned here. They rank below quote
+    # frames and are added last, by `with_filler`, and only in a unit long
+    # enough to spare a slot.
+    #
+    # Ranking them with the evidence was wrong in a way the fourth sample made
+    # obvious: the close declares a CLOSE_IMAGE and earns exactly one shot, so
+    # the picture beat the words on the single most important frame in the
+    # video. The line being spoken was "that part has not been published" and
+    # the screen showed a filing cabinet.
+    return figures + tables + photos + clips + records
+
+
+def with_filler(assets, text, want, images=()):
+    """Fill a unit's shot budget: evidence, then narration, then at most one
+    picture — and the picture only if the unit can spare a slot.
+
+    `MIN_SHOTS_FOR_IMAGE` is the whole policy. A generated scene is atmosphere,
+    and atmosphere is what you add once the argument is already on screen; in a
+    unit with two or three shots there is nothing to spare, and a quote frame
+    beats a picture of the idea of a quote every time.
+    """
+    out = list(assets[:want])
+    room = want - len(out)
+    if room <= 0:
+        return out[:want]
+    picture = (list(images)[:MAX_IMAGES_PER_UNIT]
+               if want >= MIN_SHOTS_FOR_IMAGE else [])
+    quotes = quote_fill(text, len(out), want - len(picture))
+    out += quotes
+    out += [{"kind": "image", "prompt": p} for p in picture]
+    # A unit with nothing to say and nothing declared still needs one frame.
+    if not out:
+        out = [{"kind": "image", "prompt": (list(images) or [None])[0]}]
+    return out[:want]
 
 
 # What makes a clip usable, and which of those needs a human to say yes.
@@ -925,7 +951,7 @@ def render(parsed, out_mp4, work_dir=None, voice=None, illustrate=True,
     for (key, chap, text), (_wav, dur, pauses) in zip(units, voiced):
         if chap:
             unit, fallback = chap, None
-        else:
+        else:  # noqa: E701
             # The bookends carry the same vocabulary as a chapter — see
             # parse_script. A 46-second close on one frame is the audio-book
             # failure on the unit a viewer judges the video by.
@@ -935,12 +961,15 @@ def render(parsed, out_mp4, work_dir=None, voice=None, illustrate=True,
         assets = plan_assets(unit, fallback_image=fallback)
         if not assets:
             assets = [{"kind": "image", "prompt": None}]
-        # Quote frames fill whatever the writer did not declare. Before 2026-09-11
-        # the filler was a generated illustration, and generated illustrations
-        # kept being worse than nothing — see draw_quote_frame. A shot budget is
-        # now always fillable, so a unit never holds one frame for a minute.
-        want = _shot_count(dur, max(len(assets), _shot_count(dur, 99)))
-        assets = assets[:want] + quote_fill(text, len(assets[:want]), want)
+        # Quote frames fill whatever the writer did not declare, and a picture
+        # gets the last slot only in a unit long enough to spare one. Before
+        # 2026-09-11 the filler was a generated illustration and they kept being
+        # worse than nothing — see draw_quote_frame. A shot budget is now always
+        # fillable, so a unit never holds one frame for a minute either.
+        want = _shot_count(dur, max(len(assets) + 1, _shot_count(dur, 99)))
+        declared_images = ((chap or {}).get("images")
+                           or ([fallback] if fallback else []))
+        assets = with_filler(assets, text, want, images=declared_images)
         k = min(want, len(assets)) or 1
         plans.append(list(zip(assets[:k], plan_cuts(dur, k, pauses))))
 
