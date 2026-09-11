@@ -63,7 +63,7 @@ def _kb(path):
         return 0
 
 
-def attach_script(queue_id, script_path):
+def attach_script(queue_id, script_path, blockers=None):
     """Record the written script against a queue item and open gate 1.
 
     Separate from rendering because the script is written by a different thing
@@ -89,7 +89,11 @@ def attach_script(queue_id, script_path):
     set_longform_artifact(queue_id, script_path=str(path.resolve()))
     longform.advance(queue_id, row.get("status") or longform.QUEUED,
                      longform.SCRIPTED, by="system")
-    longform.notify_script_for_review(queue_id, parsed)
+    # The blockers matter more than the script on that card — see
+    # notify_script_for_review. publishing/longform_script.py supplies the
+    # mechanical ones; a hand-attached script passes none and says so by
+    # omission.
+    longform.notify_script_for_review(queue_id, parsed, blockers=blockers)
     return {"ok": True, "status": longform.SCRIPTED,
             "words": parsed.get("word_count", 0),
             "chapters": len(parsed["chapters"])}

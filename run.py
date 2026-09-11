@@ -844,6 +844,29 @@ if service == "thelivu-agent":
             except Exception as e:
                 log.error("Topic check failed: %s", e, exc_info=True)
 
+        # Long-form scripting. LAST of the paid stages on purpose, and one per
+        # tick: a long-form script is a large model call for a format that
+        # publishes monthly, and it must never be what spends the cap the daily
+        # pipeline needs. Below the governor, so a parked day parks this too.
+        #
+        # This is the only automated step between the reel format reporting that
+        # a story outgrew it and a human having to read something. It stops at
+        # SCRIPTED — a gate — every time.
+        try:
+            from publishing.longform_script import write_pending
+            for _res in write_pending():
+                if _res.get("ok"):
+                    log.info("Long-form #%s scripted: %s words, %s blocker(s)",
+                             _res["id"], _res.get("words"),
+                             len(_res.get("blockers") or []))
+                    _sweep_recovered("Long-form scripting")
+                else:
+                    log.warning("Long-form #%s not scripted: %s",
+                                _res["id"], _res.get("error"))
+        except Exception as e:
+            log.error("Long-form scripting failed: %s", e, exc_info=True)
+            _sweep_failed("Long-form scripting", e)
+
         # Idle alert — if no RSS cycle has completed in >8h, ping once per 12h
         try:
             last_cycle = kv_get("last_cycle_at")

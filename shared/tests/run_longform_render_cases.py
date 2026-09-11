@@ -545,6 +545,58 @@ class _stub_voice:
         return False
 
 
+# --------------------------------------------------- the mechanical blockers
+#
+# These go on the gate-1 card. They are NOT an evidence assessment — a script is
+# prose and shared/evidence.py assesses Claim objects — so what they do instead
+# is point a reviewer at what reading 1,500 words of confident prose will not
+# make them notice.
+
+def t_a_chapter_with_no_record_is_flagged():
+    from publishing import longform
+    from publishing.longform_script import mechanical_blockers
+
+    parsed = longform.parse_script(SCRIPT)
+    flags = mechanical_blockers(parsed)
+    # SCRIPT carries no RECORD lines at all, so every chapter is flagged.
+    check("every recordless chapter flagged",
+          sum(1 for f in flags if f.startswith("Chapter")), len(parsed["chapters"]))
+    check("the missing WHY_LONG_FORM is flagged",
+          any("WHY_LONG_FORM" in f for f in flags), True)
+
+
+def t_a_chapter_with_a_record_is_not_flagged():
+    from publishing import longform
+    from publishing.longform_script import mechanical_blockers
+
+    with_record = SCRIPT.replace(
+        "CHAPTER 1 IMAGE 1: A ledger open on a desk.",
+        "CHAPTER 1 RECORD: MoRTH deficiency register | https://example.gov.in/r | forty\n"
+        "CHAPTER 1 IMAGE 1: A ledger open on a desk.")
+    flags = mechanical_blockers(longform.parse_script(with_record))
+    check("chapter 1 is no longer flagged",
+          any(f.startswith("Chapter 1 ") for f in flags), False)
+    check("chapter 2 still is",
+          any(f.startswith("Chapter 2 ") for f in flags), True)
+
+
+def t_figures_spelled_out_still_count_as_figures():
+    """The house style spells numbers out, because the script is read aloud.
+    A digit-only pattern would have found nothing in any script we have ever
+    written, and the 'states figures' half of the flag — the half that tells a
+    reviewer this one matters more — would have been dead code."""
+    from publishing.longform_script import _FIGURE
+
+    for text in ("forty of fifty-nine deficiencies were closed",
+                 "two thousand seven hundred crore rupees",
+                 "recovering under twenty-nine percent",
+                 "a penalty of up to nine crore rupees"):
+        check(f"figure found in {text[:34]!r}", bool(_FIGURE.search(text)), True)
+    for text in ("the register is public and has been the whole time",
+                 "someone approved that design for that ground"):
+        check(f"no false figure in {text[:34]!r}", bool(_FIGURE.search(text)), False)
+
+
 def main():
     if not have_ffmpeg():
         print("ffmpeg not available — skipping long-form render cases")
@@ -573,6 +625,10 @@ def main():
               t_posting_needs_a_person_and_then_a_flip,
               t_dropping_removes_the_unlisted_upload):
         t(state)
+    for t in (t_a_chapter_with_no_record_is_flagged,
+              t_a_chapter_with_a_record_is_not_flagged,
+              t_figures_spelled_out_still_count_as_figures):
+        t()
 
     print("\n" + "=" * 72)
     if _fails:
