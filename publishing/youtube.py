@@ -223,6 +223,54 @@ def publish_video(video_bytes, title, description="", tags=None, progress=None,
     return video_id, f"https://youtube.com/watch?v={video_id}"
 
 
+# videos.insert needs only youtube.upload. videos.update (the privacy flip that
+# PUBLISHES a long-form video) and videos.delete (the reject path) do not —
+# confirmed against Google's docs 2026-09-11: youtube.upload "allows an
+# application to upload files to the authenticated user's YouTube channel, but
+# doesn't allow other types of access."
+#
+# The production token is youtube.upload + youtube.readonly (see
+# publishing/youtube_auth.py), which is why every Short has posted fine for
+# months: insert is all the reel path ever does. The long-form path needs more,
+# and would have discovered that AFTER spending an hour of the voice server.
+PUBLISH_SCOPES = ("https://www.googleapis.com/auth/youtube",
+                  "https://www.googleapis.com/auth/youtube.force-ssl")
+
+
+def preflight(need_publish=False):
+    """(ok, why) — can we do what we are about to do? Checked BEFORE the work.
+
+    A long-form render costs ~80 minutes of the only voice server. Finding out
+    afterwards that the token cannot upload, or cannot flip a video public, is
+    the most expensive possible moment to find out.
+    """
+    if not (YOUTUBE_CLIENT_ID and YOUTUBE_CLIENT_SECRET and YOUTUBE_REFRESH_TOKEN):
+        return False, ("YouTube is not configured on this box — "
+                       "YOUTUBE_CLIENT_ID/SECRET/REFRESH_TOKEN are unset")
+    try:
+        resp = requests.post(_TOKEN_URL, data={
+            "client_id": YOUTUBE_CLIENT_ID,
+            "client_secret": YOUTUBE_CLIENT_SECRET,
+            "refresh_token": YOUTUBE_REFRESH_TOKEN,
+            "grant_type": "refresh_token",
+        }, timeout=30)
+    except Exception as e:
+        return False, f"could not reach Google: {type(e).__name__}: {e}"
+    if resp.status_code != 200:
+        return False, f"refresh token rejected: {resp.text[:200]}"
+
+    granted = (resp.json().get("scope") or "").split()
+    if "https://www.googleapis.com/auth/youtube.upload" not in granted and not any(
+            sc in granted for sc in PUBLISH_SCOPES):
+        return False, f"token cannot upload; scopes are {granted}"
+    if need_publish and not any(sc in granted for sc in PUBLISH_SCOPES):
+        return False, (
+            "token can upload but CANNOT publish or delete — videos.update and "
+            "videos.delete need youtube or youtube.force-ssl, and this token has "
+            f"{granted}. Re-run publishing/youtube_auth.py to widen it.")
+    return True, "ok"
+
+
 def set_privacy(video_id, privacy):
     """Flip an already-uploaded video's privacy. Returns the new status.
 

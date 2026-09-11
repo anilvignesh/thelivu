@@ -216,6 +216,16 @@ def render_pending(limit=MAX_PER_PASS, voice=None, illustrate=True):
     from shared.db import longform_queue
 
     rows = longform_queue(status=longform.SCRIPT_OK)[:limit]
+    if rows:
+        # Before an hour of narration, not after it. This box needs to be able
+        # to UPLOAD; it deliberately does not need to publish.
+        from publishing import youtube
+        ok, why = youtube.preflight(need_publish=False)
+        if not ok:
+            log.error("not rendering — %s", why)
+            return [{"id": r["id"], "ok": False,
+                     "error": f"YouTube upload unavailable on this box: {why}"}
+                    for r in rows]
     out = []
     for row in rows:
         qid = row["id"]

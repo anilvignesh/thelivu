@@ -720,6 +720,10 @@ class FakeYouTube:
     def __init__(self):
         self.uploads, self.privacy, self.deleted = [], [], []
 
+    @staticmethod
+    def preflight(need_publish=False):
+        return True, "ok"
+
     def publish_video(self, data, title="", description="", tags=None,
                       privacy="public", chapters=None, progress=None):
         self.uploads.append({"bytes": len(data), "title": title,
@@ -949,21 +953,32 @@ def _clear_youtube_id(queue_id):
 
 
 def lb_swap(lb, fake):
-    """Point longform_build's lazy `from publishing import youtube` at a fake."""
-    import publishing
-    real = getattr(publishing, "youtube", None)
+    """Point longform_build's lazy `from publishing import youtube` at a fake.
+
+    Imports the real module FIRST so there is always something to put back.
+    The earlier version captured whatever happened to be bound and skipped the
+    restore when that was None — so the very first swap left the stub in
+    sys.modules permanently, and every later case that touched
+    publishing.youtube silently got the fake. That is how a scope test failed
+    with "FakeYouTube has no attribute PUBLISH_SCOPES": nothing to do with
+    scopes, everything to do with a leaky helper.
+    """
+    import importlib
     import sys
+
+    import publishing
+    real = importlib.import_module("publishing.youtube")
     sys.modules["publishing.youtube"] = fake
     publishing.youtube = fake
     return real
 
 
 def lb_restore(lb, real):
-    import publishing
     import sys
-    if real is not None:
-        sys.modules["publishing.youtube"] = real
-        publishing.youtube = real
+
+    import publishing
+    sys.modules["publishing.youtube"] = real
+    publishing.youtube = real
 
 
 class _stub_voice:
@@ -1051,6 +1066,81 @@ def t_figures_spelled_out_still_count_as_figures():
         check(f"no false figure in {text[:34]!r}", bool(_FIGURE.search(text)), False)
 
 
+def t_the_render_is_not_started_without_an_upload_credential(state=None):
+    """An hour of the only voice server is the most expensive possible moment to
+    discover the token cannot upload.
+
+    Found 2026-09-11 while answering "what's next": the reel-worker box holds NO
+    YouTube credentials — deliberately, so it can notify but never post — and
+    longform_build._upload_unlisted runs ON that box. Uploading needs exactly
+    the credential the box was designed not to have. The first real run would
+    have narrated for eighty minutes and then failed at the last step.
+    """
+    import sys
+    import publishing
+    import publishing.longform_build as lb
+    from publishing import longform, reel
+    from shared.db import longform_queue, queue_longform, set_longform_status
+
+    from shared.db import init_db
+    init_db()
+    queue_longform(run_id=7701, title="needs a credential", reason="test")
+    qid = longform_queue(status="queued")[-1]["id"]
+    set_longform_status(qid, longform.SCRIPT_OK)
+
+    class NoCreds:
+        @staticmethod
+        def preflight(need_publish=False):
+            return False, "YOUTUBE_CLIENT_ID/SECRET/REFRESH_TOKEN are unset"
+
+    voiced = []
+    real_mod = sys.modules.get("publishing.youtube")
+    real_attr = getattr(publishing, "youtube", None)
+    real_synth = reel.synth_beats
+    sys.modules["publishing.youtube"] = NoCreds
+    publishing.youtube = NoCreds
+    reel.synth_beats = lambda *a, **k: voiced.append(1) or []
+    try:
+        res = lb.render_pending()
+    finally:
+        reel.synth_beats = real_synth
+        if real_mod is not None:
+            sys.modules["publishing.youtube"] = real_mod
+        if real_attr is not None:
+            publishing.youtube = real_attr
+
+    check("it refuses rather than rendering", [r.get("ok") for r in res], [False])
+    check("and says why", "upload unavailable" in res[0]["error"], True)
+    check("the voice server was never touched", voiced, [])
+
+
+def t_publishing_needs_a_wider_scope_than_uploading():
+    """videos.insert needs youtube.upload. videos.update — the flip that
+    PUBLISHES a long-form video — and videos.delete do not.
+
+    The production token is upload + readonly, which is exactly why every Short
+    has posted fine for months (insert is all the reel path ever does) and why
+    the long-form publish step would have 403'd the first time it ran. Checked
+    against Google's own documentation 2026-09-11, not assumed.
+
+    Imported through importlib on purpose: earlier cases in this file swap a
+    stub into publishing.youtube, and a module-level name would pick the stub
+    up — which is how this case first "failed" for a reason that had nothing to
+    do with scopes.
+    """
+    import importlib
+
+    yt = importlib.import_module("publishing.youtube")
+    check("the publish scopes are named",
+          "https://www.googleapis.com/auth/youtube" in yt.PUBLISH_SCOPES, True)
+    check("force-ssl counts too",
+          "https://www.googleapis.com/auth/youtube.force-ssl"
+          in yt.PUBLISH_SCOPES, True)
+    check("upload alone is not one of them",
+          "https://www.googleapis.com/auth/youtube.upload"
+          in yt.PUBLISH_SCOPES, False)
+
+
 def main():
     if not have_ffmpeg():
         print("ffmpeg not available — skipping long-form render cases")
@@ -1101,11 +1191,13 @@ def main():
               t_a_retry_reuses_the_render_and_keeps_its_chapters,
               t_an_upload_that_succeeded_is_never_repeated,
               t_posting_needs_a_person_and_then_a_flip,
-              t_dropping_removes_the_unlisted_upload):
+              t_dropping_removes_the_unlisted_upload,
+              t_the_render_is_not_started_without_an_upload_credential):
         t(state)
     for t in (t_a_chapter_with_no_record_is_flagged,
               t_a_chapter_with_a_record_is_not_flagged,
-              t_figures_spelled_out_still_count_as_figures):
+              t_figures_spelled_out_still_count_as_figures,
+              t_publishing_needs_a_wider_scope_than_uploading):
         t()
 
     print("\n" + "=" * 72)
