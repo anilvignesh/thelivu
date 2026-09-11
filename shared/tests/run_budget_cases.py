@@ -127,11 +127,38 @@ def t_belief_headroom_is_independent():
           spent >= cap * 0.55, False)
 
 
+def t_prompt_caching_is_only_applied_where_it_pays():
+    """A cache WRITE bills at 1.25x, so caching a prompt nothing re-reads costs
+    more than not caching — silently, with no error anywhere.
+
+    Measured over 30 days to 2026-09-11 (see docs/token-cost-measurement.md):
+    video-script writes 941k cache tokens and reads back 53k, a 4% hit and a
+    13% overspend across 204 calls — the highest-volume skill we run. Three
+    others are mildly negative for the same reason. The mechanism is fine; the
+    CADENCE decides, and a skill called once per reel build has nothing left in
+    a 5-minute window to hit.
+
+    This guards the denylist, not the numbers: the point is that a new skill
+    caches by DEFAULT and has to be measured out, rather than the reverse.
+    """
+    from engine.agents import skill_runner
+
+    check("video-script is not cached", "video-script" in skill_runner.NO_PROMPT_CACHE, True)
+    # The ones caching genuinely pays for, -46% to -31% on the same data.
+    for skill in ("chief-of-staff", "news-investigator", "story-scout",
+                  "topic-intake", "ek:record-builder"):
+        check(f"{skill} still caches", skill in skill_runner.NO_PROMPT_CACHE, False)
+    # A skill nobody has measured yet must cache, not silently opt out.
+    check("an unmeasured skill caches by default",
+          "some-brand-new-skill" in skill_runner.NO_PROMPT_CACHE, False)
+
+
 def main():
     init_db()
     for t in (t_reserve_parsing, t_reserve_clamp, t_over_budget,
               t_reserve_zero_is_the_old_behaviour, t_no_cap_and_attended,
-              t_belief_headroom_is_independent):
+              t_belief_headroom_is_independent,
+              t_prompt_caching_is_only_applied_where_it_pays):
         t()
 
     print("\n" + "=" * 72)

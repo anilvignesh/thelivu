@@ -534,6 +534,16 @@ def _run_nvidia(skill_name, input_text, system_prompt, max_tokens, run_id=None):
 # call with NO tools, forcing the model to answer from what it has already gathered.
 _MAX_TOOL_ROUNDS = 6
 
+# Skills whose system prompt is NOT worth caching — see _run_claude below for the
+# measurements. These are called too far apart for the 5-minute window, so the
+# 1.25x write premium is paid on every call and almost never recovered.
+NO_PROMPT_CACHE = {
+    "video-script",
+    "article-writer",
+    "editorial-reviewer",
+    "pattern-synthesizer",
+}
+
 
 def _cache_growing_context(messages):
     """Mark the end of the conversation as a cache breakpoint so each tool round
@@ -568,12 +578,32 @@ def _run_claude(skill_name, input_text, system_prompt, extra_tools, max_tokens,
     rounds = 0
 
     # Cache the system prompt (contract + date anchor + full SKILL.md, ~1.5-2k
-    # tokens). When the same skill is called again within the cache window — the
-    # revision loop re-runs article-writer / editorial-reviewer up to 3× minutes
-    # apart with an identical system prompt — the repeat bills at ~0.1×. Below the
-    # model's minimum cacheable size the flag is simply ignored, never an error.
-    system_blocks = [{"type": "text", "text": system_prompt,
-                      "cache_control": {"type": "ephemeral"}}]
+    # tokens) — but only for skills where a repeat call actually lands inside the
+    # 5-minute window. Below the model's minimum cacheable size the flag is
+    # simply ignored, never an error.
+    #
+    # This used to be unconditional, on the assumption that the revision loop
+    # re-runs article-writer / editorial-reviewer minutes apart. Measured over 30
+    # days (2026-09-11) that assumption does not hold, and a cache write bills at
+    # 1.25x, so writing one that nothing reads costs MORE than not caching:
+    #
+    #   video-script         204 calls   4% hit   +13% spend
+    #   pattern-synthesizer   32 calls   3% hit    +4%
+    #   editorial-reviewer    34 calls   7% hit    +3%
+    #   article-writer        34 calls   6% hit    +2%
+    #
+    # against, on the same data, -46% for chief-of-staff, -41% for
+    # ek:record-builder, -37% for news-investigator. The mechanism is sound; it
+    # is the CADENCE that decides. A skill called once per reel build, ten-plus
+    # minutes apart, has no prefix left to hit.
+    #
+    # So this is a denylist of measured losers, not an allowlist: a new skill
+    # caches by default and shows up in the same report if it should not.
+    # Re-measure with the query in docs/ before editing — the right answer here
+    # changes when call cadence does.
+    system_blocks = [{"type": "text", "text": system_prompt}]
+    if skill_name not in NO_PROMPT_CACHE:
+        system_blocks[0]["cache_control"] = {"type": "ephemeral"}
 
     log.info("Running %s via Claude (%s)", skill_name, model)
 
