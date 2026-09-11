@@ -149,9 +149,50 @@ def mechanical_blockers(parsed):
     if not parsed.get("why_long_form"):
         out.append("No WHY_LONG_FORM line — the script does not say why this is "
                    "not a reel")
+    out.extend(_long_holds(parsed))
     fits, why = longform.fits_window(parsed.get("word_count", 0))
     if not fits:
         out.append(why)
+    return out
+
+
+# Past this, one frame is a slide with a voice over it. Anil, 2026-09-11: the
+# video "shouldnt end up like an audio book". The renderer cuts as often as the
+# narration allows, but it can only cut to something that exists — a chapter
+# that declares two assets and runs two minutes holds each for a minute, and no
+# renderer setting fixes that. Only another FIGURE, TABLE, RECORD or IMAGE line
+# does, which makes it a note for the reviewer rather than a knob.
+MAX_HOLD_SECONDS = 20.0
+
+
+def _long_holds(parsed):
+    """Units whose frames sit on screen too long because too little was declared."""
+    from publishing import longform, longform_render
+
+    out = []
+    def _bookend(key):
+        return {"figures": parsed.get(f"{key}_figures") or [],
+                "images": parsed.get(f"{key}_images") or []}
+
+    units = [("Cold open", _bookend("cold_open"), parsed.get("cold_open", ""),
+              parsed.get("cold_open_image"))]
+    for c in parsed.get("chapters", []):
+        units.append((f"Chapter {c['n']} ({c['title']})", c, c["text"], None))
+    units.append(("Close", _bookend("close"), parsed.get("close", ""),
+                  parsed.get("close_image")))
+
+    for name, chap, text, fallback in units:
+        words = len((text or "").split())
+        if not words:
+            continue
+        secs = words / (longform.SPOKEN_WORDS_PER_MINUTE / 60.0)
+        assets = longform_render.plan_assets(chap or {}, fallback_image=fallback)
+        shots = longform_render._shot_count(secs, len(assets)) if assets else 1
+        hold = secs / max(1, shots)
+        if hold > MAX_HOLD_SECONDS:
+            out.append(f"{name} holds one frame for {hold:.0f}s — declares "
+                       f"{len(assets)} asset(s) for {secs:.0f}s of narration; "
+                       f"needs more FIGURE/TABLE/RECORD/IMAGE lines")
     return out
 
 

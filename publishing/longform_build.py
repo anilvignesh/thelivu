@@ -188,10 +188,15 @@ def _upload_unlisted(qid, video_path, parsed, existing_id=None):
     with open(video_path, "rb") as f:
         data = f.read()
     log.info("#%s uploading %.1fMB unlisted…", qid, len(data) / 1e6)
+    from publishing.longform import build_description
     video_id, permalink = youtube.publish_video(
         data,
         title=parsed.get("title") or f"Thelivu long-form #{qid}",
-        description=parsed.get("description") or "",
+        # Not parsed["description"] — build_description() appends every source
+        # the video puts on screen, derived from the FIGURE/TABLE/RECORD lines
+        # rather than trusted to the writer's own list, which drifts the moment
+        # a chapter is edited.
+        description=build_description(parsed),
         tags=parsed.get("hashtags") or None,
         privacy="unlisted",
         chapters=chapters or None,

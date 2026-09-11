@@ -188,6 +188,71 @@ def draw_data_card(figure, out_png, chapter_label=""):
     return out_png
 
 
+def draw_table_frame(table, out_png, chapter_label=""):
+    """A short ranked list with one row lit up.
+
+    The frame that answers "there should be things valid on the screen". A rank
+    stated as a figure — "23rd of 26" — asks the viewer to take it on trust. The
+    same claim as a list they can read down, with the row that matters in the
+    accent colour, is checkable with their eyes while the narration is still
+    talking. For a story whose whole argument is that a raw count and a rate
+    rank the same state at opposite ends, this is the argument, not decoration.
+
+    Rows are drawn as given. The renderer does not sort, compute or round: every
+    number on screen is one the script declared and a reviewer approved at gate
+    1, which is the same rule FIGURE lines follow and for the same reason.
+    """
+    img = Image.open(_ground(out_png.with_name(out_png.stem + "_bg.png"),
+                             variant=0)).convert("RGB")
+    d = ImageDraw.Draw(img)
+    d.text((120, 96), "THELIVU", font=_font(MONO_BOLD, 38), fill=ACCENT)
+    if chapter_label:
+        d.text((120, 148), chapter_label.upper()[:60],
+               font=_font(MONO, 30), fill=MUTED)
+
+    title = (table.get("title") or "").strip()
+    y = 250
+    if title:
+        tf = _font(SERIF_BOLD, 60)
+        for line in _wrap(d, title, tf, W - 240)[:2]:
+            d.text((120, y), line, font=tf, fill=PAPER)
+            y += 72
+        y += 20
+
+    rows = table.get("rows") or []
+    # Fit the rows into what is left rather than assuming a count: five states
+    # and twelve want different leading, and a fixed one either overflows the
+    # frame or strands the list in its top third.
+    avail = H - y - 150
+    size = 52
+    while size > 26 and len(rows) * int(size * 1.55) > avail:
+        size -= 2
+    lead = int(size * 1.55)
+    rf, rfb = _font(MONO, size), _font(MONO_BOLD, size)
+
+    for row in rows:
+        if row.get("elision"):
+            # Say the list is cut rather than implying it is whole.
+            d.text((140, y + lead // 4), "·  ·  ·", font=_font(MONO, size),
+                   fill=(90, 80, 62))
+            y += lead
+            continue
+        if row.get("highlight"):
+            d.rectangle([108, y - 8, W - 120, y + size + 10], fill=(48, 40, 26))
+            d.rectangle([108, y - 8, 116, y + size + 10], fill=ACCENT)
+            d.text((140, y), row["text"][:60], font=rfb, fill=ACCENT)
+        else:
+            d.text((140, y), row["text"][:60], font=rf, fill=PAPER)
+        y += lead
+
+    source = (table.get("source") or "").strip()
+    if source:
+        d.text((120, H - 110), source.upper()[:100],
+               font=_font(MONO, 26), fill=MUTED)
+    img.save(out_png)
+    return out_png
+
+
 def draw_record_frame(page_png, caption, out_png, chapter_label="", quote=""):
     """The actual page of the actual document, with the line that matters beside it.
 
@@ -288,12 +353,49 @@ def _ffmpeg(args, what):
         raise RuntimeError(f"{what} failed: {r.stderr[-400:]}")
 
 
-def _segment(png, wav, out_mp4, duration, audio_start=0.0):
-    """One still held over a slice of narration.
+# Motion. Anil, 2026-09-11, after watching the second sample: "the video should
+# also be moving or show meaningful things to hook the viewer. We can[\'t] keep
+# static images like in the reels and expect users to watch it for 10 minutes."
+#
+# That overrides the original call, and correctly. A reel's stillness works
+# because the whole thing is over in ninety seconds; ten minutes of held stills
+# is a slideshow with a voice-over, however good the stills are.
+#
+# A slow push or pull, inside each shot. Deliberately not cross-dissolves
+# between shots: xfade would mean re-encoding the entire timeline in one
+# filter_complex instead of concat-copying eleven independent segments, which
+# turns a resumable render into an all-or-nothing one. Motion within a shot buys
+# most of the life for none of that.
+#
+# The upscale before zoompan is not optional. zoompan samples the SOURCE frame,
+# so zooming a 1920-wide image steps whole pixels at a time and the result
+# visibly judders; feeding it 2x and letting it scale down makes the steps
+# sub-pixel. This is the single most common way this filter is got wrong.
+ZOOM_MAX = 1.12          # 12% over the shot. More reads as a Ken Burns parody.
+ZOOM_SUPERSAMPLE = 2
 
-    No motion: a static frame held for twenty-odd seconds is what the
-    illustration cadence already assumes, and every effect is another thing to
-    break in a renderer that runs monthly.
+
+def _motion_filter(kind, duration):
+    """The -vf chain for one shot. `kind` is 'in', 'out' or 'none'."""
+    frames = max(1, int(round(duration * FPS)))
+    if kind == "none" or frames < FPS:
+        # Under a second there is no room for a move; a jump is worse than a hold.
+        return f"scale={W}:{H}"
+    big_w, big_h = W * ZOOM_SUPERSAMPLE, H * ZOOM_SUPERSAMPLE
+    step = (ZOOM_MAX - 1.0) / frames
+    if kind == "out":
+        z = f"if(eq(on,0),{ZOOM_MAX},max(zoom-{step:.8f},1.0))"
+    else:
+        z = f"min(zoom+{step:.8f},{ZOOM_MAX})"
+    return (f"scale={big_w}:{big_h},"
+            f"zoompan=z='{z}':d={frames}"
+            f":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+            f":s={W}x{H}:fps={FPS},"
+            f"setsar=1")
+
+
+def _segment(png, wav, out_mp4, duration, audio_start=0.0, motion="in"):
+    """One frame, moving slowly, over a slice of narration.
 
     `audio_start` exists because a chapter is voiced in ONE call — splitting the
     text would give each part its own prosody contour — and then cut into
@@ -312,16 +414,20 @@ def _segment(png, wav, out_mp4, duration, audio_start=0.0):
         args += ["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo"]
     args += ["-t", f"{duration:.3f}", "-r", str(FPS),
              "-c:v", "libx264", "-preset", "medium", "-crf", "20",
-             "-pix_fmt", "yuv420p", "-vf", f"scale={W}:{H}",
+             "-pix_fmt", "yuv420p", "-vf", _motion_filter(motion, duration),
              "-af", "apad", "-ar", "44100", "-ac", "2",
              "-c:a", "aac", "-b:a", "160k",
              str(out_mp4)]
     _ffmpeg(args, f"segment {Path(png).name}")
 
 
-# A chapter runs a minute or more, and now has three kinds of frame to fill it
-# with, so it can hold more cuts than the illustration-only version did.
-MAX_SHOTS_PER_UNIT = 5
+# How often the picture should change. Anil, 2026-09-11: "it shouldnt end up
+# like an audio book" — which is what a long chapter on one frame is, however
+# good the frame. A flat cap got this wrong in the other direction: five shots
+# over a 110-second chapter is 22 seconds a frame, no better than three over 66.
+# So the cut rate follows the narration, and the cap is only a safety rail.
+TARGET_SHOT_SECONDS = 13.0
+MAX_SHOTS_PER_UNIT = 8
 # Below this a shot is a flicker. Lower than the illustration-only 12s, because a
 # number or a quoted line is READ — four or five seconds is enough for a figure
 # where a scene needs dwelling on.
@@ -330,10 +436,18 @@ MIN_SHOT_SECONDS = 8.0
 
 def _shot_count(duration, available):
     """How many cuts a unit of `duration` seconds earns, given `available`
-    assets. Long enough to need a second frame, or it keeps the first."""
+    assets.
+
+    Three things bound it and all three matter: what the writer supplied, how
+    fast a viewer can absorb a change (the floor), and how long anyone will look
+    at one picture (the target). A chapter with two assets gets two shots however
+    long it runs — the fix for that is a TABLE or a FIGURE line, not a longer
+    hold, and the gate-1 blockers say so.
+    """
     if available <= 1:
         return 1
-    k = min(available, MAX_SHOTS_PER_UNIT, int(duration // MIN_SHOT_SECONDS))
+    wanted = max(1, round(duration / TARGET_SHOT_SECONDS))
+    k = min(available, MAX_SHOTS_PER_UNIT, wanted, int(duration // MIN_SHOT_SECONDS))
     return max(1, k)
 
 
@@ -356,11 +470,12 @@ def plan_assets(chapter, fallback_image=None):
     in the skill rather than pretending the renderer can infer it.
     """
     figures = [{"kind": "figure", "figure": f} for f in (chapter.get("figures") or [])]
+    tables = [{"kind": "table", "table": t} for t in (chapter.get("tables") or [])]
     records = [{"kind": "record", "record": r} for r in (chapter.get("records") or [])]
     images = [{"kind": "image", "prompt": p} for p in (chapter.get("images") or [])]
     if not images and fallback_image:
         images = [{"kind": "image", "prompt": fallback_image}]
-    return figures + records + images
+    return figures + tables + records + images
 
 
 def _render_record(record, out_dir, stem):
@@ -462,9 +577,16 @@ def render(parsed, out_mp4, work_dir=None, voice=None, illustrate=True,
     #    Figures and records first, illustrations last — see plan_assets.
     plans = []          # per unit: [(asset, seconds)]
     for (key, chap, text), (_wav, dur, pauses) in zip(units, voiced):
-        fallback = (parsed.get("cold_open_image") if key == "cold_open"
-                    else parsed.get("close_image") if key == "close" else None)
-        assets = plan_assets(chap or {}, fallback_image=fallback)
+        if chap:
+            unit, fallback = chap, None
+        else:
+            # The bookends carry the same vocabulary as a chapter — see
+            # parse_script. A 46-second close on one frame is the audio-book
+            # failure on the unit a viewer judges the video by.
+            unit = {"figures": parsed.get(f"{key}_figures") or [],
+                    "images": parsed.get(f"{key}_images") or []}
+            fallback = parsed.get(f"{key}_image")
+        assets = plan_assets(unit, fallback_image=fallback)
         if not assets:
             assets = [{"kind": "image", "prompt": None}]
         k = _shot_count(dur, len(assets))
@@ -544,6 +666,8 @@ def render(parsed, out_mp4, work_dir=None, voice=None, illustrate=True,
             png = tmp / f"frame_{i:03d}_{j}.png"
             if asset["kind"] == "figure":
                 draw_data_card(asset["figure"], png, chapter_label=label)
+            elif asset["kind"] == "table":
+                draw_table_frame(asset["table"], png, chapter_label=label)
             elif asset["kind"] == "record":
                 shot = asset["shot"]
                 draw_record_frame(shot["path"], shot["caption"], png,

@@ -205,6 +205,7 @@ There are three kinds of frame, and they are not equal:
 |---|---|---|
 | `FIGURE` | the number, drawn huge, with its label and its source | every figure the argument turns on |
 | `RECORD` | the real page of the real document, with the quoted line beside it | every claim a sceptic would want to see for themselves |
+| `TABLE` | a short ranked list, one row lit up | any claim that is a rank, a comparison or a breakdown |
 | `IMAGE` | a generated symbolic scene | the connective tissue between those |
 
 When a chapter declares more than its narration has room for, **the renderer
@@ -237,6 +238,42 @@ third field is not optional.** A number with no source on screen is a poster.
 
 **One to three figures per chapter.** A chapter with five is a chapter that
 should be two.
+
+### TABLE lines
+
+```
+CHAPTER 3 TABLE: <title> | <source> | <row> | <row> | ... | *<the row that matters>
+```
+
+```
+CHAPTER 3 TABLE: Share of NH projects running late | MoRTH, state-wise NH projects and delayed projects (data.gov.in) | Arunachal Pradesh   87% | Mizoram   82% | Gujarat   71% | ... | *Kerala   22%   (4 of 18 — 23rd of 26)
+```
+
+A `*` prefix highlights that row. A row that is just `...` renders as a visible
+elision — say the list is cut rather than implying it is whole.
+
+**A rank is not a figure.** "Kerala is 23rd of 26" as a single number asks the
+viewer to take it on trust; as five states they can read down, with Kerala lit
+at the bottom, it is checkable with the eyes while you are still talking. Any
+claim of the form *more than*, *less than*, *ranks Nth*, or *of the total, X*
+should be a TABLE.
+
+Four to seven rows. The renderer does not sort, compute or round — every number
+on screen is one you wrote and a reviewer approved.
+
+### The cold open and the close take the same lines
+
+`COLD_OPEN_FIGURE:`, `COLD_OPEN_IMAGE 2:`, `CLOSE_FIGURE:`, `CLOSE_IMAGE 3:` —
+all repeatable. These are the units a viewer judges the video by, and they used
+to be the only ones that could hold exactly one frame.
+
+### Give every unit enough to cut to
+
+The renderer changes the picture about **every 13 seconds**, but it can only cut
+to something you declared. A chapter with two assets and two minutes of
+narration holds each frame for a minute, and no renderer setting fixes that —
+gate 1 will flag it as *"holds one frame for 60s"*. Roughly **one asset per
+12-15 seconds of narration**, counting all four kinds.
 
 ### Never make a picture do a number's job
 

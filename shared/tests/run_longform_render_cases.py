@@ -94,6 +94,7 @@ CHAPTER 1 IMAGE 2: A rubber stamp resting beside an unsigned page.
 
 CHAPTER 2 TITLE: The money
 CHAPTER 2: Two thousand seven hundred and thirty-two crore rupees was imposed in penalties over three years, and seven hundred and eighty crore of it was recovered. The rest is still outstanding.
+CHAPTER 2 TABLE: Share of NH projects running late | MoRTH (data.gov.in) | Arunachal Pradesh 87% | Gujarat 71% | ... | *Kerala 22%
 CHAPTER 2 IMAGE 1: A cash box with a broken lock.
 CHAPTER 2 IMAGE 2: An empty vault shelf.
 CHAPTER 2 IMAGE 3: A pile of unpaid invoices.
@@ -123,18 +124,19 @@ def t_shots_never_exceed_the_pictures_available():
 
 
 def t_the_narration_not_the_prompt_count_sets_the_budget():
-    # The floor moved from 12s to 8s when figures and records joined the
-    # vocabulary: a number or a quoted line is READ, and four or five seconds is
-    # enough for one where a scene needs dwelling on. So 30 seconds now buys
-    # three shots where it used to buy two.
-    check("20s with three assets", lfr._shot_count(20.0, 3), 2)
-    check("30s with three assets", lfr._shot_count(30.0, 3), 3)
+    # Three bounds, and each has to be able to win. TARGET_SHOT_SECONDS (13s)
+    # sets the cadence, MIN_SHOT_SECONDS (8s) stops a flicker, and the asset
+    # count stops the renderer cutting to something that does not exist.
+    check("30s wants about two shots", lfr._shot_count(30.0, 6), 2)
+    check("90s wants about seven", lfr._shot_count(90.0, 12), 7)
     check("a 10s unit still holds one", lfr._shot_count(10.0, 3), 1)
+    check("and never more frames than assets", lfr._shot_count(90.0, 3), 3)
 
 
 def t_the_cap_holds_however_long_the_chapter_runs():
-    check("ten minutes, six images", lfr._shot_count(600.0, 6),
-          lfr.MAX_SHOTS_PER_UNIT)
+    # The cap is a safety rail, not the cadence: ten minutes of narration at
+    # 13s a shot "wants" 46 frames, and no unit should ever get that.
+    check("the cap holds", lfr._shot_count(600.0, 40), lfr.MAX_SHOTS_PER_UNIT)
 
 
 # ------------------------------------------------------------------- framing
@@ -217,8 +219,9 @@ def t_hard_evidence_outranks_illustration():
     kinds = [a["kind"] for a in lfr.plan_assets(chapter)]
     check("declared order within a kind, evidence first", kinds,
           ["figure", "figure", "record", "image", "image", "image"])
-    # A 30-second chapter buys three shots; those three must be the hard ones.
-    k = lfr._shot_count(30.0, len(kinds))
+    # A 40-second chapter buys three shots; those three must be the hard ones,
+    # and all three illustrations go unused.
+    k = lfr._shot_count(40.0, len(kinds))
     check("a short chapter keeps the evidence", kinds[:k],
           ["figure", "figure", "record"])
 
@@ -254,6 +257,87 @@ def t_a_record_that_cannot_be_fetched_demotes_instead_of_failing():
                              tempfile.mkdtemp(), "s"), None)
     check("a record with no url returns None",
           lfr._render_record({"url": ""}, tempfile.mkdtemp(), "s"), None)
+
+
+def t_a_table_is_a_frame_the_viewer_can_check():
+    """Anil, 2026-09-11: "there should be things valid on the screen, its a
+    video at the end of the day."
+
+    A rank stated as a figure asks for trust. The same claim as a short ranked
+    list with one row lit is checkable with the eyes while the narration is
+    still talking — which for a story whose whole argument is that a raw count
+    and a rate rank the same state at opposite ends IS the argument."""
+    import tempfile as _t
+    from pathlib import Path as _P
+    from PIL import Image
+
+    parsed = longform.parse_script(SCRIPT)
+    ch2 = [c for c in parsed["chapters"] if c["n"] == 2][0]
+    table = ch2["tables"][0]
+    check("rows parsed", len(table["rows"]), 4)
+    check("the highlighted row is marked",
+          [r["text"] for r in table["rows"] if r["highlight"]], ["Kerala 22%"])
+    check("the elision is marked, not silently dropped",
+          sum(1 for r in table["rows"] if r["elision"]), 1)
+    out = lfr.draw_table_frame(table, _P(_t.mkdtemp()) / "t.png",
+                               chapter_label="The money")
+    check("the table frame is landscape", Image.open(out).size, (1920, 1080))
+
+
+def t_a_table_ranks_with_the_figures_not_the_pictures():
+    kinds = [a["kind"] for a in lfr.plan_assets(
+        {"figures": [{"value": "1"}], "tables": [{"title": "t"}],
+         "records": [{"url": "u"}], "images": ["a"]})]
+    check("evidence order", kinds, ["figure", "table", "record", "image"])
+
+
+def t_every_source_on_screen_reaches_the_description():
+    """Anil, 2026-09-11: "always make sure to leave the sources in the video
+    description for the youtube long videos."
+
+    Derived from the FIGURE/TABLE/RECORD lines rather than trusted to the
+    writer's own list, which drifts the moment a chapter is edited."""
+    parsed = longform.parse_script(SCRIPT)
+    desc = longform.build_description(parsed)
+    check("there is a Sources block", "Sources" in desc, True)
+    check("the figure's source is in it", "MoRTH register" in desc
+          or "MoRTH (data.gov.in)" in desc, True)
+
+    # The same document cited two ways must appear once, with its URL.
+    two_ways = longform.parse_script(
+        "TITLE: t\nCOLD_OPEN: x\nCHAPTER 1 TITLE: A\nCHAPTER 1: b\n"
+        "CHAPTER 1 FIGURE: 5 | things | Lok Sabha Unstarred Question 843, 23 July 2026\n"
+        "CHAPTER 1 RECORD: Lok Sabha Unstarred Question 843, answered 23 July 2026"
+        " | https://sansad.in/x/AU843.pdf | five\nCLOSE: y\n")
+    lines = [l for l in longform.build_description(two_ways).splitlines()
+             if l.strip().startswith(("1.", "2."))]
+    check("one entry, not two", len(lines), 1)
+    check("and it is the one with the URL", "sansad.in" in lines[0], True)
+
+
+def t_a_shared_year_is_not_a_shared_source():
+    """Nearly every citation carries a year, so counting one as identity merged
+    two different ministry replies into one line."""
+    parsed = longform.parse_script(
+        "TITLE: t\nCOLD_OPEN: x\nCHAPTER 1 TITLE: A\nCHAPTER 1: b\n"
+        "CHAPTER 1 FIGURE: 1 | a | Ministry reply reported August 2026\n"
+        "CHAPTER 1 FIGURE: 2 | b | Government figures, as reported 2026\nCLOSE: y\n")
+    lines = [l for l in longform.build_description(parsed).splitlines()
+             if l.strip().startswith(("1.", "2."))]
+    check("both survive", len(lines), 2)
+
+
+def t_a_shot_moves_and_a_very_short_one_does_not():
+    """A slow push stops a ten-minute video reading as a slideshow. Under a
+    second there is no room for a move and a jump is worse than a hold."""
+    check("a normal shot moves", "zoompan" in lfr._motion_filter("in", 6.0), True)
+    check("it supersamples first, or zoompan judders",
+          lfr._motion_filter("in", 6.0).startswith(
+              f"scale={lfr.W * lfr.ZOOM_SUPERSAMPLE}:"), True)
+    check("a sub-second shot holds", lfr._motion_filter("in", 0.5),
+          f"scale={lfr.W}:{lfr.H}")
+    check("and motion can be switched off", lfr._motion_filter("none", 6.0),
+          f"scale={lfr.W}:{lfr.H}")
 
 
 # --------------------------------------------------------------- end to end
@@ -347,17 +431,16 @@ def t_the_chapters_were_actually_cut(state):
     A renderer that silently uses only the first image still produces a valid
     file of the right length, so nothing else in this suite would notice.
 
-    Both chapters here run ~30s, which at the 8-second floor buys three shots.
-    Chapter 1 declares a figure and two images; chapter 2 declares three images.
-    The shot budget comes from the narration, not from how many assets the
-    writer happened to supply — a chapter with eight IMAGE lines and twelve
-    seconds of speech still gets one frame.
+    Both chapters here run ~30s, which at a 13-second target cadence buys two
+    shots each. The budget comes from the narration, not from how many assets
+    the writer supplied — a chapter with eight IMAGE lines and twelve seconds of
+    speech still gets one frame.
     """
     res = state["res"]
     if not res.get("ok"):
         return
-    # cold open (1) + card + 3 + card + 3 + close (1) = 10
-    check("shot count", res.get("shots"), 10)
+    # cold open (1) + card + 2 + card + 2 + close (1) = 8
+    check("shot count", res.get("shots"), 8)
 
 
 # ------------------------------------------------------- the chain around it
@@ -726,7 +809,12 @@ def main():
               t_hard_evidence_outranks_illustration,
               t_a_chapter_with_nothing_declared_still_gets_a_frame,
               t_a_figure_is_drawn_not_generated,
-              t_a_record_that_cannot_be_fetched_demotes_instead_of_failing):
+              t_a_record_that_cannot_be_fetched_demotes_instead_of_failing,
+              t_a_table_is_a_frame_the_viewer_can_check,
+              t_a_table_ranks_with_the_figures_not_the_pictures,
+              t_every_source_on_screen_reaches_the_description,
+              t_a_shared_year_is_not_a_shared_source,
+              t_a_shot_moves_and_a_very_short_one_does_not):
         t()
     for t in (t_the_whole_chain_renders,
               t_the_file_is_as_long_as_the_plan_says,

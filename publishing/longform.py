@@ -207,6 +207,31 @@ def parse_script(text):
     if m:
         out["hashtags"] = [t.lstrip("#") for t in m.group(1).split() if t.strip()]
 
+    # The cold open and the close are units like any other and were the only
+    # ones that could hold exactly one frame. The close of the NH script runs 46
+    # seconds — a frame held that long is the "audio book" failure by itself, on
+    # the two units a viewer is most likely to judge the video by. So they take
+    # the same repeatable vocabulary as a chapter.
+    for bookend in ("cold_open", "close"):
+        out[f"{bookend}_figures"] = []
+        out[f"{bookend}_images"] = []
+        for line in text.splitlines():
+            m = re.match(rf"^\s*{bookend}_FIGURE\s*:\s*(.+)$", line, re.I)
+            if m:
+                bits = [b.strip() for b in m.group(1).split("|")]
+                if bits and bits[0]:
+                    out[f"{bookend}_figures"].append({
+                        "value": bits[0],
+                        "label": bits[1] if len(bits) > 1 else "",
+                        "source": bits[2] if len(bits) > 2 else ""})
+                continue
+            m = re.match(rf"^\s*{bookend}_IMAGE(?:\s+\d+)?\s*:\s*(.+)$", line, re.I)
+            if m:
+                out[f"{bookend}_images"].append(m.group(1).strip())
+        # The singular field stays, so anything already reading it keeps working.
+        if out[f"{bookend}_images"] and not out.get(f"{bookend}_image"):
+            out[f"{bookend}_image"] = out[f"{bookend}_images"][0]
+
     chapters = {}
     for line in text.splitlines():
         m = re.match(r"^\s*CHAPTER\s+(\d+)\s+TITLE\s*:\s*(.+)$", line, re.I)
@@ -234,6 +259,29 @@ def parse_script(text):
         # 200pt in the middle of the screen — the single worst place in the whole
         # system to be wrong. The writer states it, and it is reviewable at gate 1
         # against the source named in the same line.
+        # "CHAPTER 3 TABLE: <title> | <source> | Arunachal = 87% | ... | *Kerala = 22%"
+        #
+        # A rank is not a number. "Kerala is 23rd of 26" told as a single figure
+        # asks the viewer to take it on trust; the same claim as a short ranked
+        # list with one row lit up is something they can check with their eyes
+        # in four seconds. Anil, 2026-09-11: "there should be things valid on
+        # the screen, its a video at the end of the day."
+        #
+        # A row prefixed `*` is the highlighted one. A row that is just `...` is
+        # an elision — say so on screen rather than implying the list is whole.
+        m = re.match(r"^\s*CHAPTER\s+(\d+)\s+TABLE\s*:\s*(.+)$", line, re.I)
+        if m:
+            bits = [b.strip() for b in m.group(2).split("|")]
+            if len(bits) >= 3:
+                chapters.setdefault(int(m.group(1)), {}).setdefault("tables", []).append({
+                    "title": bits[0],
+                    "source": bits[1],
+                    "rows": [{"text": r.lstrip("*").strip(),
+                              "highlight": r.startswith("*"),
+                              "elision": r.strip() == "..."}
+                             for r in bits[2:] if r],
+                })
+            continue
         m = re.match(r"^\s*CHAPTER\s+(\d+)\s+FIGURE\s*:\s*(.+)$", line, re.I)
         if m:
             bits = [b.strip() for b in m.group(2).split("|")]
@@ -262,11 +310,84 @@ def parse_script(text):
         {"n": n, "title": c.get("title", f"Chapter {n}"),
          "text": c.get("text", ""), "image": c.get("image", ""),
          "images": c.get("images", []), "records": c.get("records", []),
-         "figures": c.get("figures", [])}
+         "figures": c.get("figures", []), "tables": c.get("tables", [])}
         for n, c in sorted(chapters.items()) if c.get("text")
     ]
     out["word_count"] = spoken_words(text)
     return out
+
+
+def build_description(parsed):
+    """The YouTube description: the writer's blurb, then EVERY source used.
+
+    Anil, 2026-09-11: "always make sure to leave the sources in the video
+    description for the youtube long videos."
+
+    Derived from the frames rather than trusted to the writer. Every FIGURE,
+    TABLE and RECORD line carries the source it came from, because that source
+    is printed on screen beside the number — so the description is assembled
+    from the same fields, deduplicated, in the order they appear. A hand-written
+    source list drifts the moment a chapter is edited; this one cannot, and a
+    source that reaches the screen with no citation would have failed at the
+    parser long before it reached here.
+
+    RECORD lines contribute their URL, which is the strongest kind: a viewer who
+    doubts the video can open the document itself.
+    """
+    parts = [(parsed.get("description") or "").strip()]
+
+    # The same document is cited two ways: a FIGURE line says "Lok Sabha
+    # Unstarred Question 843, 23 July 2026" and the RECORD line for the page on
+    # screen says "...answered 23 July 2026" with the URL. Exact-string dedup
+    # keeps both and the list reads as padded.
+    #
+    # So identity is the DISTINCTIVE NUMBERS — a question number, a PIB release
+    # id, a year — taken from the text and its URL together. Two citations whose
+    # numbers are the same document are the same document, whatever words wrap
+    # them. Numbers rather than fuzzy text matching because a citation's numbers
+    # are the part nobody paraphrases.
+    def _ident(text, url=""):
+        # Years are excluded: nearly every citation carries one, so counting
+        # them as identity merged "Ministry reply reported August 2026" into
+        # "Government figures, as reported 2026" — two different sources whose
+        # only common number was the year. A question number or a release id
+        # identifies a document; a year identifies nothing.
+        nums = re.findall(r"\d{3,}", f"{text} {url}")
+        return frozenset(n for n in nums if not (len(n) == 4 and 1900 <= int(n) <= 2099))
+
+    seen_text, idents, sources = set(), [], []
+
+    def add(text, url=""):
+        text = (text or "").strip()
+        if not text or text.lower() in seen_text:
+            return
+        mine = _ident(text, url)
+        if mine and any(mine <= prior or prior <= mine for prior in idents):
+            return
+        seen_text.add(text.lower())
+        if mine:
+            idents.append(mine)
+        sources.append(f"{text} — {url}" if url else text)
+
+    # RECORDs first: they carry the URL, which is the citation a viewer can
+    # actually open, so when two forms collapse into one the URL-bearing form
+    # is the one that should survive.
+    for c in parsed.get("chapters", []):
+        for r in c.get("records") or []:
+            add(r.get("description"), r.get("url", ""))
+    for c in parsed.get("chapters", []):
+        for f in c.get("figures") or []:
+            add(f.get("source"))
+        for t in c.get("tables") or []:
+            add(t.get("source"))
+
+    if sources:
+        parts.append("Sources")
+        parts += [f"{i}. {src}" for i, src in enumerate(sources, 1)]
+        parts.append("Every figure on screen carries its source in the frame. "
+                     "If something here is wrong, tell us and we will correct it "
+                     "on the record.")
+    return "\n\n".join(p for p in parts if p).strip()
 
 
 def estimate_chapter_timestamps(parsed, wpm=SPOKEN_WORDS_PER_MINUTE):
