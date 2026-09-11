@@ -340,6 +340,70 @@ def t_a_shot_moves_and_a_very_short_one_does_not():
           f"scale={lfr.W}:{lfr.H}")
 
 
+# ------------------------------------------------------------------ footage
+#
+# Anil: "what is the possibility of stitching in short videos also into the
+# video" and then "if we give appropriate credits, cant we use them?"
+#
+# Stitching video is the easy half. The half that ends a channel is a clip
+# pulled off social media with no licence and no guarantee it is the right road
+# on the right day.
+
+def t_credit_is_the_condition_on_some_licences_and_not_on_others():
+    from publishing.longform_render import clip_licence_status
+
+    for lic in ("GODL-India, PIB release 2130592", "CC-BY 4.0, Wikimedia",
+                "licensed from the outlet", "own footage"):
+        ok, needs_call, _why = clip_licence_status({"licence": lic})
+        check(f"settled: {lic[:22]!r}", (ok, needs_call), (True, False))
+
+    # Naming the owner is not a licence. This is the confusion that gets a
+    # Content ID claim: crediting them does not create permission, and the
+    # matcher does not read credits.
+    ok, _n, why = clip_licence_status({"licence": "Onmanorama"})
+    check("a bare credit is not a basis", ok, False)
+    check("and it says what to do instead", "fair-dealing" in why, True)
+
+    check("no licence at all is refused",
+          clip_licence_status({"licence": ""})[0], False)
+
+
+def t_fair_dealing_renders_but_goes_to_a_human():
+    """A defence, not a permission — and the person carrying the risk decides."""
+    from publishing.longform_render import clip_licence_status
+
+    ok, needs_call, why = clip_licence_status(
+        {"licence": "fair-dealing: 6s excerpt, reporting current events"})
+    check("it renders", ok, True)
+    check("and it is flagged", needs_call, True)
+    check("with the reason", "defence, not a permission" in why, True)
+
+
+def t_an_unlicensed_clip_never_reaches_a_frame():
+    """Enforced in the plan as well as at the download, because it matters."""
+    kinds = [a["kind"] for a in lfr.plan_assets({
+        "clips": [{"shows": "a", "src": "u", "licence": "GODL-India"},
+                  {"shows": "b", "src": "u", "licence": ""},
+                  {"shows": "c", "src": "u", "licence": "Some News Channel"}],
+        "images": ["x"]})]
+    check("only the licensed clip is planned", kinds, ["clip", "image"])
+    check("and the download refuses it too",
+          lfr._prepare_clip({"src": "https://x/y.mp4", "licence": ""},
+                            tempfile.mkdtemp(), "s"), None)
+
+
+def t_the_caption_carries_all_three_things():
+    """What it shows, when and where, under what licence. Attribution is a
+    licence condition for most of what we can legally use, and provenance is
+    what stops a correctly licensed clip of the wrong flyover being a false
+    claim."""
+    cap = lfr._clip_caption({"shows": "The embankment after the collapse",
+                             "provenance": "Malappuram, 19 May 2025",
+                             "licence": "GODL-India"})
+    for bit in ("embankment", "Malappuram", "GODL"):
+        check(f"caption carries {bit!r}", bit in cap, True)
+
+
 # --------------------------------------------------------------- end to end
 
 def _render_with_stubs(tmp, illustrate=False):
@@ -814,7 +878,11 @@ def main():
               t_a_table_ranks_with_the_figures_not_the_pictures,
               t_every_source_on_screen_reaches_the_description,
               t_a_shared_year_is_not_a_shared_source,
-              t_a_shot_moves_and_a_very_short_one_does_not):
+              t_a_shot_moves_and_a_very_short_one_does_not,
+              t_credit_is_the_condition_on_some_licences_and_not_on_others,
+              t_fair_dealing_renders_but_goes_to_a_human,
+              t_an_unlicensed_clip_never_reaches_a_frame,
+              t_the_caption_carries_all_three_things):
         t()
     for t in (t_the_whole_chain_renders,
               t_the_file_is_as_long_as_the_plan_says,

@@ -259,6 +259,30 @@ def parse_script(text):
         # 200pt in the middle of the screen — the single worst place in the whole
         # system to be wrong. The writer states it, and it is reviewable at gate 1
         # against the source named in the same line.
+        # "CHAPTER 5 CLIP: <what it shows> | <url or local path> | <licence> | <when and where>"
+        #
+        # Real footage. Anil, 2026-09-11: "what is the possibility of stitching
+        # in short videos also into the video... if a video of the nh actually
+        # breaking up".
+        #
+        # The LICENCE FIELD IS REQUIRED and the renderer refuses a clip without
+        # one. Stitching video is the easy half; the half that ends the channel
+        # is a clip pulled off social media with no licence (a Content ID claim
+        # or a strike) and no guarantee it is the right road on the right day.
+        # See BRAND.md — licence and verification are separate requirements and
+        # both are mandatory, because a correctly licensed clip of the wrong
+        # flyover is still a false claim.
+        m = re.match(r"^\s*CHAPTER\s+(\d+)\s+CLIP\s*:\s*(.+)$", line, re.I)
+        if m:
+            bits = [b.strip() for b in m.group(2).split("|")]
+            if len(bits) >= 2:
+                chapters.setdefault(int(m.group(1)), {}).setdefault("clips", []).append({
+                    "shows": bits[0],
+                    "src": bits[1],
+                    "licence": bits[2] if len(bits) > 2 else "",
+                    "provenance": bits[3] if len(bits) > 3 else "",
+                })
+            continue
         # "CHAPTER 3 TABLE: <title> | <source> | Arunachal = 87% | ... | *Kerala = 22%"
         #
         # A rank is not a number. "Kerala is 23rd of 26" told as a single figure
@@ -310,7 +334,8 @@ def parse_script(text):
         {"n": n, "title": c.get("title", f"Chapter {n}"),
          "text": c.get("text", ""), "image": c.get("image", ""),
          "images": c.get("images", []), "records": c.get("records", []),
-         "figures": c.get("figures", []), "tables": c.get("tables", [])}
+         "figures": c.get("figures", []), "tables": c.get("tables", []),
+         "clips": c.get("clips", [])}
         for n, c in sorted(chapters.items()) if c.get("text")
     ]
     out["word_count"] = spoken_words(text)

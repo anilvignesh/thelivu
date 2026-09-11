@@ -78,6 +78,60 @@ stays the accent on the kraft variant.
 Full explored-directions artifact (for reference, not the source of truth —
 this section is): https://claude.ai/code/artifact/15020fc7-bfd3-494d-bb21-1bc6333dc35c
 
+## What goes on screen in ANY video (2026-09-11)
+
+Written here rather than in one script skill because it applies to every video
+this desk makes — reel, Short or long-form. The long-form skill adds its own
+frame types on top; these rules are the floor.
+
+Anil, after watching the first long-form samples: *"we need to print out
+numbers, facts, screenshots, evidences. generated images like these won't
+work."* / *"there should be things valid on the screen, its a video at the end
+of the day."*
+
+**1. A picture may never do a number's job.** No lettering in a generated image
+— that is a brand rule and diffusion models are bad at it anyway. So a prompt
+whose point is a readable word or figure produces neither: asked for *"a large
+invoice stamped PAID IN FULL"*, FLUX returned a broken column on cracked ground,
+because the only distinguishing part of the request had been stripped out.
+If the point is a word or a number, it is drawn type or a rendered document —
+never a generated picture. Generated images describe **objects, space and
+scale**.
+
+**2. Numbers on screen are declared, never scraped.** A figure a regex lifted
+out of narration is a figure nobody checked, rendered at 200pt in the middle of
+the screen. The writer states the value, what it is, and its source, and a human
+checks all three against the same line before it renders.
+
+**3. Every figure carries its source in the frame**, and the video description
+carries the full list. The description is assembled from the sources actually
+shown, not written separately — a hand-kept list drifts the moment a chapter is
+edited.
+
+**4. Real footage and photographs need a licence and a verification, in that
+order.** This is the one that will bite. A clip of a road collapsing, pulled off
+social media or a news site, has no licence (a Content ID claim or a strike) and
+no guarantee it is the right road on the right date — and being wrong about what
+a record shows is the only thing this desk cannot survive. Acceptable sources
+are, in order of preference:
+
+  * **Government-released footage and stills** — PIB, ministry and NHAI releases,
+    much of it under GODL-India. Attribution required, and the release is also
+    the provenance.
+  * **Explicitly licensed material** — CC-BY / CC-BY-SA with the licence named on
+    screen, or footage licensed from the outlet that shot it.
+  * **Our own material.**
+
+A clip with no licence field does not render. Verification is separate from
+licence and both are required: what it shows, where, and when — a correctly
+licensed clip of the wrong flyover is still a false claim.
+
+**5. A rendered document page is evidence, not decoration.** It is the one place
+lettering belongs, because its text is the reason to show it. Cropping to the
+relevant table is allowed; anything that changes what the page says is not, and
+it is captioned with what it is and where it came from so a viewer can go and
+read it.
+
 ## Reels & sign-off (locked 2026-07-26)
 
 Reels are the **default reach surface**; carousels are optional — the "receipts"

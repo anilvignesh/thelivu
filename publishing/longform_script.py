@@ -149,10 +149,37 @@ def mechanical_blockers(parsed):
     if not parsed.get("why_long_form"):
         out.append("No WHY_LONG_FORM line — the script does not say why this is "
                    "not a reel")
+    out.extend(_clip_calls(parsed))
     out.extend(_long_holds(parsed))
     fits, why = longform.fits_window(parsed.get("word_count", 0))
     if not fits:
         out.append(why)
+    return out
+
+
+def _clip_calls(parsed):
+    """Footage the reviewer has to decide about, not the renderer.
+
+    A clip on a settled licence (GODL, CC-BY, licensed, our own) needs no
+    comment — attribution is the condition and the caption carries it. A clip
+    relying on fair dealing is a judgement about risk, and the person carrying
+    that risk should be told, every time, before it ships. A clip with no
+    recognised basis never reaches a frame at all; it is reported here so the
+    reviewer knows a line was dropped rather than wondering where it went.
+    """
+    from publishing.longform_render import clip_licence_status
+
+    out = []
+    for c in parsed.get("chapters", []):
+        for clip in c.get("clips") or []:
+            ok, needs_call, why = clip_licence_status(clip)
+            what = (clip.get("shows") or clip.get("src") or "")[:60]
+            if not ok:
+                out.append(f"Chapter {c['n']} clip DROPPED — {what}: {why}")
+            elif needs_call:
+                out.append(f"Chapter {c['n']} clip needs your call — {what}: "
+                           f"{why}. Credit alone is not permission; Content ID "
+                           f"claims first and asks later.")
     return out
 
 

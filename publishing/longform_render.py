@@ -57,6 +57,10 @@ PAPER = (245, 240, 230)
 MUTED = (200, 192, 175)
 
 CHAPTER_CARD_SECONDS = 2.5
+# A clip is a shot, not a segment of its own — 15 seconds of someone else's
+# footage is a repost. The cap is on the DOWNLOAD, so a 2GB source file
+# cannot take the box down on a render that runs monthly.
+MAX_CLIP_BYTES = 120_000_000
 
 
 def _scrim(base):
@@ -394,6 +398,75 @@ def _motion_filter(kind, duration):
             f"setsar=1")
 
 
+def _clip_segment(clip_path, wav, out_mp4, duration, audio_start=0.0,
+                  caption="", chapter_label=""):
+    """A real piece of footage, letterboxed onto the house ground, over narration.
+
+    The clip's OWN audio is dropped and the narration continues over it. That is
+    not a shortcut — an eight-second burst of someone else's ambient sound in the
+    middle of a read is jarring, and more importantly the licence we hold is
+    usually for the pictures.
+
+    Letterboxed, never cropped to fill: a 4:3 phone clip cropped to 16:9 loses
+    the top and bottom of the thing it was shown to prove. `force_original_aspect_ratio`
+    plus `pad` keeps it whole on the ink ground.
+
+    The caption is burned in for the whole clip because attribution that appears
+    for two seconds is attribution nobody read. It carries what the footage shows
+    and under what licence — see BRAND.md.
+    """
+    ink = f"{INK[0]:02x}{INK[1]:02x}{INK[2]:02x}"
+    vf = (f"scale={W}:{H}:force_original_aspect_ratio=decrease,"
+          f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:color=0x{ink},"
+          f"setsar=1,fps={FPS}")
+    args = ["-stream_loop", "-1", "-i", str(clip_path)]
+    if wav:
+        args += ["-ss", f"{audio_start:.3f}", "-i", str(wav)]
+    else:
+        args += ["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo"]
+    args += ["-map", "0:v:0", "-map", "1:a:0",
+             "-t", f"{duration:.3f}", "-r", str(FPS),
+             "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+             "-pix_fmt", "yuv420p", "-vf", vf,
+             "-af", "apad", "-ar", "44100", "-ac", "2",
+             "-c:a", "aac", "-b:a", "160k",
+             str(out_mp4)]
+    _ffmpeg(args, f"clip {Path(clip_path).name}")
+
+
+def _overlay_caption(clip_mp4, out_mp4, caption, chapter_label=""):
+    """Burn the masthead and the attribution onto an encoded clip.
+
+    Drawn as a PNG and overlaid rather than with drawtext: drawtext needs the
+    font path escaped through two layers of shell and filter quoting, and gets
+    the ₹ glyph wrong. Compositing a transparent PNG uses the same PIL text
+    path every other frame in this file uses, so the type matches exactly.
+    """
+    strip = Path(out_mp4).with_suffix(".strip.png")
+    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.rectangle([0, 0, W, 200], fill=(0, 0, 0, 150))
+    d.rectangle([0, H - 150, W, H], fill=(0, 0, 0, 175))
+    d.text((120, 70), "THELIVU", font=_font(MONO_BOLD, 38), fill=ACCENT)
+    if chapter_label:
+        d.text((120, 122), chapter_label.upper()[:60],
+               font=_font(MONO, 30), fill=MUTED)
+    if caption:
+        cf = _font(MONO, 28)
+        lines = _wrap(d, caption, cf, W - 240)[:2]
+        y = H - 40 - len(lines) * 38
+        for line in lines:
+            d.text((120, y), line, font=cf, fill=PAPER)
+            y += 38
+    img.save(strip)
+    _ffmpeg(["-i", str(clip_mp4), "-i", str(strip),
+             "-filter_complex", "[0:v][1:v]overlay=0:0[v]",
+             "-map", "[v]", "-map", "0:a:0",
+             "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+             "-pix_fmt", "yuv420p", "-c:a", "copy", str(out_mp4)],
+            f"caption {Path(clip_mp4).name}")
+
+
 def _segment(png, wav, out_mp4, duration, audio_start=0.0, motion="in"):
     """One frame, moving slowly, over a slice of narration.
 
@@ -472,10 +545,105 @@ def plan_assets(chapter, fallback_image=None):
     figures = [{"kind": "figure", "figure": f} for f in (chapter.get("figures") or [])]
     tables = [{"kind": "table", "table": t} for t in (chapter.get("tables") or [])]
     records = [{"kind": "record", "record": r} for r in (chapter.get("records") or [])]
+    # Footage ranks with the records: it is the thing itself, not a picture of
+    # the idea of it. A clip with no licence is dropped here rather than
+    # rendered — see _prepare_clip and BRAND.md.
+    clips = [{"kind": "clip", "clip": c} for c in (chapter.get("clips") or [])
+             if clip_licence_status(c)[0]]
     images = [{"kind": "image", "prompt": p} for p in (chapter.get("images") or [])]
     if not images and fallback_image:
         images = [{"kind": "image", "prompt": fallback_image}]
-    return figures + tables + records + images
+    return figures + tables + clips + records + images
+
+
+# What makes a clip usable, and which of those needs a human to say yes.
+#
+# Anil: "if we give appropriate credits, cant we use them?" The honest answer is
+# in two halves, and conflating them is how a channel gets a strike:
+#
+#   Credit IS the licence condition   GODL-India, CC-BY, CC-BY-SA, a commercial
+#                                     licence, our own footage. Attribute as the
+#                                     licence requires and it is settled.
+#
+#   Credit is NOT permission          Ordinary copyrighted news or social footage.
+#                                     Crediting the owner does not create a right
+#                                     to use it, and YouTube's Content ID does not
+#                                     read credits — it matches audio and video
+#                                     fingerprints and files a claim automatically.
+#
+# Between them sits **fair dealing** (India, s.52(1)(a)(ii) Copyright Act 1957 —
+# reporting current events) and fair use in the US, which is the law YouTube's
+# dispute process actually runs on. A short excerpt of newsworthy footage, used
+# with commentary that transforms it, credited, is a recognised journalistic
+# practice. It is a DEFENCE, assessed case by case, not a permission — and
+# Content ID will claim it first and ask later.
+#
+# So this is not a binary. A clip declares its basis; the settled ones render
+# without comment, and a fair-dealing claim renders but is surfaced at gate 1 so
+# the person carrying the risk decides knowingly. None of this is legal advice.
+SETTLED_LICENCES = ("godl", "cc-by", "cc0", "public domain", "licensed", "own",
+                    "pib", "gov")
+FAIR_DEALING_PREFIX = "fair-dealing"
+
+
+def clip_licence_status(clip):
+    """(ok_to_render, needs_human_call, why)."""
+    lic = (clip.get("licence") or "").strip().lower()
+    if not lic:
+        return False, False, "no licence recorded"
+    if lic.startswith(FAIR_DEALING_PREFIX):
+        return True, True, "relies on fair dealing — a defence, not a permission"
+    if any(tok in lic for tok in SETTLED_LICENCES):
+        return True, False, ""
+    return False, False, (f"licence {clip.get('licence')!r} is not a recognised "
+                          f"basis; use a settled licence or declare "
+                          f"'{FAIR_DEALING_PREFIX}: <why>'")
+
+
+def _clip_caption(clip):
+    """What the footage shows, where it came from, and under what licence.
+
+    All three, always. Attribution is a licence condition for most of what we
+    can legally use, and provenance is what stops a correctly licensed clip of
+    the wrong flyover becoming a false claim.
+    """
+    bits = [(clip.get("shows") or "").strip()]
+    if clip.get("provenance"):
+        bits.append(clip["provenance"].strip())
+    if clip.get("licence"):
+        bits.append(clip["licence"].strip())
+    return " · ".join(b for b in bits if b)
+
+
+def _prepare_clip(clip, out_dir, stem):
+    """Get a usable local video file for a CLIP, or None.
+
+    Refuses, loudly, anything with no licence recorded. That check also lives in
+    plan_assets so an unlicensed clip never reaches a shot slot at all; it is
+    repeated here because this is the function that would otherwise download it,
+    and a rule that matters is worth enforcing at the point of the act as well
+    as the point of the plan.
+    """
+    ok, needs_call, why = clip_licence_status(clip)
+    if not ok:
+        log.warning("clip %r not usable: %s", clip.get("shows"), why)
+        return None
+    if needs_call:
+        log.info("clip %r %s — flagged for review", clip.get("shows"), why)
+    src = (clip.get("src") or "").strip()
+    if not src:
+        return None
+    out_dir = Path(out_dir)
+    try:
+        if not src.lower().startswith(("http://", "https://")):
+            local = Path(src).expanduser()
+            return local if local.exists() else None
+        from engine.digger import fetch as digfetch
+        return digfetch.fetch_file(src, out_dir / f"{stem}{Path(src).suffix or '.mp4'}",
+                                   max_bytes=MAX_CLIP_BYTES)
+    except Exception as e:
+        log.warning("clip %s unusable (%s: %s)", src, type(e).__name__, e)
+        return None
 
 
 def _render_record(record, out_dir, stem):
@@ -596,19 +764,25 @@ def render(parsed, out_mp4, work_dir=None, voice=None, illustrate=True,
     #    that fails to fetch demotes its shot to an illustration and that has to
     #    be known before the batch is sent — one batched FLUX call is the whole
     #    reason illustration is cheap.
-    n_rec = sum(1 for pl in plans for a, _ in pl if a["kind"] == "record")
-    if n_rec:
-        _p(0.20, f"Fetching {n_rec} record(s)…")
+    n_ev = sum(1 for pl in plans for a, _ in pl if a["kind"] in ("record", "clip"))
+    if n_ev:
+        _p(0.20, f"Fetching {n_ev} record(s) and clip(s)…")
     for i, pl in enumerate(plans):
         for j, (asset, _secs) in enumerate(pl):
-            if asset["kind"] != "record":
-                continue
-            shot = _render_record(asset["record"], tmp / "records", f"u{i}_{j}")
-            if shot:
-                asset["shot"] = shot
+            got = None
+            if asset["kind"] == "record":
+                got = _render_record(asset["record"], tmp / "records", f"u{i}_{j}")
+                if got:
+                    asset["shot"] = got
+            elif asset["kind"] == "clip":
+                got = _prepare_clip(asset["clip"], tmp / "clips", f"u{i}_{j}")
+                if got:
+                    asset["file"] = got
             else:
-                # Demote rather than fail. A missing document costs the frame
-                # its evidence, not the video its render.
+                continue
+            if not got:
+                # Demote rather than fail. A missing document or an unusable
+                # clip costs the frame its evidence, not the video its render.
                 asset["kind"] = "image"
                 asset["prompt"] = None
 
@@ -668,6 +842,16 @@ def render(parsed, out_mp4, work_dir=None, voice=None, illustrate=True,
                 draw_data_card(asset["figure"], png, chapter_label=label)
             elif asset["kind"] == "table":
                 draw_table_frame(asset["table"], png, chapter_label=label)
+            elif asset["kind"] == "clip":
+                clip = asset["clip"]
+                raw = tmp / f"clipseg_{i:03d}_{j}.mp4"
+                _clip_segment(asset["file"], wav, raw, secs, audio_start=offset)
+                seg = tmp / f"seg_{i:03d}_{j}.mp4"
+                _overlay_caption(raw, seg, _clip_caption(clip), chapter_label=label)
+                segs.append(seg)
+                offset += secs
+                clock += secs
+                continue
             elif asset["kind"] == "record":
                 shot = asset["shot"]
                 draw_record_frame(shot["path"], shot["caption"], png,

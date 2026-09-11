@@ -206,6 +206,7 @@ There are three kinds of frame, and they are not equal:
 | `FIGURE` | the number, drawn huge, with its label and its source | every figure the argument turns on |
 | `RECORD` | the real page of the real document, with the quoted line beside it | every claim a sceptic would want to see for themselves |
 | `TABLE` | a short ranked list, one row lit up | any claim that is a rank, a comparison or a breakdown |
+| `CLIP` | real footage, letterboxed, attribution burned in | when the event itself was filmed and we can lawfully use it |
 | `IMAGE` | a generated symbolic scene | the connective tissue between those |
 
 When a chapter declares more than its narration has room for, **the renderer
@@ -260,6 +261,41 @@ should be a TABLE.
 
 Four to seven rows. The renderer does not sort, compute or round — every number
 on screen is one you wrote and a reviewer approved.
+
+### CLIP lines — real footage
+
+```
+CHAPTER 5 CLIP: <what it shows> | <url or path> | <licence basis> | <when and where>
+```
+
+```
+CHAPTER 5 CLIP: The embankment at Kooriyad after the collapse | https://…/clip.mp4 | GODL-India, PIB release 2130592 | Malappuram, 19 May 2025
+```
+
+**The licence field is required and it is not a credit line.** Naming the outlet
+does not create permission to use their footage, and YouTube's Content ID does
+not read credits — it matches fingerprints and claims automatically. A clip
+whose licence field is just a name is dropped before it reaches a frame.
+
+Write one of:
+
+* **A settled basis** — `GODL-India`, `CC-BY …`, `CC0`, `public domain`,
+  `licensed from <outlet>`, `own footage`. Attribution is the condition and the
+  burned-in caption satisfies it. These render without comment.
+* **`fair-dealing: <why>`** — e.g. `fair-dealing: 6s excerpt, reporting current
+  events, with commentary`. Reporting current events is covered by s.52(1)(a)(ii)
+  of the Copyright Act 1957, and by fair use in the US, which is the law
+  YouTube's dispute process runs on. But it is a **defence, assessed case by
+  case, not a permission** — so it renders and is flagged at gate 1 for a human
+  to accept the risk. Keep the excerpt short and let the commentary carry it.
+
+The fourth field is **provenance, and it is not optional in practice**: a
+correctly licensed clip of the wrong flyover is still a false claim. What it
+shows, where, when.
+
+The clip's own audio is dropped and the narration continues over it. It is
+letterboxed onto the ink ground, never cropped to fill — a 4:3 phone clip
+cropped to 16:9 loses the top and bottom of the thing it was shown to prove.
 
 ### The cold open and the close take the same lines
 
