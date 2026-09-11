@@ -457,6 +457,66 @@ def t_longest_waiting_cleared_story_wins():
     check("oldest cleared story chosen", chosen["title"], "Older")
 
 
+# --------------------------------------------------------------------------
+# the two gates — approval is the trigger, not a calendar
+# --------------------------------------------------------------------------
+
+def t_the_pipeline_cannot_skip_a_gate():
+    """A state machine that silently accepts an illegal move is how a video
+    reaches YouTube without a person having read the script."""
+    check("cannot jump queued -> posted",
+          longform.can_advance(longform.QUEUED, longform.POSTED)[0], False)
+    check("cannot jump scripted -> rendered",
+          longform.can_advance(longform.SCRIPTED, longform.RENDERED)[0], False)
+    check("cannot jump script_ok -> posted",
+          longform.can_advance(longform.SCRIPT_OK, longform.POSTED)[0], False)
+    check("legal step allowed",
+          longform.can_advance(longform.SCRIPT_OK, longform.RENDERED)[0], True)
+    check("posted is terminal",
+          longform.can_advance(longform.POSTED, longform.RENDERED)[0], False)
+
+
+def t_the_machine_may_not_pass_its_own_gates():
+    """Rendering an unread script wastes an hour of the only voice server;
+    posting an unwatched video is worse."""
+    for state, nxt in ((longform.SCRIPTED, longform.SCRIPT_OK),
+                       (longform.RENDERED, longform.POSTED)):
+        try:
+            longform.advance(1, state, nxt, by="system")
+            check(f"{state} blocked for system", False, True)
+        except PermissionError as e:
+            check(f"{state} blocked for system", True, True)
+            check("reason names the cost", "voice server" in str(e) or "unwatched" in str(e), True)
+
+
+def t_a_person_may_pass_a_gate():
+    _fresh_db()
+    from shared.db import queue_longform, longform_queue
+    queue_longform(9, "Story", "over at 118s", 118.0)
+    qid = longform_queue(status=longform.QUEUED)[0]["id"]
+    longform.advance(qid, longform.QUEUED, longform.SCRIPTED, by="system")
+    check("pipeline may script it", len(longform_queue(status=longform.SCRIPTED)), 1)
+    longform.advance(qid, longform.SCRIPTED, longform.SCRIPT_OK, by="anil")
+    check("a person may approve", len(longform_queue(status=longform.SCRIPT_OK)), 1)
+
+
+def t_anything_can_be_dropped_at_any_live_state():
+    """A story can turn out wrong at any point before it ships."""
+    for state in (longform.QUEUED, longform.SCRIPTED, longform.SCRIPT_OK,
+                  longform.RENDERED):
+        check(f"{state} can be dropped",
+              longform.can_advance(state, longform.DROPPED)[0], True)
+
+
+def t_rendering_sits_between_the_gates():
+    """Not before the first — an hour of narration on a script nobody has read
+    is how the box ends up busy with something thrown away."""
+    check("render follows script approval",
+          longform.can_advance(longform.SCRIPT_OK, longform.RENDERED)[0], True)
+    check("render does not follow scripting directly",
+          longform.can_advance(longform.SCRIPTED, longform.RENDERED)[0], False)
+
+
 def main():
     print("long-form video cases")
     for t in (t_permalink_is_watch_not_shorts,
@@ -490,6 +550,11 @@ def main():
               t_queued_story_is_eligible_not_ready,
               t_a_cleared_story_takes_the_slot,
               t_longest_waiting_cleared_story_wins,
+              t_the_pipeline_cannot_skip_a_gate,
+              t_the_machine_may_not_pass_its_own_gates,
+              t_a_person_may_pass_a_gate,
+              t_anything_can_be_dropped_at_any_live_state,
+              t_rendering_sits_between_the_gates,
               t_budget_check_reports_synthesis_cost):
         t()
 

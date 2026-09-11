@@ -318,6 +318,88 @@ def budget_check(parsed_or_words):
 
 
 # ---------------------------------------------------------------------------
+# The pipeline, and where a human stands in it
+#
+# Anil, 2026-09-11: "all research, digging, validation should run automated,
+# once a script or report is reviewed and validated, we create the long videos
+# once that is reviewed we post it."
+#
+# So the trigger is APPROVAL, not a calendar. Long-form is occasional by design
+# — it happens when something substantial turns up, not every Saturday.
+#
+#   queued          the reel pipeline said this outgrew 90 seconds
+#   scripted        a long-form script exists and cleared the evidence bar
+#   -- GATE 1: a human reads the script ------------------------------------
+#   script_ok       approved; this is what releases the render
+#   rendered        an MP4 exists
+#   -- GATE 2: a human watches the video -----------------------------------
+#   posted          published to YouTube
+#   dropped         rejected at either gate, with a reason
+#
+# Two gates rather than one because they fail differently. A script can be
+# wrong about a fact, which no amount of watching the video will reveal — you
+# have to read it against the record. A video can be right and still unwatchable.
+# Collapsing them into one "approve" would let a factual error through on the
+# strength of the pictures looking fine.
+#
+# Rendering sits BETWEEN the gates on purpose: narration costs about an hour of
+# the reel-worker's only voice server, and spending that on a script nobody has
+# read yet is how the box ends up busy with something that gets thrown away.
+
+QUEUED = "queued"
+SCRIPTED = "scripted"
+SCRIPT_OK = "script_ok"
+RENDERED = "rendered"
+POSTED = "posted"
+DROPPED = "dropped"
+
+# Which transitions are legal. Anything else is a bug, and a state machine that
+# silently accepts an illegal move is how a video reaches YouTube without
+# passing a gate.
+TRANSITIONS = {
+    QUEUED:    {SCRIPTED, DROPPED},
+    SCRIPTED:  {SCRIPT_OK, DROPPED},
+    SCRIPT_OK: {RENDERED, DROPPED},
+    RENDERED:  {POSTED, DROPPED},
+    POSTED:    set(),
+    DROPPED:   set(),
+}
+
+# The states a human must move it out of. Nothing automated may advance these.
+HUMAN_GATES = {SCRIPTED, RENDERED}
+
+
+def can_advance(current, nxt):
+    """(ok, why_not) for a proposed state change."""
+    if current not in TRANSITIONS:
+        return False, f"unknown state {current!r}"
+    if nxt not in TRANSITIONS[current]:
+        return False, (f"{current} -> {nxt} is not a legal move; "
+                       f"allowed: {sorted(TRANSITIONS[current]) or 'none (terminal)'}")
+    return True, ""
+
+
+def requires_human(current):
+    """Is this state waiting on a person?"""
+    return current in HUMAN_GATES
+
+
+def advance(queue_id, current, nxt, by="system"):
+    """Move an item, refusing illegal moves and machine-made gate decisions."""
+    ok, why = can_advance(current, nxt)
+    if not ok:
+        raise ValueError(why)
+    if requires_human(current) and by == "system":
+        raise PermissionError(
+            f"{current} is a human gate — {nxt} needs a person, not the pipeline. "
+            "Rendering an unread script wastes an hour of the voice server; "
+            "posting an unwatched video is worse.")
+    from shared.db import set_longform_status
+    set_longform_status(queue_id, nxt)
+    return nxt
+
+
+# ---------------------------------------------------------------------------
 # Weekly cadence — at most one, Saturday morning
 #
 # "At most" is doing the work in that sentence. A weekly slot that must be
