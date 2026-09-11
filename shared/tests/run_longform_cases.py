@@ -23,6 +23,18 @@ os.environ["DB_PATH"] = _TMPDB.name
 
 from publishing import youtube                    # noqa: E402
 from publishing import longform                   # noqa: E402
+from datetime import datetime                     # noqa: E402
+
+
+def _fresh_db():
+    from shared.db import init_db, _conn
+    init_db()
+    conn = _conn()
+    try:
+        conn.cursor().execute("DELETE FROM longform_queue")
+        conn.commit()
+    finally:
+        conn.close()
 
 _fails = []
 
@@ -391,6 +403,60 @@ def t_budget_check_reports_synthesis_cost():
     check("message states the cost", "synthesise" in msg, True)
 
 
+# --------------------------------------------------------------------------
+# the graduation queue — the reel pipeline reporting on itself
+# --------------------------------------------------------------------------
+
+def t_queue_is_idempotent_per_run():
+    """A rebuilt run must not queue the same story twice."""
+    _fresh_db()
+    from shared.db import queue_longform, longform_queue
+    check("first queue accepted", bool(queue_longform(7, "T", "over at 118s", 118.0)), True)
+    check("repeat ignored", queue_longform(7, "T", "over again", 120.0), None)
+    check("one row", len(longform_queue()), 1)
+
+
+def t_queued_story_is_eligible_not_ready():
+    """Outgrowing a reel makes a story eligible for long-form. It still has to
+    clear the evidence bar, and a queue entry carries no claims yet — so the
+    slot must skip rather than publish it."""
+    _fresh_db()
+    from shared.db import queue_longform
+    from shared import evidence as ev
+    queue_longform(8, "Highway penalties", "over at 118s", 118.0)
+    cands = longform.queued_candidates()
+    check("candidate surfaced", len(cands), 1)
+    check("carries the reel's reason", "118s" in cands[0]["reason"], True)
+
+    cands[0]["claims"] = [ev.Claim("names a firm", ev.NAMED, ev.SECONDARY)]
+    chosen, why = longform.slot_decision(cands, datetime(2026, 9, 11, 23, 0))
+    check("not published on eligibility alone", chosen, None)
+    check("skip explains itself", "evidence bar" in why, True)
+
+
+def t_a_cleared_story_takes_the_slot():
+    _fresh_db()
+    from shared import evidence as ev
+    cands = [{"title": "Cleared story", "word_count": 1200,
+              "queued_since": "2026-09-01",
+              "claims": [ev.Claim("primary figure", ev.HOOK, ev.PRIMARY)]}]
+    chosen, why = longform.slot_decision(cands, datetime(2026, 9, 11, 23, 0))
+    check("published", chosen["title"], "Cleared story")
+    check("names the render deadline", "rendering must start by" in why, True)
+
+
+def t_longest_waiting_cleared_story_wins():
+    """A piece that has held up for two weeks of digging is more certain, not
+    more stale."""
+    _fresh_db()
+    from shared import evidence as ev
+    ok = lambda: [ev.Claim("f", ev.HOOK, ev.PRIMARY)]
+    cands = [{"title": "Newer", "word_count": 900, "queued_since": "2026-09-09", "claims": ok()},
+             {"title": "Older", "word_count": 900, "queued_since": "2026-09-01", "claims": ok()}]
+    chosen, _ = longform.slot_decision(cands, datetime(2026, 9, 11, 23, 0))
+    check("oldest cleared story chosen", chosen["title"], "Older")
+
+
 def main():
     print("long-form video cases")
     for t in (t_permalink_is_watch_not_shorts,
@@ -420,6 +486,10 @@ def main():
               t_chapter_timestamps_start_at_zero_and_ascend,
               t_length_alone_never_fails_a_script,
               t_only_machine_time_can_fail_a_script,
+              t_queue_is_idempotent_per_run,
+              t_queued_story_is_eligible_not_ready,
+              t_a_cleared_story_takes_the_slot,
+              t_longest_waiting_cleared_story_wins,
               t_budget_check_reports_synthesis_cost):
         t()
 

@@ -859,6 +859,33 @@ def make_narrated_reel(run_id, *, dark=None, article_url=None, progress=None,
             except Exception:
                 pass
 
+            # The reel format's overflow rule has now run out: the script was
+            # rewritten shorter once, told to cut whole beats, and is STILL
+            # over. Anything further would take the hook, the close, or a
+            # load-bearing attribution — which the rule forbids. That is the
+            # long-form graduation signal, and it is this pipeline reporting it
+            # about itself rather than a second judgement bolted alongside.
+            #
+            # The reel still ships, unchanged. A published reel does not close a
+            # topic (Anil, 2026-09-10: "we are not gonna say, the reel is done,
+            # no long video") — this records that the story ALSO owes a long
+            # video, for the weekly slot to pick up. Wrapped like the notify
+            # above: a queueing failure must never cost a built reel.
+            try:
+                from shared.db import queue_longform
+                queue_longform(
+                    run_id=run_id,
+                    title=(fields.get("title") or "")[:200],
+                    reason=(f"reel voiced at {total_s:.0f}s against a "
+                            f"{MAX_REEL_SECONDS:.0f}s ceiling after a shorter "
+                            f"rewrite — further cuts would take the hook, the "
+                            f"close, or an attribution"),
+                    reel_seconds=total_s)
+                log.info("run #%s: queued for long-form — the material outgrew "
+                         "the reel format", run_id)
+            except Exception as e:
+                log.warning("run #%s: could not queue for long-form (%s)", run_id, e)
+
         if illustrated:
             shots_per_beat = _plan_shots(voiced)
             n_shots = sum(shots_per_beat)

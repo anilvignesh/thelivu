@@ -363,6 +363,31 @@ def build_deadline(slot, word_count):
     return slot - lead
 
 
+def queued_candidates():
+    """Stories the reel pipeline said outgrew the format.
+
+    Written by make_reel at the moment the reel's own overflow rule runs out,
+    so the queue is the reel format reporting on itself rather than a second
+    judgement. Each still has to clear the evidence bar before it can take a
+    slot — outgrowing a reel makes a story ELIGIBLE for long-form, not ready.
+    """
+    try:
+        from shared.db import longform_queue
+        rows = longform_queue(status="queued")
+    except Exception:
+        return []
+    return [{
+        "id": r["id"],
+        "run_id": r.get("run_id"),
+        "title": r.get("title") or f"run #{r.get('run_id')}",
+        "reason": r.get("reason") or "",
+        "queued_since": str(r.get("queued_at") or ""),
+        "reel_seconds": r.get("reel_seconds"),
+        "claims": [],      # filled by whoever assembles the script
+        "word_count": 0,
+    } for r in rows]
+
+
 def slot_decision(candidates, now, assess=None):
     """Choose what fills the next slot, or decide to skip it.
 

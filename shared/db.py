@@ -420,6 +420,26 @@ CREATE TABLE IF NOT EXISTS rti_requests (
     created_at    TIMESTAMP DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_rti_status ON rti_requests (status, reply_by);
+
+-- Stories a reel could not hold. Written by the reel build at the exact moment
+-- the format's own overflow rule runs out: the script was rewritten shorter
+-- ONCE, told to cut whole beats, and is still over the ceiling — so the only
+-- remaining cuts are the hook, the close, or a load-bearing attribution, which
+-- the rule forbids. That is the graduation signal, and it is the reel pipeline
+-- reporting it about itself rather than a second judgement bolted alongside.
+--
+-- The reel still ships. This records that the story ALSO owes a long video.
+CREATE TABLE IF NOT EXISTS longform_queue (
+    id          SERIAL PRIMARY KEY,
+    run_id      INTEGER,
+    title       TEXT,
+    reason      TEXT,
+    reel_seconds REAL,
+    status      TEXT DEFAULT 'queued',   -- queued | drafted | published | dropped
+    queued_at   TIMESTAMP DEFAULT NOW(),
+    decided_at  TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_longform_queue_status ON longform_queue (status, queued_at);
 """
 
 # SQLite fallback schema (same structure, SQLite syntax)
@@ -778,6 +798,18 @@ CREATE TABLE IF NOT EXISTS rti_requests (
     created_at    TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_rti_status ON rti_requests (status, reply_by);
+
+CREATE TABLE IF NOT EXISTS longform_queue (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id      INTEGER,
+    title       TEXT,
+    reason      TEXT,
+    reel_seconds REAL,
+    status      TEXT DEFAULT 'queued',
+    queued_at   TEXT DEFAULT (datetime('now')),
+    decided_at  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_longform_queue_status ON longform_queue (status, queued_at);
 """
 
 
@@ -3574,6 +3606,51 @@ def set_digger_candidate_status(candidate_id, status):
         ph = "%s" if _is_postgres() else "?"
         cur.execute(f"UPDATE digger_candidates SET status = {ph} WHERE id = {ph}",
                     (status, candidate_id))
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
+def queue_longform(run_id, title, reason, reel_seconds=None):
+    """Record that a story outgrew the reel format. Idempotent per run."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(f"SELECT id FROM longform_queue WHERE run_id = {ph}", (run_id,))
+        if cur.fetchone():
+            return None
+        cur.execute(
+            f"""INSERT INTO longform_queue (run_id, title, reason, reel_seconds)
+                VALUES ({ph}, {ph}, {ph}, {ph})""",
+            (run_id, title, reason, reel_seconds))
+        conn.commit()
+        return cur.lastrowid if not _is_postgres() else True
+    finally:
+        conn.close()
+
+
+def longform_queue(status="queued"):
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(f"SELECT * FROM longform_queue WHERE status = {ph} ORDER BY queued_at",
+                    (status,))
+        return _fetchall(cur)
+    finally:
+        conn.close()
+
+
+def set_longform_status(queue_id, status):
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        now = "NOW()" if _is_postgres() else "datetime('now')"
+        cur.execute(f"UPDATE longform_queue SET status = {ph}, decided_at = {now} "
+                    f"WHERE id = {ph}", (status, queue_id))
         conn.commit()
         return cur.rowcount
     finally:
