@@ -515,6 +515,96 @@ def t_no_unverified_host_rewrites():
           routing.alternates("https://example.gov.in/x"), [])
 
 
+def t_sansad_question_urls_are_retried_at_the_current_path():
+    """Every search-indexed sansad.in question URL now answers HTTP 500.
+
+    Measured 2026-09-11 across sessions 183, 185, 187 and 188, starred and
+    unstarred: `/getFile/loksabhaquestions/...` is 500, and the identical
+    filename under `/getFile/lsapps/loksabhaquestions/...` is 200. Search-then-
+    fetch is THE autonomous route to parliamentary records, so without the
+    rewrite the whole door reads as shut — a 500 looks like "the record is
+    gone", not "you asked the old path".
+    """
+    got = routing.path_variants(
+        "https://sansad.in/getFile/loksabhaquestions/annex/188/AU843_Phz3XH.pdf")
+    check("rewritten to the live path", got,
+          ["https://sansad.in/getFile/lsapps/loksabhaquestions/annex/188/AU843_Phz3XH.pdf"])
+    check("a URL already on the live path is not rewritten again",
+          routing.path_variants(
+              "https://sansad.in/getFile/lsapps/loksabhaquestions/annex/188/AU843_Phz3XH.pdf"), [])
+    check("other sansad paths untouched",
+          routing.path_variants("https://sansad.in/ls/questions"), [])
+    check("other hosts untouched",
+          routing.path_variants("https://example.gov.in/getFile/loksabhaquestions/x.pdf"), [])
+
+
+def t_only_server_errors_earn_the_retry():
+    """A 404 means the document is not there and a 403 is a refusal — retrying
+    either at a different path just makes the real reason harder to see. The
+    rewrite is a 5xx-only move, and it happens once."""
+    import urllib.error
+    from engine.digger import fetch as fetch_mod
+
+    calls = []
+
+    class FakeResp:
+        headers = {"Content-Type": "text/html"}
+
+        def __init__(self, url):
+            self._url = url
+
+        def read(self, n):
+            return b"<html><body>the record, at last</body></html>"
+
+        def geturl(self):
+            return self._url
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, timeout=None):
+        url = req.full_url
+        calls.append(url)
+        if "/lsapps/" in url:
+            return FakeResp(url)
+        raise urllib.error.HTTPError(url, 500, "Server Error", {}, None)
+
+    real_open = fetch_mod.urllib.request.urlopen
+    real_allowed, real_check = fetch_mod.robots.allowed, fetch_mod.robots.check
+    real_throttle = fetch_mod._throttle
+    fetch_mod.urllib.request.urlopen = fake_urlopen
+    fetch_mod.robots.allowed = lambda u: True
+    fetch_mod.robots.check = lambda u: None
+    fetch_mod._throttle = lambda u: None
+    try:
+        r = fetch_mod.fetch(
+            "https://sansad.in/getFile/loksabhaquestions/annex/188/AU843_Phz3XH.pdf")
+        check("the 500 was recovered", "the record, at last" in r["text"], True)
+        check("it tried the old path then the new one", len(calls), 2)
+        check("and the second was the live shape", "/lsapps/" in calls[1], True)
+
+        calls.clear()
+
+        def fake_404(req, timeout=None):
+            calls.append(req.full_url)
+            raise urllib.error.HTTPError(req.full_url, 404, "Not Found", {}, None)
+
+        fetch_mod.urllib.request.urlopen = fake_404
+        try:
+            fetch_mod.fetch(
+                "https://sansad.in/getFile/loksabhaquestions/annex/188/AU843_Phz3XH.pdf")
+            check("404 is not retried", "fetched", "FetchError")
+        except fetch_mod.FetchError:
+            check("404 is not retried", len(calls), 1)
+    finally:
+        fetch_mod.urllib.request.urlopen = real_open
+        fetch_mod.robots.allowed, fetch_mod.robots.check = real_allowed, real_check
+        fetch_mod._throttle = real_throttle
+
+
 def t_api_key_is_used_when_held_and_absent_otherwise():
     """data.gov.in answers 400, not 403 — it wants a registered key. That is
     the intended door, and using it is the opposite of a bypass."""
@@ -1126,6 +1216,8 @@ def main():
               t_robots_4xx_means_allowed_per_rfc9309,
               t_robots_5xx_means_back_off,
               t_robots_check_raises_with_a_clear_reason,
+              t_sansad_question_urls_are_retried_at_the_current_path,
+              t_only_server_errors_earn_the_retry,
               t_missing_key_says_what_to_do,
               t_absent_values_are_none_not_zero,
               t_rate_table_ranks_by_performance_not_size,

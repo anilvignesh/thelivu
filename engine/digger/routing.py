@@ -67,6 +67,35 @@ from urllib.parse import urlparse, urlunparse
 HOST_ALTERNATES = {}
 
 
+# The SAME host, a different path. Distinct from HOST_ALTERNATES and worth its
+# own mechanism: search engines have indexed sansad.in's question PDFs under
+# `/getFile/loksabhaquestions/...`, and every one of those URLs now answers
+# HTTP 500. The live path carries an `lsapps` segment —
+# `/getFile/lsapps/loksabhaquestions/...` — and the same filename and hash
+# resolve there immediately.
+#
+# Measured 2026-09-11 across four sessions (183, 185, 187, 188) and both
+# starred and unstarred answers: 500 without the segment, 200 with it, every
+# time. This matters more than one broken link, because search-then-fetch (see
+# the module docstring) is THE autonomous route to parliamentary records — and
+# a 500 reads like "the record is gone" rather than "you asked the old path",
+# so without this the whole door looks shut.
+PATH_REWRITES = {
+    "sansad.in": [("/getFile/loksabhaquestions/", "/getFile/lsapps/loksabhaquestions/")],
+}
+
+
+def path_variants(url):
+    """Other paths on the SAME host that may serve this document."""
+    p = urlparse(url)
+    out = []
+    for old, new in PATH_REWRITES.get(p.netloc.lower(), []):
+        if old in p.path and new not in p.path:
+            out.append(urlunparse((p.scheme, p.netloc, p.path.replace(old, new),
+                                   p.params, p.query, "")))
+    return out
+
+
 def alternates(url):
     """Permitted hosts that may serve the same document."""
     host = urlparse(url).netloc.lower()

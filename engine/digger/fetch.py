@@ -9,6 +9,7 @@ burstable VM where an unbounded read is enough to put the box into a swap
 death-spiral (see brain/1GB VM Memory Traps in the vault).
 """
 
+import logging
 import re
 import time
 import urllib.error
@@ -17,6 +18,8 @@ from datetime import datetime, timezone
 from html.parser import HTMLParser
 
 from engine.digger import robots, routing
+
+log = logging.getLogger("digger.fetch")
 
 MAX_BYTES = 2_000_000        # 2MB ceiling per HTML document
 MAX_TEXT_CHARS = 40_000      # what we're willing to hand a model
@@ -82,7 +85,7 @@ class FetchError(RuntimeError):
     pass
 
 
-def fetch(url, timeout=TIMEOUT, max_bytes=MAX_BYTES):
+def fetch(url, timeout=TIMEOUT, max_bytes=MAX_BYTES, _retrying=False):
     """Return {url, final_url, text, fetched_at, content_type, truncated}.
 
     PDFs are parsed via liteparse (see pdf_to_text). A PDF with no text layer,
@@ -118,6 +121,19 @@ def fetch(url, timeout=TIMEOUT, max_bytes=MAX_BYTES):
             raw = resp.read(cap + 1)
             final_url = resp.geturl()
     except urllib.error.HTTPError as e:
+        # A server error on a host we know has moved its paths is worth one
+        # retry at the new shape. sansad.in answers every search-indexed
+        # question URL with 500 and the same document with 200 one segment
+        # along — see routing.PATH_REWRITES. Only on 5xx, and only once: a 404
+        # means the document is not there, and retrying a 403 would be arguing
+        # with a refusal.
+        if 500 <= e.code < 600 and not _retrying:
+            for alt in routing.path_variants(url):
+                if robots.allowed(alt):
+                    log.info("HTTP %s — retrying at the current path shape: %s",
+                             e.code, alt)
+                    return fetch(alt, timeout=timeout, max_bytes=max_bytes,
+                                 _retrying=True)
         raise FetchError(f"HTTP {e.code} for {url}") from e
     except (urllib.error.URLError, TimeoutError, OSError) as e:
         raise FetchError(f"fetch failed for {url}: {e}") from e
