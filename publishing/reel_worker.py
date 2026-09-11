@@ -174,6 +174,29 @@ def _notify_reel_ready(reel_id, run_id, story, kind, notes=None):
 # and comes back to life failing.
 _STUCK_ALERT_AFTER = 3
 
+# A CONTENT failure is not a transient one, and the difference is the whole
+# retry policy. make_narrated_reel already marks the transient kind with
+# `retry: True` (a fact check that could not RUN, a voice server that is down);
+# everything else — a script that states figures the article does not contain —
+# fails the same way on the next attempt because the input has not changed.
+#
+# Found 2026-09-11: run #237 had failed the fact check **128 consecutive times**,
+# once every ten minutes, each attempt a paid Haiku call. The wording of the
+# complaint drifted; the substance never did — the model kept inventing the same
+# two figures. The one alert fired at attempt 3 and then, correctly by the old
+# policy, never again, so it looked exactly like a run that was quietly working.
+#
+# So a content failure now gets a bounded number of attempts and is then PARKED:
+# it stops being picked up, and Anil is told once, with the reason. Parking is
+# not giving up — it is the same move the digger makes when a source is blocked
+# rather than empty. Clear it with kv_set(f"reel_build_parked_{run_id}", "").
+_CONTENT_FAILURES_BEFORE_PARK = 5
+
+
+def _parked(run_id):
+    from shared.db import kv_get
+    return bool(kv_get(f"reel_build_parked_{run_id}"))
+
 
 def _tg_post_text(text):
     """Plain text push — same minimal, best-effort pattern as _tg_post_video:
@@ -250,12 +273,35 @@ def _build_one(run_id, slug):
                            run.get("throughline"), result.get("kind"))
         kv_set(fail_key, "")  # clear the streak — it recovered
         kv_set(f"reel_build_alerted_{run_id}", "")
+        kv_set(f"reel_content_fails_{run_id}", "")
     else:
         # Never raises by contract (make_reel.py docstring) — log and move on,
         # next poll picks it up again.
         log.warning("run #%s did not build: %s", run_id, result)
         n = int(kv_get(fail_key) or 0) + 1
         kv_set(fail_key, str(n))
+
+        # Content failures are bounded. See _CONTENT_FAILURES_BEFORE_PARK.
+        if not result.get("retry"):
+            c_key = f"reel_content_fails_{run_id}"
+            c = int(kv_get(c_key) or 0) + 1
+            kv_set(c_key, str(c))
+            if c >= _CONTENT_FAILURES_BEFORE_PARK:
+                kv_set(f"reel_build_parked_{run_id}", "1")
+                run = get_run(run_id) or {}
+                _tg_post_text(
+                    f"⏸️ Reel for run #{run_id} parked after {c} content failures.\n\n"
+                    f"{(run.get('throughline') or '')[:200]}\n\n"
+                    f"{str(result.get('error', ''))[:300]}\n\n"
+                    f"This is not a transient error — the same input produces the "
+                    f"same failure, so retrying costs a model call every ten "
+                    f"minutes and changes nothing. The article or the script "
+                    f"skill is what needs a look.\n\n"
+                    f"The command centre's Make reel button still works and is "
+                    f"not parked; this only stops the unattended retry loop.")
+                log.warning("run #%s parked after %d content failures", run_id, c)
+        else:
+            kv_set(f"reel_content_fails_{run_id}", "")
         # >= + a separate alerted flag, not `== _STUCK_ALERT_AFTER`: a service
         # restart mid-streak (has happened — see the fix that shipped this)
         # must not let the counter sail past the threshold without ever
@@ -321,7 +367,7 @@ def run_once():
         for r in remakes:
             _build_remake(r["id"], r["run_id"], r.get("notes"))
 
-    candidates = _find_candidates()
+    candidates = [c for c in _find_candidates() if not _parked(c["id"])]
     if candidates:
         log.info("%d run(s) awaiting a reel: %s", len(candidates),
                   [c["id"] for c in candidates])
