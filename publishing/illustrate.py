@@ -38,6 +38,10 @@ CF_FLUX_URL = ("https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/"
               "@cf/black-forest-labs/flux-1-schnell")
 # 9:16-ish at a size the endpoint accepts; frames are resized to 1080x1920.
 GEN_W, GEN_H = 768, 1344
+# The transpose, for long-form's 1920x1080 frames. Same pixel budget, same
+# endpoint. Passed explicitly by publishing/longform_render.py — the reel path
+# never sees it, and the default above is unchanged.
+LANDSCAPE = (1344, 768)
 
 # The locked house style. Ink-dark grounds (owner's call 2026-07-26) so the whole
 # feed reads as one system — earlier prototypes had warm kraft skies with only the
@@ -377,7 +381,7 @@ def scene_from_beat(caption, spoken=""):
 
 
 def generate_beat_images(scenes, out_dir, *, seed=7, progress=None, place=None,
-                         ground=STYLE):
+                         ground=STYLE, size=None):
     """Render one illustration per scene. Returns a list of Paths, or None in a
     slot that failed.
 
@@ -389,6 +393,15 @@ def generate_beat_images(scenes, out_dir, *, seed=7, progress=None, place=None,
     `place` is the story's setting (from the script's PLACE: line). It anchors the
     architecture and landscape so a Karnataka story does not close on the US
     Capitol. Omitted when the script names no place — see `_place_clause`.
+
+    `size` is (width, height) for the generation, defaulting to the reel's
+    portrait (GEN_W, GEN_H). Long-form passes LANDSCAPE — and it has to, because
+    a portrait illustration cover-cropped into a 1920x1080 frame shows only the
+    middle third of a composition the model built for a tall frame. Measured
+    2026-09-11 on the first real long-form render: the cold open came back as a
+    church steeple wedged into the bottom-left corner of an otherwise empty
+    frame, because the subject FLUX had centred was below the crop. Asking for
+    the right aspect ratio in the first place is the fix; cropping is not.
 
     `ground` is the STYLE prompt tail — defaults to the locked dark house style.
     Callers pick STYLE_BRIGHT (or look it up via STYLE_BY_PRESENTATION) to run
@@ -411,6 +424,7 @@ def generate_beat_images(scenes, out_dir, *, seed=7, progress=None, place=None,
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    gen_w, gen_h = size or (GEN_W, GEN_H)
 
     def _try(prompt, img_seed):
         """One generation attempt, transient failures retried. Returns bytes, or None
@@ -435,7 +449,7 @@ def generate_beat_images(scenes, out_dir, *, seed=7, progress=None, place=None,
             r = requests.post(
                 FLUX_URL,
                 headers={"Authorization": f"Bearer {key}", "Accept": "application/json"},
-                json={"prompt": full, "width": GEN_W, "height": GEN_H,
+                json={"prompt": full, "width": gen_w, "height": gen_h,
                       "steps": 35, "cfg_scale": 3.5, "seed": img_seed},
                 timeout=180,
             )

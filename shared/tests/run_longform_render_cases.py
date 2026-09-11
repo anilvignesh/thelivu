@@ -135,6 +135,53 @@ def t_the_cap_holds_however_long_the_chapter_runs():
 
 # ------------------------------------------------------------------- framing
 
+def t_illustrations_are_asked_for_in_the_shape_they_are_shown_in():
+    """The bug the first real render found, and the only test that would have.
+
+    Everything else passed: the frames were 1920x1080, the chapter marks were
+    right, the file was the right length. But `generate_beat_images` defaults to
+    the REEL's 768x1344, and cover-cropping that into a landscape frame keeps
+    only the middle 32% of an image the model composed for a tall frame. The
+    cold open came back as a church steeple wedged into the bottom-left corner
+    of an otherwise empty frame — a valid file, a worthless picture.
+
+    So this checks the two halves separately: that the renderer asks for
+    landscape, and that landscape is what actually survives the crop.
+    """
+    from publishing.illustrate import GEN_W, GEN_H, LANDSCAPE
+
+    def kept(bw, bh):
+        scale = max(lfr.W / bw, lfr.H / bh)
+        return (lfr.W * lfr.H) / (int(bw * scale) * int(bh * scale))
+
+    check("the reel default is still portrait", (GEN_W, GEN_H), (768, 1344))
+    check("landscape is its transpose", LANDSCAPE, (1344, 768))
+    check("portrait would lose most of the picture", kept(GEN_W, GEN_H) < 0.40, True)
+    check("landscape keeps nearly all of it", kept(*LANDSCAPE) > 0.95, True)
+
+    # And that render() actually passes it, rather than the constant merely
+    # existing. Captured at the call, because nothing downstream records it.
+    import publishing.illustrate as illus
+    seen = {}
+
+    def fake_generate(scenes, out_dir, **kw):
+        seen.update(kw)
+        return [None] * len(scenes)
+
+    real = illus.generate_beat_images
+    illus.generate_beat_images = fake_generate
+    tmp = tempfile.mkdtemp(prefix="lfr_size_")
+    try:
+        with _stub_voice():
+            lfr.render(longform.parse_script(SCRIPT),
+                       os.path.join(tmp, "o.mp4"),
+                       work_dir=os.path.join(tmp, "w"), illustrate=True)
+    finally:
+        illus.generate_beat_images = real
+    check("render asks for landscape", seen.get("size"), LANDSCAPE)
+
+
+
 def t_frames_are_landscape():
     # The reel path is 1080x1920. A transposed frame renders without error and
     # is unwatchable, so assert the orientation rather than trusting it.
@@ -609,7 +656,8 @@ def main():
               t_shots_never_exceed_the_pictures_available,
               t_the_narration_not_the_prompt_count_sets_the_budget,
               t_the_cap_holds_however_long_the_chapter_runs,
-              t_frames_are_landscape):
+              t_frames_are_landscape,
+              t_illustrations_are_asked_for_in_the_shape_they_are_shown_in):
         t()
     for t in (t_the_whole_chain_renders,
               t_the_file_is_as_long_as_the_plan_says,

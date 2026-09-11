@@ -249,16 +249,22 @@ def render(parsed, out_mp4, work_dir=None, voice=None, illustrate=True,
         plans.append(list(zip(prompts, parts)))
 
     _p(0.35, f"Illustrating {sum(len(pl) for pl in plans)} shots…")
-    from publishing.illustrate import (STYLE, generate_beat_images,
+    from publishing.illustrate import (LANDSCAPE, STYLE, generate_beat_images,
                                        scene_from_beat)
     scenes = [pr or scene_from_beat("", units[i][2][:120])
               for i, pl in enumerate(plans) for pr, _sec in pl]
     arts = [None] * len(scenes)
     if illustrate:
         try:
+            # LANDSCAPE, not the reel default. A portrait illustration
+            # cover-cropped into 1920x1080 shows only the middle third of a
+            # composition the model built for a tall frame — on the first real
+            # render that put the cold open's subject below the crop and left
+            # 90% of the frame empty. Ask for the aspect ratio you are going to
+            # show; do not crop your way to it.
             arts = generate_beat_images(scenes, tmp / "art",
                                         place=parsed.get("place"),
-                                        ground=STYLE) or arts
+                                        ground=STYLE, size=LANDSCAPE) or arts
         except Exception as e:
             log.warning("illustration batch failed (%s) — falling back to grounds", e)
             arts = [None] * len(scenes)
