@@ -848,9 +848,28 @@ def notify_script_for_review(queue_id, parsed, blockers=None):
     lines += [f"  {c['n']}. {c['title']}" for c in chapters]
     if parsed.get("open_loop"):
         lines += ["", f"Opens: {parsed['open_loop']}"]
-    if blockers:
+    # Three kinds, shown apart. A card where most lines need nothing from the
+    # reader teaches them to skim it, and then the one line that DOES need
+    # something goes past unread — Anil, 2026-09-13, on a card listing three
+    # "blockers" none of which blocked.
+    notes = blockers or []
+    if notes and isinstance(notes[0], dict):
+        by = {"block": [], "check": [], "info": []}
+        for n in notes:
+            by.get(n.get("level"), by["info"]).append(n.get("text", ""))
+        if by["block"]:
+            lines += ["", "🛑 <b>Stop — these are wrong:</b>"]
+            lines += [f"  • {t}" for t in by["block"][:5]]
+        if by["check"]:
+            lines += ["", "👀 <b>Your call:</b>"]
+            lines += [f"  • {t}" for t in by["check"][:5]]
+        if by["info"]:
+            lines += ["", "<i>" + " · ".join(by["info"][:3]) + "</i>"]
+        if not by["block"] and not by["check"]:
+            lines += ["", "✅ Nothing to fix — read it for the journalism."]
+    elif notes:
         lines += ["", "⚠️ <b>Not fully sourced:</b>"]
-        lines += [f"  • {b}" for b in blockers[:5]]
+        lines += [f"  • {b}" for b in notes[:5]]
     else:
         lines += ["", "✅ Every claim meets its evidence bar."]
     lines += ["", "Approving releases ~an hour of narration. Read it first."]

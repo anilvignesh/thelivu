@@ -141,60 +141,82 @@ def material_for(queue_id):
     return "\n".join(parts), meta
 
 
-def mechanical_blockers(parsed):
-    """What a reviewer should look at, found by looking rather than by judging.
+def review_notes(parsed):
+    """What gate 1 should say, in three kinds — because they are not the same.
 
-    NOT an evidence assessment — see the module docstring. These are the three
-    things that are checkable without a model: a chapter with no record behind
-    it, a chapter stating figures with no record behind it, and a script whose
-    narration will not fit an idle window.
+    Anil, 2026-09-13, on a card listing three "blockers" none of which blocked:
+    "if we are adding the source in the description, its not really a blocker
+    na? and the conclusion is also as expected."
+
+    He is right, and lumping them is the failure this whole list exists to
+    avoid. A card where most lines are not actionable teaches the reviewer to
+    skim, and then the one line that IS actionable goes past unread.
+
+      block  something is wrong and publishing it would be wrong — a record
+             that is not a document, media we may not use, narration that will
+             not fit the machine time.
+      check  a judgement only a person can make — does this photograph show
+             what the line says, is this fair-dealing claim one we want.
+      info   true and worth knowing, requiring nothing — the frame mix, a
+             chapter with no document to show because there isn't one.
+
+    Returns [{"level", "text"}]. mechanical_blockers() keeps returning the
+    block-level lines for callers that only want those.
     """
     from publishing import longform
 
-    out, recordless = [], []
+    notes = []
+    def block(t): notes.append({"level": "block", "text": t})
+    def checkn(t): notes.append({"level": "check", "text": t})
+    def info(t): notes.append({"level": "info", "text": t})
+
+    recordless = []
     for c in parsed.get("chapters", []):
         states_figures = bool(_FIGURE.search(c.get("text") or ""))
-        # A chapter that says a number and never puts it on screen is the
-        # specific failure the first sample had: the argument turned on 2,732
-        # against 780 and the viewer saw a symbolic ledger. Separate from the
-        # record check, because they fail for different reasons and a reviewer
-        # fixes them differently — one needs a FIGURE line, the other a source.
+        hard = sum(len(c.get(k) or [])
+                   for k in ("figures", "tables", "records", "photos", "clips"))
         if states_figures and not c.get("figures"):
-            out.append(f"Chapter {c['n']} ({c['title']}) states figures but puts "
-                       f"none on screen — no FIGURE line")
+            checkn(f"Chapter {c['n']} ({c['title']}) says numbers it never puts "
+                   f"on screen — no FIGURE line")
+        if not hard:
+            checkn(f"Chapter {c['n']} ({c['title']}) has nothing to show but an "
+                   f"illustration")
         if not c.get("records"):
             recordless.append(c)
-    if not parsed.get("why_long_form"):
-        out.append("No WHY_LONG_FORM line — the script does not say why this is "
-                   "not a reel")
-    # Collapsed, not one line per chapter. A script with no fetchable primary
-    # document produces the SAME sentence for every chapter, and six identical
-    # warnings is the skim problem in a new shape — the reviewer reads the first,
-    # recognises the rest, and stops reading the list.
-    chapters = parsed.get("chapters") or []
-    if recordless and len(recordless) == len(chapters):
-        out.append(f"No chapter cites a record — all {len(chapters)} rely on "
-                   f"FIGURE/TABLE lines alone. Usually means no fetchable "
-                   f"primary document was found for this story.")
-    elif len(recordless) > 2:
-        out.append(f"{len(recordless)} chapters cite no record: "
-                   + ", ".join(str(c["n"]) for c in recordless))
-    else:
-        for c in recordless:
-            out.append(f"Chapter {c['n']} ({c['title']}) cites no record")
 
-    out.extend(_unverifiable_records(parsed))
-    out.extend(_no_evidence_chapters(parsed))
-    out.extend(_clip_calls(parsed))
-    out.extend(_long_holds(parsed))
-    out.extend(_too_thin(parsed))
+    chapters = parsed.get("chapters") or []
+    # INFO, not a blocker. A chapter with no document is usually a chapter about
+    # a rebuttal, an interpretation or a conclusion — and its figures still carry
+    # their sources into the description, so nothing is uncited.
+    if recordless and chapters:
+        which = ", ".join(str(c["n"]) for c in recordless)
+        info(f"No document shown in chapter{'s' if len(recordless) > 1 else ''} "
+             f"{which} — their sources still reach the description")
+
+    if not parsed.get("why_long_form"):
+        checkn("No WHY_LONG_FORM line — the script does not say why this is not "
+               "a reel, which is the first thing to disagree with")
+
+    for level, text in _record_problems(parsed):
+        (block if level == "block" else checkn)(text)
+    for level, text in _media_calls(parsed):
+        (block if level == "block" else checkn)(text)
+    for t in _long_holds(parsed):
+        checkn(t)
+
+    info(_frame_mix(parsed))
     fits, why = longform.fits_window(parsed.get("word_count", 0))
     if not fits:
-        out.append(why)
-    return out
+        block(why)
+    return notes
 
 
-def _unverifiable_records(parsed, check=True):
+def mechanical_blockers(parsed):
+    """The block-level notes only, as plain strings."""
+    return [n["text"] for n in review_notes(parsed) if n["level"] == "block"]
+
+
+def _record_problems(parsed, check=True):
     """RECORD lines whose URL is not actually a document.
 
     A model told to supply a URL will supply a plausible one. The first
@@ -212,13 +234,13 @@ def _unverifiable_records(parsed, check=True):
         return []
     from engine.digger import fetch as digfetch
 
-    out, seen = [], {}
+    out, seen = [], {}   # out is [(level, text)]
     for c in parsed.get("chapters", []):
         for rec in c.get("records") or []:
             url = (rec.get("url") or "").strip()
             what = (rec.get("description") or url)[:56]
             if not url:
-                out.append(f"Chapter {c['n']} record has no URL — {what}")
+                out.append(("block", f"Chapter {c['n']} record has no URL — {what}"))
                 continue
             if url in seen:
                 verdict = seen[url]
@@ -231,15 +253,17 @@ def _unverifiable_records(parsed, check=True):
                     verdict = f"does not fetch ({type(e).__name__})"
                 seen[url] = verdict
             if verdict:
-                out.append(f"Chapter {c['n']} record URL {verdict} — {what}")
+                out.append(("block",
+                            f"Chapter {c['n']} record URL {verdict} — {what}"))
 
     # The same URL on several chapters is the other half of the same tell.
     urls = [ (r.get("url") or "").strip()
              for c in parsed.get("chapters", []) for r in (c.get("records") or []) ]
     real = [u for u in urls if u]
     if len(real) > 1 and len(set(real)) == 1:
-        out.append(f"All {len(real)} records cite the SAME url — that is one "
-                   f"document being passed off as several, or a landing page")
+        out.append(("block",
+                    f"All {len(real)} records cite the SAME url — one document "
+                    f"passed off as several, or a landing page"))
     return out
 
 
@@ -261,7 +285,7 @@ def _no_evidence_chapters(parsed):
     return out
 
 
-def _too_thin(parsed):
+def _frame_mix(parsed):
     """One line on how much of the video the safety net would be carrying.
 
     Quote frames fill whatever the writer did not declare. That keeps a video
@@ -297,17 +321,17 @@ def _too_thin(parsed):
         total += k
 
     if not total:
-        return []
+        return "Frames: none planned."
     quotes = kinds.get("quote", 0)
     mix = ", ".join(f"{n} {k}" for k, n in sorted(kinds.items(), key=lambda x: -x[1]))
     line = f"Frames: {total} — {mix}."
     if quotes * 2 > total:
-        return [f"{line} More than half are quote frames, which means the script "
-                f"under-declared: the safety net is carrying the video."]
-    return [line]
+        return (f"{line} More than half are quote frames — the script "
+                f"under-declared and the safety net is carrying the video.")
+    return line
 
 
-def _clip_calls(parsed):
+def _media_calls(parsed):
     """Footage the reviewer has to decide about, not the renderer.
 
     A clip on a settled licence (GODL, CC-BY, licensed, our own) needs no
@@ -327,12 +351,13 @@ def _clip_calls(parsed):
                 ok, needs_call, why = media_licence_status(item)
                 what = (item.get("shows") or item.get("src") or "")[:60]
                 if not ok:
-                    out.append(f"Chapter {c['n']} {kind} DROPPED — {what}: {why}")
+                    out.append(("block",
+                                f"Chapter {c['n']} {kind} DROPPED — {what}: {why}"))
                 elif needs_call:
-                    out.append(
+                    out.append(("check",
                         f"Chapter {c['n']} {kind} needs your call — {what}: "
                         f"{why}. Credit alone is not permission; Content ID "
-                        f"claims first and asks later.")
+                        f"claims first and asks later."))
                 elif kind == "photo":
                     # Every photo, every time. The licence is machine-checked;
                     # whether the picture shows what the line says it shows is
@@ -341,10 +366,10 @@ def _clip_calls(parsed):
                     # Demonstrated live 2026-09-11: a Commons search for
                     # "Indian highway construction" returns 1900s photographs
                     # of the Wind River Indian Reservation, Wyoming.
-                    out.append(
+                    out.append(("check",
                         f"Chapter {c['n']} photo — CONFIRM IT SHOWS THIS: "
                         f"\"{what}\" ({item.get('provenance') or 'no date given'}). "
-                        f"Licence is fine; the subject is your call.")
+                        f"Licence is fine; the subject is your call."))
     return out
 
 
@@ -480,7 +505,8 @@ def write_script(queue_id, model=None, dry_run=False):
             f"-word floor — that is a reel with chapter cards, not a long video. "
             f"Kept at {short}")}
 
-    blockers = mechanical_blockers(parsed)
+    notes = review_notes(parsed)
+    blockers = [n["text"] for n in notes if n["level"] == "block"]
     ok_budget, budget_msg = longform.budget_check(parsed)
     if not ok_budget:
         # The one hard failure. Length is advisory; machine time is not.
@@ -497,7 +523,7 @@ def write_script(queue_id, model=None, dry_run=False):
                 "budget": budget_msg}
     path.write_text(raw)
 
-    res = attach_script(queue_id, str(path), blockers=blockers)
+    res = attach_script(queue_id, str(path), blockers=notes)
     if not res.get("ok"):
         return {"ok": False, "error": res.get("error"), "path": str(path)}
     from shared.db import kv_set
@@ -507,7 +533,7 @@ def write_script(queue_id, model=None, dry_run=False):
              len(blockers))
     return {"ok": True, "path": str(path), "words": parsed.get("word_count", 0),
             "chapters": len(parsed["chapters"]), "blockers": blockers,
-            "budget": budget_msg}
+            "notes": notes, "budget": budget_msg}
 
 
 def _note_attempt(queue_id):

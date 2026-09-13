@@ -292,8 +292,11 @@ def cmd_longform(args):
         print(f"\n  ✗ {res.get('error')}")
         return
     print(f"\n  ✓ #{qid} scripted — {res['words']} words, {res['chapters']} chapters")
-    for b in res.get("blockers") or []:
-        print(f"      ⚠ {b}")
+    icon = {"block": "🛑", "check": "👀", "info": " ·"}
+    for n in res.get("notes") or []:
+        print(f"      {icon.get(n['level'], ' ·')} {n['text']}")
+    if not [n for n in (res.get("notes") or []) if n["level"] != "info"]:
+        print("      ✓ nothing to fix — read it for the journalism")
     print(f"\n  {res.get('budget','')}")
     print(f"  written to {res['path']}")
     print("\n  It is at SCRIPTED. Gate 1 is still a person reading it — the card "

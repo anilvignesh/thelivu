@@ -526,15 +526,18 @@ def t_a_correct_licence_does_not_make_a_true_caption():
 
     So every photo raises a gate-1 line, every time — not only the doubtful
     ones. A blocker that appears sometimes trains a reviewer to skim."""
-    from publishing.longform_script import mechanical_blockers
+    from publishing.longform_script import review_notes
 
     parsed = longform.parse_script(
         "TITLE: t\nCOLD_OPEN: x\nCHAPTER 1 TITLE: A\n"
         "CHAPTER 1: Words words words words words words words words.\n"
         "CHAPTER 1 PHOTO: The NH-66 stretch at Kooriyad | https://x/y.jpg"
         " | CC BY-SA 4.0, someone | 2016-01-31\nCLOSE: y\n")
-    flags = mechanical_blockers(parsed)
-    confirm = [f for f in flags if "CONFIRM IT SHOWS THIS" in f]
+    # A CHECK, not a block: the licence is fine and the subject is a human
+    # judgement, which is exactly the distinction the three levels encode.
+    notes = review_notes(parsed)
+    confirm = [n["text"] for n in notes
+               if n["level"] == "check" and "CONFIRM IT SHOWS THIS" in n["text"]]
     check("the reviewer is asked to confirm the subject", len(confirm), 1)
     check("and the date is put in front of them", "2016-01-31" in confirm[0], True)
     check("while the licence is not questioned",
@@ -1174,22 +1177,61 @@ def t_a_chapter_with_no_record_is_flagged():
     from publishing import longform
     from publishing.longform_script import mechanical_blockers
 
+    from publishing.longform_script import review_notes
+
     parsed = longform.parse_script(SCRIPT)
-    flags = mechanical_blockers(parsed)
-    # SCRIPT carries no RECORD lines at all. That is reported ONCE, not once per
-    # chapter: the same sentence repeated six times is how a reviewer learns to
-    # stop reading the list.
-    collapsed = [f for f in flags if f.startswith("No chapter cites a record")]
+    notes = review_notes(parsed)
+    # Reported ONCE, not once per chapter, and as INFO rather than a blocker:
+    # a chapter with no document is usually a rebuttal or a conclusion, and its
+    # figures still carry their sources into the description.
+    collapsed = [n for n in notes if n["text"].startswith("No document shown")]
     check("recordlessness is reported once", len(collapsed), 1)
-    check("and it says how many", f"all {len(parsed['chapters'])} " in collapsed[0], True)
+    check("as information, not a blocker", collapsed[0]["level"], "info")
+    check("and it names the chapters",
+          all(str(c["n"]) in collapsed[0]["text"] for c in parsed["chapters"]), True)
     # Chapter 2 states figures and declares no FIGURE line — the specific
     # failure the first rendered sample had. Chapter 1 declares one, so it is
     # flagged for the missing record only.
-    unshown = [f for f in flags if "puts none on screen" in f]
+    unshown = [n["text"] for n in notes
+               if "never puts" in n["text"] and n["level"] == "check"]
     check("the chapter that shows no figure is named",
-          [f.startswith("Chapter 2 ") for f in unshown], [True])
+          [t.startswith("Chapter 2 ") for t in unshown], [True])
     check("the missing WHY_LONG_FORM is flagged",
-          any("WHY_LONG_FORM" in f for f in flags), True)
+          any("WHY_LONG_FORM" in n["text"] and n["level"] == "check"
+              for n in notes), True)
+
+
+def t_a_note_that_needs_nothing_is_not_called_a_blocker():
+    """Anil, 2026-09-13, on a card listing three "blockers" none of which
+    blocked: "if we are adding the source in the description, its not really a
+    blocker na? and the conclusion is also as expected."
+
+    He is right, and it is the same failure in a new shape. A card where most
+    lines need nothing from the reader teaches them to skim, and then the one
+    line that DOES need something goes past unread. Three kinds now: block,
+    check, info.
+    """
+    from publishing.longform_script import review_notes, mechanical_blockers
+
+    # A chapter with no document, whose figures carry their own sources, is
+    # INFO — the rebuttal and conclusion case.
+    parsed = longform.parse_script(
+        "TITLE: t\nCOLD_OPEN: x\n"
+        "CHAPTER 1 TITLE: The rebuttal\n"
+        "CHAPTER 1: The minister says the forty of fifty-nine cases are counted wrongly.\n"
+        "CHAPTER 1 FIGURE: 40 of 59 | as the minister counts them | Minister, public statements\n"
+        "CLOSE: y\n")
+    notes = review_notes(parsed)
+    levels = {n["level"] for n in notes}
+    check("nothing is graded as a blocker", "block" in levels, False)
+    check("the missing document is info",
+          any(n["level"] == "info" and "No document shown" in n["text"]
+              for n in notes), True)
+    check("and mechanical_blockers agrees", mechanical_blockers(parsed), [])
+
+    # The frame mix is information, never a blocker.
+    check("frame mix is info",
+          [n["level"] for n in notes if n["text"].startswith("Frames:")], ["info"])
 
 
 def t_a_record_url_that_is_not_a_document_is_caught():
@@ -1202,7 +1244,7 @@ def t_a_record_url_that_is_not_a_document_is_caught():
     the video would have had none, which is worse than citing nothing: it is the
     appearance of evidence.
     """
-    from publishing.longform_script import _unverifiable_records
+    from publishing.longform_script import _record_problems
     from engine.digger import fetch as digfetch
 
     parsed = longform.parse_script(
@@ -1217,7 +1259,8 @@ def t_a_record_url_that_is_not_a_document_is_caught():
     digfetch.fetch = lambda u, **k: {"content_type": "text/html; charset=utf-8",
                                      "text": "a landing page"}
     try:
-        flags = _unverifiable_records(parsed)
+        flags = [t for _lvl, t in _record_problems(parsed)]
+        levels = {lvl for lvl, _t in _record_problems(parsed)}
     finally:
         digfetch.fetch = real
 
@@ -1225,12 +1268,14 @@ def t_a_record_url_that_is_not_a_document_is_caught():
           sum(1 for f in flags if "not a document" in f), 2)
     check("and the duplicate url is its own tell",
           any("SAME url" in f for f in flags), True)
+    check("these DO block — the video would show a web page as evidence",
+          levels, {"block"})
 
     # A real PDF passes silently.
     digfetch.fetch = lambda u, **k: {"content_type": "application/pdf", "text": "x"}
     try:
         check("a PDF raises nothing",
-              [f for f in _unverifiable_records(parsed) if "not a document" in f], [])
+              [t for _l, t in _record_problems(parsed) if "not a document" in t], [])
     finally:
         digfetch.fetch = real
 
@@ -1238,7 +1283,7 @@ def t_a_record_url_that_is_not_a_document_is_caught():
     digfetch.fetch = lambda u, **k: (_ for _ in ()).throw(RuntimeError("boom"))
     try:
         check("an unreachable url says so",
-              any("does not fetch" in f for f in _unverifiable_records(parsed)), True)
+              any("does not fetch" in t for _l, t in _record_problems(parsed)), True)
     finally:
         digfetch.fetch = real
 
@@ -1247,7 +1292,7 @@ def t_a_chapter_with_nothing_to_show_is_named():
     """On the first skill-written script that was chapter 5 — the one that adds
     the findings up, which is exactly where a viewer wants the numbers back on
     screen. It declared one illustration and nothing else."""
-    from publishing.longform_script import mechanical_blockers
+    from publishing.longform_script import review_notes
 
     parsed = longform.parse_script(
         "TITLE: t\nCOLD_OPEN: x\nCHAPTER 1 TITLE: Has evidence\n"
@@ -1256,16 +1301,19 @@ def t_a_chapter_with_nothing_to_show_is_named():
         "CHAPTER 2 TITLE: Has nothing\n"
         "CHAPTER 2: The findings add up to a pattern across every department.\n"
         "CHAPTER 2 IMAGE 1: a ledger\nCLOSE: y\n")
-    flags = mechanical_blockers(parsed)
-    named = [f for f in flags if "nothing to show but an illustration" in f]
+    # A CHECK: the chapter is thin, which is a judgement for the reviewer, not
+    # something that makes the video wrong.
+    named = [n for n in review_notes(parsed)
+             if "nothing to show but an illustration" in n["text"]]
     check("the empty chapter is named", len(named), 1)
-    check("and it is chapter 2", named[0].startswith("Chapter 2 "), True)
+    check("and it is chapter 2", named[0]["text"].startswith("Chapter 2 "), True)
+    check("graded as a call for the reviewer", named[0]["level"], "check")
 
 
 def t_the_card_says_how_much_the_safety_net_is_carrying():
     """Quote frames keep a thin script watchable, which is why a reviewer can
     read 1,200 words and not notice it was thin. Past half, say so."""
-    from publishing.longform_script import mechanical_blockers
+    from publishing.longform_script import review_notes
 
     # Nothing declared anywhere: every frame becomes a quote.
     thin = longform.parse_script(
@@ -1273,10 +1321,11 @@ def t_the_card_says_how_much_the_safety_net_is_carrying():
         "CHAPTER 1 TITLE: One\nCHAPTER 1: " +
         " ".join(["The ministry told Parliament this in writing."] * 12) +
         "\nCLOSE: That is what the record shows and nothing more.\n")
-    lines = [f for f in mechanical_blockers(thin) if f.startswith("Frames:")]
+    lines = [n for n in review_notes(thin) if n["text"].startswith("Frames:")]
     check("the frame mix is always reported", len(lines), 1)
+    check("as information", lines[0]["level"], "info")
     check("and thinness is called out",
-          "safety net is carrying" in lines[0], True)
+          "safety net is carrying" in lines[0]["text"], True)
 
 
 def t_a_chapter_with_a_record_is_not_flagged():
@@ -1287,12 +1336,14 @@ def t_a_chapter_with_a_record_is_not_flagged():
         "CHAPTER 1 IMAGE 1: A ledger open on a desk.",
         "CHAPTER 1 RECORD: MoRTH deficiency register | https://example.gov.in/r | forty\n"
         "CHAPTER 1 IMAGE 1: A ledger open on a desk.")
-    flags = mechanical_blockers(longform.parse_script(with_record))
-    check("the collapsed line is gone once one chapter cites a record",
-          any(f.startswith("No chapter cites a record") for f in flags), False)
-    check("and the remaining chapter is named individually",
-          any(f.startswith("Chapter 2 ") and "cites no record" in f for f in flags),
-          True)
+    from publishing.longform_script import review_notes
+    notes = review_notes(longform.parse_script(with_record))
+    line = [n for n in notes if n["text"].startswith("No document shown")]
+    check("the chapter that cites a record is not listed",
+          "1" not in line[0]["text"].split("chapters")[-1].split("—")[0]
+          if line else True, True)
+    check("and the one without it still is",
+          any("2" in n["text"] for n in line), True)
 
 
 def t_figures_spelled_out_still_count_as_figures():
@@ -1446,6 +1497,7 @@ def main():
               t_a_script_under_the_floor_does_not_reach_the_human,
               t_the_token_ceiling_stays_under_the_streaming_limit,
               t_a_chapter_with_no_record_is_flagged,
+              t_a_note_that_needs_nothing_is_not_called_a_blocker,
               t_a_record_url_that_is_not_a_document_is_caught,
               t_a_chapter_with_nothing_to_show_is_named,
               t_the_card_says_how_much_the_safety_net_is_carrying,
