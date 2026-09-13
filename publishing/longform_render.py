@@ -34,10 +34,13 @@ flag would quietly produce a badly-laid-out frame in whichever mode was tested
 less. And the reel path is the one that must not break.
 """
 
+import hashlib
 import logging
 import os
+import shutil
 import subprocess
 import tempfile
+import wave
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -673,6 +676,63 @@ def _chunk_for_synth(text, max_words=MAX_SYNTH_WORDS):
     return out or [""]
 
 
+def voice_cache_dir():
+    """Where synthesised chunks are kept between renders.
+
+    Beside the work directories rather than inside one, because the whole point
+    is to outlive them: a work dir is per-render and timestamped (two renderers
+    raced into the same one on 2026-09-12), and the audio is the part that does
+    not change when a render is repeated.
+    """
+    return Path(os.environ.get(
+        "LONGFORM_DIR", os.path.expanduser("~/.thelivu/longform"))) / "voice-cache"
+
+
+def _synth_cached(chunk, dest, backend, voice):
+    """Synthesise one chunk, or copy it from the cache if it has been said before.
+
+    Chatterbox takes roughly seven minutes of wall clock per minute of speech on
+    the worker box. Re-rendering long-form #1 to test a change to FRAME PLACEMENT
+    — which cannot affect a single sample of audio — cost fifty minutes of that
+    every time. The script is the same script; the voice is deterministic given
+    the same text and speaker.
+
+    Keyed on the text, the backend and the voice together, so changing the voice
+    or the engine correctly misses. A corrupt or truncated cache entry is
+    re-synthesised rather than trusted: silent truncation is exactly the failure
+    this module already exists to work around.
+    """
+    key = hashlib.sha256(
+        "\x00".join([chunk or "", backend or "", voice or ""]).encode("utf-8")
+    ).hexdigest()
+    cached = voice_cache_dir() / f"{key}.wav"
+
+    if cached.exists():
+        try:
+            with wave.open(str(cached), "rb") as w:
+                if w.getnframes() > 0:
+                    shutil.copyfile(cached, dest)
+                    return
+            log.info("voice cache entry %s is empty — re-synthesising", key[:12])
+        except (wave.Error, EOFError, OSError) as e:
+            # EOFError is the zero-byte case, which is the LIKELY one: a render
+            # killed mid-copy leaves exactly that behind. wave.open raises it
+            # rather than wave.Error, so leaving it out made the cache trust a
+            # file it had just decided it could not read.
+            log.info("voice cache entry %s unreadable (%s) — re-synthesising",
+                     key[:12], e)
+
+    from publishing import reel
+    reel._synth(chunk, dest, backend, voice=voice)
+    try:
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        tmp = cached.with_suffix(".wav.part")
+        shutil.copyfile(dest, tmp)
+        tmp.rename(cached)
+    except OSError as e:
+        log.info("could not cache synthesised chunk: %s", e)
+
+
 def synth_units(units, backend, work_dir, voice=None):
     """Voice each unit in pieces and stitch, returning reel.synth_beats' shape.
 
@@ -681,8 +741,6 @@ def synth_units(units, backend, work_dir, voice=None):
     sees the real thing; the fourth element says when each chunk of text is
     actually spoken, which is what lets a figure appear as it is said.
     """
-    import wave
-
     from publishing import reel
 
     work_dir = Path(work_dir)
@@ -693,7 +751,7 @@ def synth_units(units, backend, work_dir, voice=None):
         parts = []
         for j, chunk in enumerate(chunks):
             part = work_dir / f"a{i}_{j}.wav"
-            reel._synth(chunk, part, backend, voice=voice)
+            _synth_cached(chunk, part, backend, voice)
             parts.append(part)
 
         joined = work_dir / f"a{i}.wav"

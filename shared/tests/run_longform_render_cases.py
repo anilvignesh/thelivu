@@ -343,6 +343,50 @@ def t_a_weak_anchor_still_beats_no_anchor():
           placed[0] - 3.0 <= 40.0 <= placed[1] + 3.0, True)
 
 
+def t_the_same_sentence_is_only_ever_voiced_once():
+    """Chatterbox runs about seven minutes of wall clock per minute of speech on
+    the worker box. Re-rendering long-form #1 to test a change to FRAME
+    PLACEMENT — which cannot affect one sample of audio — spent fifty of those
+    minutes saying the same words again."""
+    import tempfile, wave as _wave
+    from pathlib import Path
+    from publishing import reel
+
+    calls = []
+
+    def fake_synth(text, dest, backend, voice=None):
+        calls.append(text)
+        with _wave.open(str(dest), "wb") as w:
+            w.setnchannels(1); w.setsampwidth(2); w.setframerate(24000)
+            w.writeframes(b"\x00\x00" * 2400)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        old_synth, old_env = reel._synth, os.environ.get("LONGFORM_DIR")
+        reel._synth = fake_synth
+        os.environ["LONGFORM_DIR"] = tmp
+        try:
+            a, b = Path(tmp) / "a.wav", Path(tmp) / "b.wav"
+            lfr._synth_cached("A sentence the narrator says.", a, "chatterbox", "anil")
+            lfr._synth_cached("A sentence the narrator says.", b, "chatterbox", "anil")
+            check("the voice server ran once", len(calls), 1)
+            check("and the second copy is real audio", b.exists() and b.stat().st_size > 0, True)
+
+            lfr._synth_cached("A sentence the narrator says.", a, "chatterbox", "someone else")
+            check("a different voice is a miss", len(calls), 2)
+
+            # A truncated entry is the failure this module exists to work around.
+            for entry in lfr.voice_cache_dir().glob("*.wav"):
+                entry.write_bytes(b"")   # two voices are cached by now
+            lfr._synth_cached("A sentence the narrator says.", a, "chatterbox", "anil")
+            check("a corrupt entry is re-synthesised, not trusted", len(calls), 3)
+        finally:
+            reel._synth = old_synth
+            if old_env is None:
+                os.environ.pop("LONGFORM_DIR", None)
+            else:
+                os.environ["LONGFORM_DIR"] = old_env
+
+
 def t_with_no_marks_it_falls_back_to_the_old_split():
     """Every unit rendered before this had no chunk timing. The fallback is the
     previous behaviour, which was imprecise and never wrong."""
@@ -1670,6 +1714,7 @@ def main():
               t_a_long_hold_buys_itself_more_frames,
               t_quote_frames_cover_the_opening_when_the_evidence_is_late,
               t_a_weak_anchor_still_beats_no_anchor,
+              t_the_same_sentence_is_only_ever_voiced_once,
               t_with_no_marks_it_falls_back_to_the_old_split,
               t_a_short_unit_keeps_one_picture,
               t_a_long_unit_uses_the_pictures_it_was_given,
