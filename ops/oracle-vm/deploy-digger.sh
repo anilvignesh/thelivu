@@ -113,7 +113,12 @@ $SSH "test -x $APP_DIR/venv/bin/python || $PY311 -m venv $APP_DIR/venv"
 # 13.8MB manylinux_2_28 wheel (matches OL8's glibc 2.28) with NO runtime
 # dependencies — Rust + PDFium, no compiler, no system packages. Measured on a
 # real 2.8MB/8-page CAG PDF: 0.06s, 35MB peak RSS.
-$SSH "$APP_DIR/venv/bin/pip install --quiet --upgrade pip 'psycopg2-binary>=2.9' 'liteparse>=2.14'"
+#
+# >=2.14.4 because that is the version whose bundled OCR was measured (see
+# OCR_MIN_CHARS in engine/digger/fetch.py). OCR needs no extra and no tesseract
+# package — it is inside the same _liteparse.abi3.so, which is why the scanned
+# half of the public record became reachable without adding anything to this box.
+$SSH "$APP_DIR/venv/bin/pip install --quiet --upgrade pip 'psycopg2-binary>=2.9' 'liteparse>=2.14.4'"
 
 # Diff before touching anything — same reasoning as deploy-secrets.sh: this is
 # safe to re-run, and an unconditional restart interrupts an in-flight cycle for
