@@ -393,15 +393,36 @@ def request_longform(run_id, why="", by="owner"):
         return False, (f"run #{run_id} has no draft text — long-form is written "
                        f"from the verified article, so there is nothing to work from")
 
-    existing = [r for r in (longform_queue(status=QUEUED)
-                            + longform_queue(status=SCRIPTED)
-                            + longform_queue(status=SCRIPT_OK)
-                            + longform_queue(status=RENDERED))
-                if r.get("run_id") == run_id]
-    if existing:
-        e = existing[0]
+    live = [r for r in (longform_queue(status=QUEUED)
+                        + longform_queue(status=SCRIPTED)
+                        + longform_queue(status=SCRIPT_OK)
+                        + longform_queue(status=RENDERED))
+            if r.get("run_id") == run_id]
+    if live:
+        e = live[0]
         return False, (f"run #{run_id} is already long-form #{e['id']} "
                        f"({e.get('status')})")
+
+    # A dropped item is REVIVED, not re-inserted. queue_longform is idempotent
+    # per run_id — right for the automatic path, so make_reel cannot queue the
+    # same story twice — but it means a dropped row blocks that run forever, and
+    # it no-ops SILENTLY. Found 2026-09-13: the first real long-form attempt was
+    # parked after its script failed, re-queued, and came back "queued as
+    # long-form #None" with nothing in the queue at all.
+    dropped = [r for r in longform_queue(status=DROPPED)
+               if r.get("run_id") == run_id]
+    if dropped:
+        qid = dropped[0]["id"]
+        _revive(qid, why)
+        return True, (f"run #{run_id} revived as long-form #{qid}. The script is "
+                      f"written on the next engine tick and comes back here to read.")
+
+    posted = [r for r in longform_queue(status=POSTED) if r.get("run_id") == run_id]
+    if posted:
+        return False, (f"run #{run_id} already has a published long video "
+                       f"(#{posted[0]['id']}). Re-queueing would overwrite the "
+                       f"record of it; if this needs a second video, that is a "
+                       f"new run.")
 
     queue_longform(run_id=run_id,
                    title=(run.get("throughline") or f"run #{run_id}")[:200],
@@ -409,9 +430,29 @@ def request_longform(run_id, why="", by="owner"):
                                   "the material needs more than 90 seconds"),
                    reel_seconds=None)
     row = [r for r in longform_queue(status=QUEUED) if r.get("run_id") == run_id]
-    qid = row[0]["id"] if row else None
-    return True, (f"run #{run_id} queued as long-form #{qid}. The script is "
-                  f"written on the next engine tick and comes back here to read.")
+    if not row:
+        return False, (f"run #{run_id} was not queued and no reason was given — "
+                       f"check longform_queue for a stale row against this run")
+    return True, (f"run #{run_id} queued as long-form #{row[0]['id']}. The script "
+                  f"is written on the next engine tick and comes back here to read.")
+
+
+def _revive(queue_id, why):
+    """Put a dropped item back in the queue, clearing what the last attempt left."""
+    from shared.db import _conn, _is_postgres, set_longform_status
+
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(
+            f"UPDATE longform_queue SET script_path = NULL, video_path = NULL, "
+            f"youtube_video_id = NULL, reason = {ph} WHERE id = {ph}",
+            ((why or "re-queued by hand")[:500], queue_id))
+        conn.commit()
+    finally:
+        conn.close()
+    set_longform_status(queue_id, QUEUED)
 
 
 def build_description(parsed):

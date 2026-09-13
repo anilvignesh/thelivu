@@ -596,6 +596,47 @@ def t_a_person_can_ask_for_a_long_video():
     check("and it says where it already is", "already" in msg2, True)
 
 
+def t_a_dropped_story_can_be_asked_for_again():
+    """queue_longform is idempotent per run_id — right for the automatic path,
+    so make_reel cannot queue the same story twice — but it means a dropped row
+    blocks that run forever, and it no-ops SILENTLY.
+
+    Found on the first real long-form attempt (2026-09-13): the item was parked
+    after its script failed, re-queued, and came back "queued as long-form
+    #None" with nothing in the queue at all. A dropped item is now REVIVED."""
+    _fresh_db()
+    from publishing.longform import request_longform, QUEUED, DROPPED, POSTED
+    from shared.db import _conn, longform_queue, set_longform_status
+
+    conn = _conn()
+    try:
+        conn.cursor().execute(
+            "INSERT INTO pipeline_runs (id, throughline, draft_text, status) "
+            "VALUES (903, 'a story', 'the article', 'published')")
+        conn.commit()
+    finally:
+        conn.close()
+
+    ok, _ = request_longform(903)
+    check("queued the first time", ok, True)
+    qid = longform_queue(status=QUEUED)[0]["id"]
+
+    set_longform_status(qid, DROPPED)
+    ok2, msg2 = request_longform(903, why="fixed the cause, trying again")
+    check("a dropped story can be asked for again", ok2, True)
+    check("and it is the same item, revived", f"#{qid}" in msg2, True)
+    check("back in the queue",
+          [r["id"] for r in longform_queue(status=QUEUED)], [qid])
+    check("with the new reason",
+          "fixed the cause" in (longform_queue(status=QUEUED)[0]["reason"] or ""), True)
+
+    # A published one is not revivable — that would overwrite the record of it.
+    set_longform_status(qid, POSTED)
+    ok3, msg3 = request_longform(903)
+    check("a published story is not re-queued", ok3, False)
+    check("and it says why", "published long video" in msg3, True)
+
+
 def t_a_run_with_no_article_cannot_graduate():
     """Long-form is written FROM the verified article. A run with no draft has
     nothing to work from, and queueing it would fail later, in the renderer,
@@ -661,6 +702,7 @@ def main():
               t_rendered_item_awaits_watching,
               t_budget_check_reports_synthesis_cost,
               t_a_person_can_ask_for_a_long_video,
+              t_a_dropped_story_can_be_asked_for_again,
               t_a_run_with_no_article_cannot_graduate):
         t()
 
