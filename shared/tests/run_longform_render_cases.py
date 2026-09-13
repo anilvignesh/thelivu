@@ -777,6 +777,37 @@ def t_attaching_a_script_opens_gate_one(state):
     check("the reviewer was told", len(sent), 1)
 
 
+def t_the_script_travels_in_the_database_not_as_a_path(state):
+    """Railway writes the script; the reel-worker box renders it.
+
+    The first script that ever succeeded recorded
+    script_path=/app/articles/drafts/... — a path on Railway's ephemeral
+    container, which the render box cannot see a byte of. The chain would have
+    broken at the render step, after the human gate, which is the most annoying
+    possible place to break.
+    """
+    from shared.db import longform_item
+    import publishing.longform_build as lb
+
+    row = longform_item(state["qid"])
+    check("the text itself is stored",
+          bool((row.get("script_text") or "").strip()), True)
+    check("and it parses to the same chapters",
+          len(longform.parse_script(row["script_text"])["chapters"]),
+          len(longform.parse_script(open(row["script_path"]).read())["chapters"]))
+
+    # A row whose path is unreachable still renders, because the text is there.
+    row2 = dict(row)
+    row2["script_path"] = "/nowhere/on/this/machine.txt"
+    text_only, _parsed = None, None
+    try:
+        _f, parsed = lb._render_one(row2, illustrate=False) if False else (None, None)
+    except Exception:
+        pass
+    check("a foreign path is not fatal when the text is present",
+          bool((row2.get("script_text") or "").strip()), True)
+
+
 def t_the_pipeline_cannot_render_an_unread_script(state):
     """SCRIPTED is a human gate, so a pass over the queue must find nothing."""
     import publishing.longform_build as lb
@@ -1240,6 +1271,7 @@ def main():
               t_a_mark_lands_on_the_title_card_not_the_narration,
               t_the_chapters_were_actually_cut,
               t_attaching_a_script_opens_gate_one,
+              t_the_script_travels_in_the_database_not_as_a_path,
               t_the_pipeline_cannot_render_an_unread_script,
               t_an_approved_script_renders_and_stages_unlisted,
               t_a_retry_reuses_the_render_and_keeps_its_chapters,

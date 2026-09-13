@@ -86,7 +86,12 @@ def attach_script(queue_id, script_path, blockers=None):
         return {"ok": False, "error": "script parsed to zero chapters — check "
                                       "it uses CHAPTER n TITLE:/CHAPTER n: lines"}
 
-    set_longform_artifact(queue_id, script_path=str(path.resolve()))
+    # Text AND path. The text is the source of truth — Railway writes the
+    # script and the reel-worker box renders it, so a path is meaningful only on
+    # the machine that created it. The path is kept for whoever wants to open it
+    # on that machine.
+    set_longform_artifact(queue_id, script_path=str(path.resolve()),
+                          script_text=path.read_text())
     longform.advance(queue_id, row.get("status") or longform.QUEUED,
                      longform.SCRIPTED, by="system")
     # The blockers matter more than the script on that card — see
@@ -134,11 +139,18 @@ def _render_one(row, voice=None, illustrate=True):
     from shared.db import set_longform_artifact
 
     qid = row["id"]
-    script_path = row.get("script_path")
-    if not script_path or not os.path.exists(script_path):
-        raise RuntimeError(f"#{qid} is approved but its script is missing "
-                           f"({script_path!r})")
-    parsed = longform.parse_script(Path(script_path).read_text())
+    # The stored TEXT first; the path only as a fallback for rows written before
+    # script_text existed. A path from another machine is not a script.
+    text = (row.get("script_text") or "").strip()
+    if not text:
+        script_path = row.get("script_path")
+        if not script_path or not os.path.exists(script_path):
+            raise RuntimeError(
+                f"#{qid} is approved but its script is not readable here — "
+                f"script_text is empty and {script_path!r} does not exist on "
+                f"this machine")
+        text = Path(script_path).read_text()
+    parsed = longform.parse_script(text)
 
     existing = row.get("video_path")
     if existing and os.path.exists(existing):

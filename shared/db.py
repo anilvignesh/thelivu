@@ -442,6 +442,12 @@ CREATE TABLE IF NOT EXISTS longform_queue (
     -- script and an eight-minute MP4 do not belong in a row, and both review
     -- gates need to hand a human the thing itself, not a database id.
     script_path TEXT,
+    -- The script ITSELF, not just where it was written. Railway writes it and
+    -- the reel-worker box renders it: a path is meaningful only on the machine
+    -- that created it, and Railway's filesystem is ephemeral besides. Found on
+    -- the first successful script (2026-09-13) — script_path pointed at
+    -- /app/articles/drafts/... and the render box could not see a byte of it.
+    script_text TEXT,
     video_path  TEXT,
     -- Uploaded UNLISTED at render time so gate 2 can be watched on YouTube
     -- itself rather than off a fileserver that would have to stream 200MB.
@@ -818,6 +824,7 @@ CREATE TABLE IF NOT EXISTS longform_queue (
     reel_seconds REAL,
     status      TEXT DEFAULT 'queued',
     script_path TEXT,
+    script_text TEXT,
     video_path  TEXT,
     youtube_video_id TEXT,
     queued_at   TEXT DEFAULT (datetime('now')),
@@ -996,7 +1003,7 @@ def init_db():
             # predates the renderer, so rows existed that recorded a story owed
             # a long video with nowhere to put the video once it had one.
             for col, defn in [("script_path", "TEXT"), ("video_path", "TEXT"),
-                              ("youtube_video_id", "TEXT")]:
+                              ("youtube_video_id", "TEXT"), ("script_text", "TEXT")]:
                 try:
                     cur.execute(f"ALTER TABLE longform_queue ADD COLUMN {col} {defn}")
                     conn.commit()
@@ -1103,7 +1110,7 @@ def init_db():
                 except Exception:
                     pass
             for col, defn in [("script_path", "TEXT"), ("video_path", "TEXT"),
-                              ("youtube_video_id", "TEXT")]:
+                              ("youtube_video_id", "TEXT"), ("script_text", "TEXT")]:
                 try:
                     cur.execute(f"ALTER TABLE longform_queue ADD COLUMN {col} {defn}")
                 except Exception:
@@ -3702,7 +3709,7 @@ def longform_item(queue_id):
 
 
 def set_longform_artifact(queue_id, script_path=None, video_path=None,
-                          youtube_video_id=None):
+                          youtube_video_id=None, script_text=None):
     """Record where the script or the video landed.
 
     Deliberately separate from set_longform_status: the file must be on disk
@@ -3720,6 +3727,9 @@ def set_longform_artifact(queue_id, script_path=None, video_path=None,
     if youtube_video_id is not None:
         sets.append(f"youtube_video_id = {ph}")
         vals.append(str(youtube_video_id))
+    if script_text is not None:
+        sets.append(f"script_text = {ph}")
+        vals.append(str(script_text))
     if not sets:
         return 0
     conn = _conn()
