@@ -1153,9 +1153,12 @@ def t_a_chapter_with_no_record_is_flagged():
 
     parsed = longform.parse_script(SCRIPT)
     flags = mechanical_blockers(parsed)
-    # SCRIPT carries no RECORD lines at all, so every chapter is flagged for that.
-    check("every recordless chapter flagged",
-          sum(1 for f in flags if "cites no record" in f), len(parsed["chapters"]))
+    # SCRIPT carries no RECORD lines at all. That is reported ONCE, not once per
+    # chapter: the same sentence repeated six times is how a reviewer learns to
+    # stop reading the list.
+    collapsed = [f for f in flags if f.startswith("No chapter cites a record")]
+    check("recordlessness is reported once", len(collapsed), 1)
+    check("and it says how many", f"all {len(parsed['chapters'])} " in collapsed[0], True)
     # Chapter 2 states figures and declares no FIGURE line — the specific
     # failure the first rendered sample had. Chapter 1 declares one, so it is
     # flagged for the missing record only.
@@ -1164,6 +1167,57 @@ def t_a_chapter_with_no_record_is_flagged():
           [f.startswith("Chapter 2 ") for f in unshown], [True])
     check("the missing WHY_LONG_FORM is flagged",
           any("WHY_LONG_FORM" in f for f in flags), True)
+
+
+def t_a_record_url_that_is_not_a_document_is_caught():
+    """Told to supply a URL, a model supplies a plausible one.
+
+    The first API-written script emitted four RECORD lines all pointing at the
+    SAME generic index page — cag.gov.in/en/audit-report — which is HTML, not
+    the report. Those four frames would have fetched fine, failed to parse as
+    PDFs, and demoted to illustrations. The card would have said "4 records" and
+    the video would have had none, which is worse than citing nothing: it is the
+    appearance of evidence.
+    """
+    from publishing.longform_script import _unverifiable_records
+    from engine.digger import fetch as digfetch
+
+    parsed = longform.parse_script(
+        "TITLE: t\nCOLD_OPEN: x\n"
+        "CHAPTER 1 TITLE: A\nCHAPTER 1: words words words words words words\n"
+        "CHAPTER 1 RECORD: The audit report | https://example.gov.in/index | figure\n"
+        "CHAPTER 2 TITLE: B\nCHAPTER 2: words words words words words words\n"
+        "CHAPTER 2 RECORD: The same report again | https://example.gov.in/index | other\n"
+        "CLOSE: y\n")
+
+    real = digfetch.fetch
+    digfetch.fetch = lambda u, **k: {"content_type": "text/html; charset=utf-8",
+                                     "text": "a landing page"}
+    try:
+        flags = _unverifiable_records(parsed)
+    finally:
+        digfetch.fetch = real
+
+    check("an HTML url is called out",
+          sum(1 for f in flags if "not a document" in f), 2)
+    check("and the duplicate url is its own tell",
+          any("SAME url" in f for f in flags), True)
+
+    # A real PDF passes silently.
+    digfetch.fetch = lambda u, **k: {"content_type": "application/pdf", "text": "x"}
+    try:
+        check("a PDF raises nothing",
+              [f for f in _unverifiable_records(parsed) if "not a document" in f], [])
+    finally:
+        digfetch.fetch = real
+
+    # A url that does not fetch at all is named as that, not as a wrong type.
+    digfetch.fetch = lambda u, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+    try:
+        check("an unreachable url says so",
+              any("does not fetch" in f for f in _unverifiable_records(parsed)), True)
+    finally:
+        digfetch.fetch = real
 
 
 def t_a_chapter_with_nothing_to_show_is_named():
@@ -1211,10 +1265,11 @@ def t_a_chapter_with_a_record_is_not_flagged():
         "CHAPTER 1 RECORD: MoRTH deficiency register | https://example.gov.in/r | forty\n"
         "CHAPTER 1 IMAGE 1: A ledger open on a desk.")
     flags = mechanical_blockers(longform.parse_script(with_record))
-    check("chapter 1 is no longer flagged",
-          any(f.startswith("Chapter 1 ") for f in flags), False)
-    check("chapter 2 still is",
-          any(f.startswith("Chapter 2 ") for f in flags), True)
+    check("the collapsed line is gone once one chapter cites a record",
+          any(f.startswith("No chapter cites a record") for f in flags), False)
+    check("and the remaining chapter is named individually",
+          any(f.startswith("Chapter 2 ") and "cites no record" in f for f in flags),
+          True)
 
 
 def t_figures_spelled_out_still_count_as_figures():
@@ -1367,6 +1422,7 @@ def main():
               t_a_script_under_the_floor_does_not_reach_the_human,
               t_the_token_ceiling_stays_under_the_streaming_limit,
               t_a_chapter_with_no_record_is_flagged,
+              t_a_record_url_that_is_not_a_document_is_caught,
               t_a_chapter_with_nothing_to_show_is_named,
               t_the_card_says_how_much_the_safety_net_is_carrying,
               t_a_chapter_with_a_record_is_not_flagged,

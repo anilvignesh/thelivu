@@ -151,7 +151,7 @@ def mechanical_blockers(parsed):
     """
     from publishing import longform
 
-    out = []
+    out, recordless = [], []
     for c in parsed.get("chapters", []):
         states_figures = bool(_FIGURE.search(c.get("text") or ""))
         # A chapter that says a number and never puts it on screen is the
@@ -162,16 +162,28 @@ def mechanical_blockers(parsed):
         if states_figures and not c.get("figures"):
             out.append(f"Chapter {c['n']} ({c['title']}) states figures but puts "
                        f"none on screen — no FIGURE line")
-        if c.get("records"):
-            continue
-        if states_figures:
-            out.append(f"Chapter {c['n']} ({c['title']}) states figures and cites "
-                       f"no record")
-        else:
-            out.append(f"Chapter {c['n']} ({c['title']}) cites no record")
+        if not c.get("records"):
+            recordless.append(c)
     if not parsed.get("why_long_form"):
         out.append("No WHY_LONG_FORM line — the script does not say why this is "
                    "not a reel")
+    # Collapsed, not one line per chapter. A script with no fetchable primary
+    # document produces the SAME sentence for every chapter, and six identical
+    # warnings is the skim problem in a new shape — the reviewer reads the first,
+    # recognises the rest, and stops reading the list.
+    chapters = parsed.get("chapters") or []
+    if recordless and len(recordless) == len(chapters):
+        out.append(f"No chapter cites a record — all {len(chapters)} rely on "
+                   f"FIGURE/TABLE lines alone. Usually means no fetchable "
+                   f"primary document was found for this story.")
+    elif len(recordless) > 2:
+        out.append(f"{len(recordless)} chapters cite no record: "
+                   + ", ".join(str(c["n"]) for c in recordless))
+    else:
+        for c in recordless:
+            out.append(f"Chapter {c['n']} ({c['title']}) cites no record")
+
+    out.extend(_unverifiable_records(parsed))
     out.extend(_no_evidence_chapters(parsed))
     out.extend(_clip_calls(parsed))
     out.extend(_long_holds(parsed))
@@ -179,6 +191,55 @@ def mechanical_blockers(parsed):
     fits, why = longform.fits_window(parsed.get("word_count", 0))
     if not fits:
         out.append(why)
+    return out
+
+
+def _unverifiable_records(parsed, check=True):
+    """RECORD lines whose URL is not actually a document.
+
+    A model told to supply a URL will supply a plausible one. The first
+    API-written script emitted four RECORD lines, all pointing at the SAME
+    generic index page — https://cag.gov.in/en/audit-report — which is HTML, not
+    the report, and not even a PDF. Those four frames would have fetched fine,
+    failed to parse, and demoted to illustrations. The card would have said
+    "4 records" and the video would have had none.
+
+    That is worse than citing nothing: it is the appearance of evidence. So the
+    URL is checked here, once, before a human reads the script — a fetch and a
+    content type, which is the cheapest possible test and catches exactly this.
+    """
+    if not check:
+        return []
+    from engine.digger import fetch as digfetch
+
+    out, seen = [], {}
+    for c in parsed.get("chapters", []):
+        for rec in c.get("records") or []:
+            url = (rec.get("url") or "").strip()
+            what = (rec.get("description") or url)[:56]
+            if not url:
+                out.append(f"Chapter {c['n']} record has no URL — {what}")
+                continue
+            if url in seen:
+                verdict = seen[url]
+            else:
+                try:
+                    r = digfetch.fetch(url)
+                    ct = (r.get("content_type") or "").lower()
+                    verdict = None if "pdf" in ct else f"is {ct.split(';')[0] or 'not a PDF'}, not a document"
+                except Exception as e:
+                    verdict = f"does not fetch ({type(e).__name__})"
+                seen[url] = verdict
+            if verdict:
+                out.append(f"Chapter {c['n']} record URL {verdict} — {what}")
+
+    # The same URL on several chapters is the other half of the same tell.
+    urls = [ (r.get("url") or "").strip()
+             for c in parsed.get("chapters", []) for r in (c.get("records") or []) ]
+    real = [u for u in urls if u]
+    if len(real) > 1 and len(set(real)) == 1:
+        out.append(f"All {len(real)} records cite the SAME url — that is one "
+                   f"document being passed off as several, or a landing page")
     return out
 
 
