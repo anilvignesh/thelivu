@@ -623,6 +623,32 @@ def _shot_count(duration, available):
 # that is right for 30 words and impossible for 200.
 MAX_SYNTH_WORDS = 34
 
+# How far BEFORE the words a frame appears. A frame that cuts in exactly as the
+# number is said reads as late, because the eye needs a beat to travel to it.
+LEAD_IN = 2.0
+# No shot shorter than this once anchoring has had its say, or an anchored
+# figure flashes past unread.
+MIN_ANCHORED_SHOT = 3.0
+# Number of assets that must carry a believed anchor before reordering happens
+# at all. Two is the minimum that can disagree about order.
+#
+# There is deliberately NO separate, higher score threshold for reordering. One
+# was tried and it backfired: a figure whose anchor scored 2 was believed enough
+# to pin but not enough to move, so it stayed in front of the quote frames, and
+# _best_monotone then had to drop it to keep the rest in order. Being dropped
+# turned it into a free asset, which landed it in the widest gap — the opening —
+# 35 seconds before the sentence that says it. An anchor is either believed or
+# it is not.
+ANCHOR_REORDER_MIN = 2
+# Longest any one frame may hold. Not a style preference — this is the number
+# that decides whether the thing is a video or an audio-book with a cover. When
+# every anchor in a chapter clumps late, placement alone cannot fix the dead air
+# in front of them; the unit needs MORE frames, so fit_unit buys them.
+MAX_HOLD = 20.0
+# How many frames above the duration-derived budget fit_unit may buy. A cap, not
+# a target: past this the unit is being cut faster than it is being spoken.
+MAX_EXTRA_SHOTS = 4
+
 
 def _chunk_for_synth(text, max_words=MAX_SYNTH_WORDS):
     """Sentence-aligned pieces, each small enough to survive the voice server.
@@ -710,14 +736,24 @@ def _sentences(text):
     return [p for p in parts if len(p.split()) >= 6]
 
 
-def quote_fill(text, have, want):
+def quote_fill(text, have, want, anchored=False):
     """Quote frames to fill the shots a unit earned but did not declare assets for.
 
-    Position-matched, not arbitrary: shots run sequentially over one continuous
-    narration take, so the frame occupying slot j of k shows a sentence from
-    about j/k of the way through the text. The line on screen therefore tracks
-    what is being said without any word-level timing — the same approximation
-    plan_cuts makes about pauses, and good enough for the same reason.
+    Two modes, because there are two ways the shots get timed.
+
+    WITHOUT anchoring, shots run sequentially over one continuous take, so the
+    frame in slot j of k shows a sentence from about j/k of the way through —
+    the line on screen tracks what is being said with no word-level timing. The
+    evidence occupies the first `have` slots, so the quotes start after them.
+
+    WITH anchoring that reasoning inverts, and keeping it was a real bug. The
+    evidence no longer occupies the leading slots; it lands wherever it is
+    spoken, which is often late. Offering quotes only from the last
+    (1 - have/want) of the text then left the OPENING with nothing to show but
+    an illustration — chapter 6 of long-form #1 held one for 22 seconds while
+    the narration laid out its whole argument, and the sentences that would have
+    covered it were never candidates. So when the caller can anchor, quotes are
+    drawn from the whole text and placed by where they are spoken.
     """
     need = max(0, want - have)
     sents = _sentences(text)
@@ -725,7 +761,10 @@ def quote_fill(text, have, want):
         return []
     out, used = [], set()
     for i in range(need):
-        frac = (have + i + 0.5) / max(1, want)
+        if anchored:
+            frac = (i + 0.5) / need
+        else:
+            frac = (have + i + 0.5) / max(1, want)
         idx = min(len(sents) - 1, int(frac * len(sents)))
         # Never show the same sentence twice in one unit.
         while idx in used and idx + 1 < len(sents):
@@ -822,60 +861,158 @@ def cuts_from_anchors(assets, marks, dur, pauses, plan_cuts):
     were synthesised separately — so an asset that can be located in the text
     gets its shot boundary at that chunk.
 
-    Assets that cannot be located keep their relative order and share out the
-    space between the ones that can. Falling back to an even split for those is
-    the old behaviour, which was never wrong, only imprecise.
+    Two kinds of asset, treated differently on purpose:
+
+      PINNED    A figure, record, table or quote frame whose content was found
+                in the narration. It belongs at that moment and nowhere else.
+
+      FREE      An illustration, or evidence whose anchor was too weak to
+                believe. It has no opinion about when it appears, so it is put
+                wherever the screen would otherwise sit longest on one frame.
+
+    That second rule is the one that stops the audio-book feeling. Spreading
+    free assets evenly in declaration order leaves the long holds exactly where
+    the anchors happened to clump; spending them on the widest gaps is what a
+    person cutting this by hand would do.
 
     Returns lengths summing to exactly `dur`, same contract as plan_cuts.
     """
+    return _placements(assets, marks, dur, pauses, plan_cuts)[1]
+
+
+def _placements(assets, marks, dur, pauses, plan_cuts):
+    """(screen order as indices into `assets`, shot length per slot).
+
+    The order is returned rather than applied so that the one caller who needs
+    both — align_to_narration — cannot get them out of step.
+    """
     k = len(assets)
     if k <= 1 or not marks:
-        return plan_cuts(dur, k, pauses)
+        return list(range(k)), plan_cuts(dur, k, pauses)
 
-    anchors = [anchor_chunk(a, marks) for a in assets]
-    starts = [None] * k
-    for i, ci in enumerate(anchors):
-        if ci is not None:
-            starts[i] = marks[ci][0]
+    scored = [_anchor_score(a, marks) for a in assets]
+    times = [marks[ci][0] if ci is not None else None for ci, _sc in scored]
+    keep = _best_monotone(times, [sc for _ci, sc in scored])
+    if not keep:
+        return list(range(k)), plan_cuts(dur, k, pauses)
 
-    # An anchor that would reorder the assets is dropped: the script's order is
-    # the argument's order, and a figure jumping ahead of the sentence that sets
-    # it up reads as a mistake even when the timing is right.
-    last = -1.0
+    # Pin the anchored ones. A frame that cuts in exactly as the number is said
+    # reads as late — the eye needs a beat to travel to it — so LEAD_IN puts it
+    # just before.
+    #
+    # Ties are spread across the chunk rather than stacked. A figure and the
+    # record that evidences it cite the same number and therefore anchor to the
+    # same chunk BY CONSTRUCTION; stacking them meant one of the two was
+    # squeezed to the minimum shot length and effectively lost.
+    start = {}
+    by_chunk = {}
+    for i in keep:
+        by_chunk.setdefault(scored[i][0], []).append(i)
+    for ci, group in by_chunk.items():
+        head = max(0.0, marks[ci][0] - LEAD_IN)
+        end = marks[ci + 1][0] if ci + 1 < len(marks) else dur
+        span = max(end - marks[ci][0], MIN_ANCHORED_SHOT * len(group))
+        for j, i in enumerate(sorted(group)):
+            start[i] = head + span * j / len(group)
+
+    # A free asset that HAS an anchor still goes where it was spoken. It is free
+    # only because keeping it would have broken the running order, which is a
+    # reason to place it loosely, not a reason to place it anywhere.
     for i in range(k):
-        if starts[i] is not None and starts[i] <= last:
-            starts[i] = None
-        elif starts[i] is not None:
-            last = starts[i]
+        if i not in start and times[i] is not None:
+            start[i] = max(0.0, times[i] - LEAD_IN)
 
-    if not any(s is not None for s in starts):
-        return plan_cuts(dur, k, pauses)
+    # Everything genuinely unplaced — illustrations — goes where the screen
+    # would otherwise sit longest on one frame.
+    free = [i for i in range(k) if i not in start]
+    for i in free:
+        edges = sorted(start.values()) + [dur]
+        if edges[0] > MIN_ANCHORED_SHOT:
+            edges = [0.0] + edges
+        gaps = [(edges[j + 1] - edges[j], edges[j]) for j in range(len(edges) - 1)]
+        width, at = max(gaps)
+        start[i] = at + width / 2 if width > 2 * MIN_ANCHORED_SHOT else at + width
 
-    # Fill the gaps evenly between known anchors, keeping the first shot at 0.
-    starts[0] = 0.0
-    known = [i for i, s in enumerate(starts) if s is not None]
-    for a, b in zip(known, known[1:]):
-        span, n = starts[b] - starts[a], b - a
-        for j in range(1, n):
-            starts[a + j] = starts[a] + span * j / n
-    tail = [i for i in range(known[-1] + 1, k)]
-    if tail:
-        span = dur - starts[known[-1]]
-        for j, i in enumerate(tail, start=1):
-            starts[i] = starts[known[-1]] + span * j / (len(tail) + 1)
+    order = sorted(range(k), key=lambda i: (start[i], i))
+    starts = [start[i] for i in order]
+    starts[0] = 0.0                      # something is on screen from frame one
 
-    # No shot shorter than this, or an anchored figure can flash past unread.
-    MIN = 3.0
     for i in range(1, k):
-        if starts[i] - starts[i - 1] < MIN:
-            starts[i] = starts[i - 1] + MIN
-    if starts[-1] > dur - MIN:
+        if starts[i] - starts[i - 1] < MIN_ANCHORED_SHOT:
+            starts[i] = starts[i - 1] + MIN_ANCHORED_SHOT
+    if starts[-1] > dur - MIN_ANCHORED_SHOT:
         for i in range(k - 1, 0, -1):
-            starts[i] = min(starts[i], dur - MIN * (k - i))
+            starts[i] = min(starts[i], dur - MIN_ANCHORED_SHOT * (k - i))
 
     lengths = [round(starts[i + 1] - starts[i], 3) for i in range(k - 1)]
     lengths.append(round(dur - sum(lengths), 3))
-    return lengths
+    return order, lengths
+
+
+def _best_monotone(times, scores):
+    """Indices of the highest-scoring non-decreasing run of anchors.
+
+    NON-decreasing, not strictly increasing: a figure and the record that
+    evidences it cite the same number and therefore anchor to the same chunk by
+    construction. Forcing them apart here discarded one of them; letting them
+    share a time and separating them afterwards with MIN_ANCHORED_SHOT keeps
+    both, in the order the writer declared them.
+    """
+    idx = [i for i, t in enumerate(times) if t is not None]
+    if not idx:
+        return []
+    best = {}
+    for i in idx:
+        run, sc = [i], scores[i]
+        for j in idx:
+            if j >= i:
+                break
+            if times[j] <= times[i] and j in best:
+                cand_run, cand_sc = best[j]
+                if cand_sc + scores[i] > sc:
+                    run, sc = cand_run + [i], cand_sc + scores[i]
+        best[i] = (run, sc)
+    return max(best.values(), key=lambda rs: (rs[1], len(rs[0])))[0]
+
+
+def fit_unit(assets, text, want, images, marks, dur, pauses, plan_cuts):
+    """(assets in screen order, shot lengths) for one unit, with no long holds.
+
+    `want` is a budget derived from duration alone, and duration alone cannot
+    see that a chapter says all four of its numbers in the last twenty seconds.
+    When it does, the frames pile up at the end and the opening sits on one
+    image for half a minute — chapter 6 of long-form #1 held a generated
+    illustration for 33 seconds while the narration laid out the whole argument.
+
+    So the budget is not final. Place the shots, look at the longest hold, and
+    if it is over MAX_HOLD buy another frame and try again. quote_fill runs out
+    of unused sentences on its own, which is the natural stopping point: when
+    there is nothing left to put on screen, holding is the honest answer.
+    """
+    best = None
+    for extra in range(0, MAX_EXTRA_SHOTS + 1):
+        filled = with_filler(assets, text, want + extra, images=images,
+                             anchored=bool(marks))
+        k = min(want + extra, len(filled)) or 1
+        ordered, cuts = align_to_narration(filled[:k], marks, dur, pauses, plan_cuts)
+        if best is None or max(cuts) < max(best[1]):
+            best = (ordered, cuts)
+        if max(cuts) <= MAX_HOLD:
+            return ordered, cuts
+        if len(filled) < want + extra:
+            break            # filler exhausted — holding is the honest answer
+    return best
+
+
+def align_to_narration(assets, marks, dur, pauses, plan_cuts):
+    """(assets in the order they appear on screen, shot lengths for them).
+
+    One entry point so the caller cannot reorder without recutting, or cut
+    without reordering — the two have to agree or every frame is wrong by one.
+    """
+    ordered = order_by_narration(assets, marks)
+    order, cuts = _placements(ordered, marks, dur, pauses, plan_cuts)
+    return [ordered[i] for i in order], cuts
 
 
 def anchor_chunk(asset, marks):
@@ -887,15 +1024,26 @@ def anchor_chunk(asset, marks):
     strength of one shared common word lands somewhere arbitrary and looks
     deliberate.
     """
+    return _anchor_score(asset, marks)[0]
+
+
+def _anchor_score(asset, marks):
+    """(chunk index, match score), or (None, 0).
+
+    The score is kept and not thrown away because two assets regularly want the
+    same chunk — a figure and the record that evidences it cite the same number
+    by construction — and deciding which one keeps the anchor needs to be a
+    judgement about match strength, not about which was declared first.
+    """
     terms = _anchor_terms(asset)
     if not terms or not marks:
-        return None
+        return None, 0
     if asset["kind"] == "quote":
         needle = " ".join(terms[0].lower().split())
         for i, (_t, text) in enumerate(marks):
             if needle[:40] in " ".join(text.lower().split()):
-                return i
-        return None
+                return i, len(needle.split())
+        return None, 0
 
     best, best_score = None, 0
     for i, (_t, text) in enumerate(marks):
@@ -906,8 +1054,65 @@ def anchor_chunk(asset, marks):
     # One shared word is coincidence; two is a match. A single term is accepted
     # only when that is all the asset had to offer.
     if best_score >= 2 or (best_score == 1 and len(terms) == 1):
-        return best
-    return None
+        return best, best_score
+    return None, 0
+
+
+def order_by_narration(assets, marks):
+    """Reorder assets into the order the narration actually reaches them.
+
+    THIS REVERSES A DELIBERATE EARLIER DECISION, so the reasoning matters. The
+    first version refused to reorder, on the grounds that "the script's order is
+    the argument's order, and a figure jumping ahead of the sentence that sets
+    it up reads as a mistake." That was right when anchors were unreliable — but
+    it also meant declaration order silently overrode the narration, and the
+    first real render showed what that costs.
+
+    Chapter 1 of long-form #1 declared FIGURE, FIGURE, TABLE, RECORD. The
+    narration reaches them at 10.7s, 29.3s, 0.0s and 10.7s. Because the two
+    out-of-order anchors came later in the list, the old monotonic filter
+    dropped BOTH of them, and the opening figure held the screen from 0 to
+    29.3s — on screen eighteen seconds after it was spoken, which is the
+    audio-book failure in its purest form.
+
+    Narration order IS the argument's order. A writer listing evidence under a
+    chapter heading is not choreographing it; the sentences are. So assets with
+    a confident anchor are sorted by when they are spoken, and anything without
+    one keeps its place relative to the anchored asset it followed — an
+    illustration or a quote frame has no opinion about where it belongs, and
+    moving it would be the guess this function is careful not to make.
+    """
+    if not marks or len(assets) < 2:
+        return list(assets)
+
+    scored = [_anchor_score(a, marks) for a in assets]
+    # Every anchor _anchor_score accepted is used. If an anchor is good enough
+    # to hang a shot on, it is good enough to say which shot comes first.
+    strong = [i for i, (ci, _sc) in enumerate(scored) if ci is not None]
+    if len(strong) < ANCHOR_REORDER_MIN:
+        return list(assets)
+
+    order = sorted(strong, key=lambda i: (marks[scored[i][0]][0], i))
+    if order == strong:
+        return list(assets)          # already in narration order
+
+    # Carry each unanchored asset with the anchored one it trailed, so a quote
+    # frame written to follow a figure still follows that figure.
+    trailing = {i: [] for i in strong}
+    head, current = [], None
+    for i in range(len(assets)):
+        if i in trailing:
+            current = i
+        elif current is None:
+            head.append(i)
+        else:
+            trailing[current].append(i)
+
+    out = [assets[i] for i in head]
+    for i in order:
+        out.append(assets[i])
+        out.extend(assets[j] for j in trailing[i])
+    return out
 
 
 def plan_assets(chapter, fallback_image=None):
@@ -953,7 +1158,7 @@ def plan_assets(chapter, fallback_image=None):
     return figures + tables + photos + clips + records
 
 
-def with_filler(assets, text, want, images=()):
+def with_filler(assets, text, want, images=(), anchored=False):
     """Fill a unit's shot budget: evidence, then narration, then at most one
     picture — and the picture only if the unit can spare a slot.
 
@@ -968,7 +1173,7 @@ def with_filler(assets, text, want, images=()):
         return out[:want]
     picture = (list(images)[:MAX_IMAGES_PER_UNIT]
                if want >= MIN_SHOTS_FOR_IMAGE else [])
-    quotes = quote_fill(text, len(out), want - len(picture))
+    quotes = quote_fill(text, len(out), want - len(picture), anchored=anchored)
     out += quotes
     out += [{"kind": "image", "prompt": p} for p in picture]
     # A unit with nothing to say and nothing declared still needs one frame.
@@ -1236,11 +1441,9 @@ def render(parsed, out_mp4, work_dir=None, voice=None, illustrate=True,
         want = _shot_count(dur, max(len(assets) + 1, _shot_count(dur, 99)))
         declared_images = ((chap or {}).get("images")
                            or ([fallback] if fallback else []))
-        assets = with_filler(assets, text, want, images=declared_images)
-        k = min(want, len(assets)) or 1
-        plans.append(list(zip(assets[:k],
-                              cuts_from_anchors(assets[:k], marks, dur,
-                                                pauses, plan_cuts))))
+        ordered, cuts = fit_unit(assets, text, want, declared_images,
+                                 marks, dur, pauses, plan_cuts)
+        plans.append(list(zip(ordered, cuts)))
 
     # 3. Fetch and render the documents. Before illustration, because a record
     #    that fails to fetch demotes its shot to an illustration and that has to

@@ -216,6 +216,133 @@ def t_anchored_cuts_sum_exactly_and_keep_order():
           abs(starts[1] - 40.0) < 6.0, True)
 
 
+def t_evidence_is_reordered_into_the_order_it_is_spoken():
+    """The defect the first real render exposed, and the reason the earlier
+    "never reorder" rule was reversed.
+
+    Chapter 1 of long-form #1 declared FIGURE, FIGURE, TABLE, RECORD. The
+    narration reaches them at 10.7s, 29.3s, 0.0s and 10.7s. The old greedy
+    left-to-right filter kept the first two anchors and dropped the other two
+    for going backwards, so the opening figure held the screen from 0 to 29.3s
+    — eighteen seconds after the sentence that says it.
+    """
+    marks = [
+        (0.0, "Two reports of the auditor contradict each other across years."),
+        (10.0, "Thirty thousand three hundred and eight crore was never collected."),
+        (30.0, "A second figure, forty one thousand one hundred and eighty crore, follows."),
+    ]
+    figure_a = {"kind": "figure", "figure": {"value": "30,308 crore", "label": "uncollected"}}
+    figure_b = {"kind": "figure", "figure": {"value": "41,180 crore", "label": "second"}}
+    table = {"kind": "table", "table": {"title": "Two reports contradict across years"}}
+
+    out = lfr.order_by_narration([figure_a, figure_b, table], marks)
+    check("the table moves ahead of both figures", out[0]["kind"], "table")
+    check("and the figures keep their own order",
+          [a["figure"]["value"] for a in out[1:]], ["30,308 crore", "41,180 crore"])
+
+
+def t_a_figure_and_the_record_that_evidences_it_both_survive():
+    """They cite the same number, so they anchor to the same chunk BY
+    CONSTRUCTION. The old strictly-increasing rule dropped one of the two."""
+    from publishing.reel import plan_cuts
+
+    marks = [(0.0, "Thirty thousand three hundred and eight crore was never collected."),
+             (20.0, "The department said reconciliation was still in progress."),
+             (40.0, "Nothing has been published since.")]
+    figure = {"kind": "figure", "figure": {"value": "30,308 crore", "label": "uncollected"}}
+    record = {"kind": "record", "record": {"quote": "thirty thousand three hundred and eight crore"}}
+    quote = {"kind": "quote", "text": "Nothing has been published since."}
+
+    assets, cuts = lfr.align_to_narration([figure, record, quote], marks, 60.0, [], plan_cuts)
+    kinds = [a["kind"] for a in assets]
+    check("all three are kept", sorted(kinds), ["figure", "quote", "record"])
+    check("the tied pair is not squeezed to the floor",
+          min(cuts[:2]) >= lfr.MIN_ANCHORED_SHOT, True)
+    check("and they are not stacked on one instant",
+          cuts[0] > 0 and cuts[1] > 0, True)
+    check("sums exactly", round(sum(cuts), 3), 60.0)
+
+
+def t_a_long_hold_buys_itself_more_frames():
+    """A chapter that says all its evidence late leaves the opening with nothing
+    to show. Duration alone cannot see that, so the shot budget is not final.
+
+    Chapter 6 of long-form #1 held a generated illustration for 33 seconds while
+    the narration laid out its whole argument.
+    """
+    from publishing.reel import plan_cuts
+
+    text = ("So, the open question. Our reading is that this looks like a state "
+            "under real fiscal strain and not a coordinated concealment operation. "
+            "That is an interpretation and we are flagging it as one. What would "
+            "settle it is not opinion. It is three things, each of which is "
+            "checkable against the public record.")
+    marks = [(0.0, text[:120]), (20.0, text[120:240]), (40.0, text[240:])]
+    late = {"kind": "figure", "figure": {"value": "3 things", "label": "checkable against the public record"}}
+
+    want = 2
+    _ordered, cuts = lfr.fit_unit([late], text, want, ["a ledger"],
+                                  marks, 60.0, [], plan_cuts)
+    check("it bought more frames than the budget asked for", len(cuts) > want, True)
+    check("and no frame holds past the ceiling", max(cuts) <= lfr.MAX_HOLD, True)
+    check("sums exactly", round(sum(cuts), 3), 60.0)
+
+
+def t_quote_frames_cover_the_opening_when_the_evidence_is_late():
+    """quote_fill used to offer sentences only from AFTER the evidence's share
+    of the text. That was right when shots ran on a stopwatch and the evidence
+    occupied the leading slots. Once placement became anchored it inverted: the
+    evidence lands where it is spoken, so the opening was left with nothing but
+    an illustration and the sentences that would have covered it were never
+    candidates.
+    """
+    text = ("First the chapter opens on a question nobody has answered yet. "
+            "Second the argument is carried forward another step by the auditor. "
+            "Third the whole thing turns on one line buried in an annexure. "
+            "Fourth the number itself finally lands in front of the reader. "
+            "Fifth and last the chapter closes on what would settle it.")
+    sents = lfr._sentences(text)
+    where = lambda qs: [sents.index(q["text"]) for q in qs]  # noqa: E731
+
+    unanchored = where(lfr.quote_fill(text, 2, 4))
+    anchored = where(lfr.quote_fill(text, 2, 4, anchored=True))
+    check("without anchoring the quotes come only from the tail",
+          min(unanchored) >= len(sents) // 2, True)
+    check("with anchoring they span the whole chapter",
+          min(anchored) < len(sents) // 2, True)
+    check("and they still spread rather than bunching",
+          max(anchored) > min(anchored), True)
+
+    # The case that actually bit: ONE declared asset, four slots. Under the old
+    # rule three of the four quotes came from the last three-quarters.
+    many = where(lfr.quote_fill(text, 1, 5, anchored=True))
+    check("a chapter with one late figure still gets an opening frame",
+          min(many), 0)
+
+
+def t_a_weak_anchor_still_beats_no_anchor():
+    """An asset dropped for breaking the running order used to become "free" and
+    land in the widest gap — which was the opening, 35 seconds before the
+    sentence that says it. Free means placed loosely, not placed anywhere."""
+    from publishing.reel import plan_cuts
+
+    marks = [(0.0, "An opening that matches nothing in particular."),
+             (20.0, "Another sentence that matches nothing either."),
+             (40.0, "It is three things, each of them checkable.")]
+    late = {"kind": "figure", "figure": {"value": "3", "label": "things checkable"}}
+    image = {"kind": "image", "prompt": "a ledger"}
+
+    assets, cuts = lfr.align_to_narration([late, image], marks, 60.0, [], plan_cuts)
+    at, placed = 0.0, None
+    for a, c in zip(assets, cuts):
+        if a["kind"] == "figure":
+            placed = (at, at + c)
+        at += c
+    check("the figure is not parked at the opening", placed[0] > 10.0, True)
+    check("it is on screen when it is spoken",
+          placed[0] - 3.0 <= 40.0 <= placed[1] + 3.0, True)
+
+
 def t_with_no_marks_it_falls_back_to_the_old_split():
     """Every unit rendered before this had no chunk timing. The fallback is the
     previous behaviour, which was imprecise and never wrong."""
@@ -1538,6 +1665,11 @@ def main():
               t_a_figure_anchors_where_its_number_is_spoken,
               t_an_asset_with_nothing_to_match_is_not_guessed,
               t_anchored_cuts_sum_exactly_and_keep_order,
+              t_evidence_is_reordered_into_the_order_it_is_spoken,
+              t_a_figure_and_the_record_that_evidences_it_both_survive,
+              t_a_long_hold_buys_itself_more_frames,
+              t_quote_frames_cover_the_opening_when_the_evidence_is_late,
+              t_a_weak_anchor_still_beats_no_anchor,
               t_with_no_marks_it_falls_back_to_the_old_split,
               t_a_short_unit_keeps_one_picture,
               t_a_long_unit_uses_the_pictures_it_was_given,
