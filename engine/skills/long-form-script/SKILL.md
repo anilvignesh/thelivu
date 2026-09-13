@@ -444,30 +444,65 @@ may never scroll. The description is where they go to verify; the spoken line is
 where they learn it is verifiable at all.
 
 ## Output (exactly this, nothing else)
+
+The order of lines within a chapter is the order they appear on screen, and the
+renderer drops from the BOTTOM when a chapter has more than its narration has
+room for. So write the evidence first and the picture last.
+
 ```
 TITLE: <short internal title>
-PLACE: <where the story happens — "Karnataka, India". Never spoken; it anchors illustrations to the right country. Blank if genuinely placeless.>
+PLACE: <where the story happens — "Kerala, India". Never spoken; it anchors illustrations to the right country. Blank if genuinely placeless.>
 WHY_LONG_FORM: <one sentence naming which of the three triggers above this story meets>
 COLD_OPEN: <spoken opening, 1-3 lines>
-COLD_OPEN_IMAGE: <one-sentence conceptual illustration>
+COLD_OPEN_FIGURE: <the number the whole video turns on> | <what it is> | <the source>
+COLD_OPEN_IMAGE: <one conceptual illustration — objects, space and scale, never words>
 OPEN_LOOP: <the specific unresolved question the cold open raises, in one line. The close must answer this by name, or state what would settle it. Never spoken — it is the contract the script holds itself to.>
+
 CHAPTER 1 TITLE: <4-8 words, plain>
 CHAPTER 1: <spoken lines, 150-300 words>
-CHAPTER 1 FIGURE: <the number as it should be READ> | <what it is> | <the source>   (one to three; the source field is required)
-CHAPTER 1 IMAGE 1: <one-sentence conceptual illustration — objects, space and scale, never words>
-CHAPTER 1 IMAGE 2: <the chapter's second beat — a different move, not another angle on the first>
-CHAPTER 1 IMAGE 3: <optional third, if the chapter runs long>
-CHAPTER 1 RECORD: <document description> | <url> | <exact phrase the page must contain>   (optional; use wherever the chapter turns on a specific figure or wording)
+CHAPTER 1 FIGURE: <the number as it should be READ> | <what it is> | <the source>
+CHAPTER 1 FIGURE: <a second figure, if the chapter turns on more than one>
+CHAPTER 1 TABLE: <title> | <source> | <row> | <row> | ... | *<the row that matters>
+CHAPTER 1 RECORD: <what the document is> | <url> | <exact phrase the page must contain>
+CHAPTER 1 IMAGE 1: <one conceptual illustration — at most one per chapter survives>
+
 CHAPTER 2 TITLE: <...>
 CHAPTER 2: <...>
-CHAPTER 2 IMAGE: <...>
+CHAPTER 2 FIGURE: <...>
+CHAPTER 2 RECORD: <...>
+CHAPTER 2 IMAGE 1: <...>
 ...
+
 CLOSE: <spoken closing, 2-4 lines. Must close OPEN_LOOP by name: either answer it, or say what would settle it and that it has not been published.>
-CLOSE_IMAGE: <one-sentence conceptual illustration>
-DESCRIPTION: <2-4 sentences, then a "Sources:" list naming each record so a viewer can find it — parliamentary questions by number and date, datasets by title, orders by number. Mark anything that is press-reported rather than primary.>
+CLOSE_FIGURE: <the figure the close leaves the viewer with, if there is one>
+CLOSE_IMAGE: <one conceptual illustration>
+DESCRIPTION: <2-4 sentences. The engine appends the full source list automatically from your FIGURE/TABLE/RECORD lines — do not write one yourself.>
 HASHTAGS: <6-10 story-specific tags — brand tags are added by the engine>
 WORD_COUNT: <integer, spoken words only>
 ```
+
+### Before you finish: count what you declared
+
+The renderer changes the picture about every 13 seconds and can only cut to
+something you wrote down. Whatever you leave undeclared becomes a QUOTE frame —
+a sentence of your own narration set as type. That is a safety net, not a plan:
+a video that is more than half quote frames is one you under-specified.
+
+Count them:
+
+* **One asset per 12-15 spoken seconds**, which is **one per 30-40 words**.
+  A 250-word chapter wants 6 to 8 lines across FIGURE, TABLE, RECORD and IMAGE.
+* **Every chapter gets at least one FIGURE, TABLE or RECORD.** A chapter with
+  nothing but an image is a chapter with nothing to show.
+* **At most one IMAGE per chapter** — the renderer discards the rest.
+* Reach for **TABLE** every time a claim is a rank, a comparison, a share or a
+  breakdown. *"Kerala is 23rd of 26"*, *"40 of 59 cases"*, *"three of the four
+  findings"* — all of those are tables, and a table is the frame a viewer can
+  actually check.
+
+For scale: a 1,600-word script on comparable material carried **15 FIGURE, 4
+TABLE and 6 RECORD lines**. If yours has six figures and no tables, you have
+written the article and not the video.
 
 ## How deep to investigate, and when to stop
 

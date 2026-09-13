@@ -1166,6 +1166,42 @@ def t_a_chapter_with_no_record_is_flagged():
           any("WHY_LONG_FORM" in f for f in flags), True)
 
 
+def t_a_chapter_with_nothing_to_show_is_named():
+    """On the first skill-written script that was chapter 5 — the one that adds
+    the findings up, which is exactly where a viewer wants the numbers back on
+    screen. It declared one illustration and nothing else."""
+    from publishing.longform_script import mechanical_blockers
+
+    parsed = longform.parse_script(
+        "TITLE: t\nCOLD_OPEN: x\nCHAPTER 1 TITLE: Has evidence\n"
+        "CHAPTER 1: Forty of fifty-nine cases closed with no penalty at all.\n"
+        "CHAPTER 1 FIGURE: 40 of 59 | closed with no penalty | MoRTH register\n"
+        "CHAPTER 2 TITLE: Has nothing\n"
+        "CHAPTER 2: The findings add up to a pattern across every department.\n"
+        "CHAPTER 2 IMAGE 1: a ledger\nCLOSE: y\n")
+    flags = mechanical_blockers(parsed)
+    named = [f for f in flags if "nothing to show but an illustration" in f]
+    check("the empty chapter is named", len(named), 1)
+    check("and it is chapter 2", named[0].startswith("Chapter 2 "), True)
+
+
+def t_the_card_says_how_much_the_safety_net_is_carrying():
+    """Quote frames keep a thin script watchable, which is why a reviewer can
+    read 1,200 words and not notice it was thin. Past half, say so."""
+    from publishing.longform_script import mechanical_blockers
+
+    # Nothing declared anywhere: every frame becomes a quote.
+    thin = longform.parse_script(
+        "TITLE: t\nCOLD_OPEN: The minister said the road was world class.\n"
+        "CHAPTER 1 TITLE: One\nCHAPTER 1: " +
+        " ".join(["The ministry told Parliament this in writing."] * 12) +
+        "\nCLOSE: That is what the record shows and nothing more.\n")
+    lines = [f for f in mechanical_blockers(thin) if f.startswith("Frames:")]
+    check("the frame mix is always reported", len(lines), 1)
+    check("and thinness is called out",
+          "safety net is carrying" in lines[0], True)
+
+
 def t_a_chapter_with_a_record_is_not_flagged():
     from publishing import longform
     from publishing.longform_script import mechanical_blockers
@@ -1331,6 +1367,8 @@ def main():
               t_a_script_under_the_floor_does_not_reach_the_human,
               t_the_token_ceiling_stays_under_the_streaming_limit,
               t_a_chapter_with_no_record_is_flagged,
+              t_a_chapter_with_nothing_to_show_is_named,
+              t_the_card_says_how_much_the_safety_net_is_carrying,
               t_a_chapter_with_a_record_is_not_flagged,
               t_figures_spelled_out_still_count_as_figures,
               t_publishing_needs_a_wider_scope_than_uploading):

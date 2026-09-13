@@ -172,12 +172,78 @@ def mechanical_blockers(parsed):
     if not parsed.get("why_long_form"):
         out.append("No WHY_LONG_FORM line — the script does not say why this is "
                    "not a reel")
+    out.extend(_no_evidence_chapters(parsed))
     out.extend(_clip_calls(parsed))
     out.extend(_long_holds(parsed))
+    out.extend(_too_thin(parsed))
     fits, why = longform.fits_window(parsed.get("word_count", 0))
     if not fits:
         out.append(why)
     return out
+
+
+def _no_evidence_chapters(parsed):
+    """Chapters carrying no figure, table, record, photo or clip.
+
+    A chapter whose only declared asset is a generated illustration has nothing
+    to show. On the first skill-written script that was chapter 5 — the one that
+    adds the findings up, which is exactly where a viewer wants the numbers
+    back on screen.
+    """
+    out = []
+    for c in parsed.get("chapters", []):
+        hard = sum(len(c.get(k) or [])
+                   for k in ("figures", "tables", "records", "photos", "clips"))
+        if not hard:
+            out.append(f"Chapter {c['n']} ({c['title']}) declares no figure, "
+                       f"table or record — nothing to show but an illustration")
+    return out
+
+
+def _too_thin(parsed):
+    """One line on how much of the video the safety net would be carrying.
+
+    Quote frames fill whatever the writer did not declare. That keeps a video
+    watchable, and it is not a plan: past half, the script under-specified and
+    the reviewer should know before reading 1,200 words.
+    """
+    from publishing import longform, longform_render as lfr
+
+    units = [("cold_open", None, parsed.get("cold_open", ""))]
+    for c in parsed.get("chapters", []):
+        units.append((f"ch{c['n']}", c, c["text"]))
+    units.append(("close", None, parsed.get("close", "")))
+
+    kinds, total = {}, 0
+    for key, chap, text in units:
+        if not (text or "").strip():
+            continue
+        secs = len(text.split()) / (longform.SPOKEN_WORDS_PER_MINUTE / 60.0)
+        if chap:
+            unit, fallback = chap, None
+        else:
+            unit = {"figures": parsed.get(f"{key}_figures") or [],
+                    "images": parsed.get(f"{key}_images") or []}
+            fallback = parsed.get(f"{key}_image")
+        assets = lfr.plan_assets(unit, fallback_image=fallback)
+        want = lfr._shot_count(secs, max(len(assets) + 1,
+                                         lfr._shot_count(secs, 99)))
+        declared = (unit.get("images") or ([fallback] if fallback else []))
+        filled = lfr.with_filler(assets, text, want, images=declared)
+        k = max(1, min(want, len(filled)))
+        for a in filled[:k]:
+            kinds[a["kind"]] = kinds.get(a["kind"], 0) + 1
+        total += k
+
+    if not total:
+        return []
+    quotes = kinds.get("quote", 0)
+    mix = ", ".join(f"{n} {k}" for k, n in sorted(kinds.items(), key=lambda x: -x[1]))
+    line = f"Frames: {total} — {mix}."
+    if quotes * 2 > total:
+        return [f"{line} More than half are quote frames, which means the script "
+                f"under-declared: the safety net is carrying the video."]
+    return [line]
 
 
 def _clip_calls(parsed):
