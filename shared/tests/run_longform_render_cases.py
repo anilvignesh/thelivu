@@ -139,6 +139,94 @@ def t_the_cap_holds_however_long_the_chapter_runs():
     check("the cap holds", lfr._shot_count(600.0, 40), lfr.MAX_SHOTS_PER_UNIT)
 
 
+# ------------------------------------------------------ putting it on the beat
+#
+# Anil, 2026-09-13, on the first finished cut: "in the first minute itself, i
+# did find places where proper alignment would have made it better."
+#
+# The renderer used to place assets in declaration order and cut on a stopwatch,
+# which is right only when the writer lists them in the order they are spoken.
+# Chunked synthesis made the real timing available for free — the chunks are
+# synthesised separately, so their start times are exact.
+
+def t_a_number_is_matched_to_the_way_it_is_spoken():
+    """A FIGURE carries digits and the script carries words. They are the same
+    fact written for two readers, and matching them is the whole basis of
+    showing a figure as it is said."""
+    check("39230 spells out", " ".join(lfr._spell(39230)),
+          "thirty nine thousand two hundred thirty")
+    check("236 spells out", " ".join(lfr._spell(236)), "two hundred thirty six")
+    check("15 spells out", " ".join(lfr._spell(15)), "fifteen")
+
+
+def t_a_figure_anchors_where_its_number_is_spoken():
+    marks = [
+        (0.0, "The bigger fight is over thirty nine thousand two hundred and "
+              "thirty crore rupees."),
+        (20.0, "It was borrowed through KIIFB and KSSPL, outside the state budget."),
+        (40.0, "Liabilities reach thirty eight point eight six percent of GSDP."),
+    ]
+    big = {"kind": "figure", "figure": {"value": "\u20b939,230.33 crore",
+                                        "label": "borrowed through KIIFB and KSSPL"}}
+    # The label's words are rarer than the number's, so without weighting the
+    # value this anchored to chunk 1 — the sentence ABOUT the money rather than
+    # the one saying how much.
+    check("the big figure lands where the number is said",
+          lfr.anchor_chunk(big, marks), 0)
+    pct = {"kind": "figure", "figure": {"value": "38.86%", "label": "of GSDP"}}
+    check("the percentage lands on its own sentence",
+          lfr.anchor_chunk(pct, marks), 2)
+    quote = {"kind": "quote", "text": "It was borrowed through KIIFB and KSSPL, "
+                                      "outside the state budget."}
+    check("a quote frame lands on its own sentence exactly",
+          lfr.anchor_chunk(quote, marks), 1)
+
+
+def t_an_asset_with_nothing_to_match_is_not_guessed():
+    """Guessing is worse than spreading evenly: a figure placed on one shared
+    common word lands arbitrarily and looks deliberate."""
+    marks = [(0.0, "Something entirely unrelated was said here."),
+             (10.0, "And then something else again.")]
+    orphan = {"kind": "image", "prompt": "a ledger"}
+    check("an image never anchors", lfr.anchor_chunk(orphan, marks), None)
+    vague = {"kind": "table", "table": {"title": "Two reports"}}
+    check("one weak match is not enough", lfr.anchor_chunk(vague, marks), None)
+
+
+def t_anchored_cuts_sum_exactly_and_keep_order():
+    from publishing.reel import plan_cuts
+
+    marks = [(0.0, "thirty nine thousand two hundred thirty crore was borrowed."),
+             (20.0, "A second sentence carries the argument forward."),
+             (40.0, "Liabilities reach thirty eight point eight six percent."),
+             (60.0, "Nobody says the money was not borrowed at all.")]
+    assets = [
+        {"kind": "figure", "figure": {"value": "39,230 crore", "label": "borrowed"}},
+        {"kind": "figure", "figure": {"value": "38.86%", "label": "liabilities"}},
+        {"kind": "quote", "text": "Nobody says the money was not borrowed at all."},
+    ]
+    cuts = lfr.cuts_from_anchors(assets, marks, 80.0, [], plan_cuts)
+    check("sums to the take exactly", round(sum(cuts), 3), 80.0)
+    check("every shot is positive", all(c > 0 for c in cuts), True)
+    starts = [sum(cuts[:i]) for i in range(len(cuts))]
+    check("shots run in order", starts == sorted(starts), True)
+    # The percentage is spoken at 40s; it should be on screen around then, not
+    # at the 26.7s an even three-way split would have given it.
+    check("the second figure lands near where it is spoken",
+          abs(starts[1] - 40.0) < 6.0, True)
+
+
+def t_with_no_marks_it_falls_back_to_the_old_split():
+    """Every unit rendered before this had no chunk timing. The fallback is the
+    previous behaviour, which was imprecise and never wrong."""
+    from publishing.reel import plan_cuts
+
+    assets = [{"kind": "image", "prompt": "a"}, {"kind": "image", "prompt": "b"}]
+    check("no marks means an even split",
+          lfr.cuts_from_anchors(assets, [], 60.0, [], plan_cuts),
+          plan_cuts(60.0, 2, []))
+
+
 # ------------------------------------------------------------------- framing
 
 def t_illustrations_are_asked_for_in_the_shape_they_are_shown_in():
@@ -645,7 +733,9 @@ def _render_with_stubs(tmp, illustrate=False):
             wav = work_dir / f"a{i}.wav"
             _silence(wav, secs)
             durations[i] = secs + reel.GAP_SECS
-            out.append((wav, secs + reel.GAP_SECS, []))
+            # Four-tuple: the fourth element is the chunk map that lets assets
+            # be placed where they are spoken. One chunk here, the whole text.
+            out.append((wav, secs + reel.GAP_SECS, [], [(0.0, spoken)]))
         return out
 
     real = lfr.synth_units
@@ -1053,7 +1143,7 @@ class _stub_voice:
                 secs = 30.0 if len(spoken.split()) > 15 else 8.0
                 wav = work_dir / f"a{i}.wav"
                 _silence(wav, secs)
-                out.append((wav, secs + reel.GAP_SECS, []))
+                out.append((wav, secs + reel.GAP_SECS, [], [(0.0, spoken)]))
             return out
 
         lfr.synth_units = fake
@@ -1444,7 +1534,12 @@ def main():
 
     print("long-form render\n")
     state = {}
-    for t in (t_a_short_unit_keeps_one_picture,
+    for t in (t_a_number_is_matched_to_the_way_it_is_spoken,
+              t_a_figure_anchors_where_its_number_is_spoken,
+              t_an_asset_with_nothing_to_match_is_not_guessed,
+              t_anchored_cuts_sum_exactly_and_keep_order,
+              t_with_no_marks_it_falls_back_to_the_old_split,
+              t_a_short_unit_keeps_one_picture,
               t_a_long_unit_uses_the_pictures_it_was_given,
               t_shots_never_exceed_the_pictures_available,
               t_the_narration_not_the_prompt_count_sets_the_budget,

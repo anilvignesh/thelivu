@@ -650,8 +650,10 @@ def _chunk_for_synth(text, max_words=MAX_SYNTH_WORDS):
 def synth_units(units, backend, work_dir, voice=None):
     """Voice each unit in pieces and stitch, returning reel.synth_beats' shape.
 
-    [(wav_path, duration_including_gap, [pause_times])], aligned with `units`.
-    Pauses are found on the STITCHED wav so cut planning sees the real thing.
+    [(wav_path, duration_including_gap, [pause_times], [(start, text), ...])],
+    aligned with `units`. Pauses are found on the STITCHED wav so cut planning
+    sees the real thing; the fourth element says when each chunk of text is
+    actually spoken, which is what lets a figure appear as it is said.
     """
     import wave
 
@@ -677,6 +679,16 @@ def synth_units(units, backend, work_dir, voice=None):
                 with wave.open(str(part), "rb") as r:
                     w.writeframes(r.readframes(r.getnframes()))
 
+        # Where each chunk starts in the stitched take. This is REAL timing, not
+        # an estimate: the chunks were synthesised separately, so their lengths
+        # are known exactly. Anil, 2026-09-13: "in the first minute itself, i did
+        # find places where proper alignment would have made it better." Placing
+        # assets in declaration order threw this away.
+        marks, t = [], 0.0
+        for part in parts:
+            marks.append((t, chunks[len(marks)]))
+            t += reel._duration(part)
+
         dur = reel._duration(joined) + reel.GAP_SECS
         words = len((text or "").split())
         spoken = words / (dur / 60.0) if dur else 0
@@ -686,7 +698,7 @@ def synth_units(units, backend, work_dir, voice=None):
                         "voice server is still dropping text", i, spoken, len(chunks))
         log.info("voiced unit %s: %d words, %d chunks, %.1fs (%.0f wpm)",
                  i, words, len(chunks), dur, spoken)
-        out.append((joined, dur, reel.find_pauses(joined)))
+        out.append((joined, dur, reel.find_pauses(joined), marks))
     return out
 
 
@@ -725,6 +737,177 @@ def quote_fill(text, have, want):
         used.add(idx)
         out.append({"kind": "quote", "text": sents[idx]})
     return out
+
+
+# Words the narration spells out, so a figure written "₹39,230.33 crore" can be
+# found in a sentence that says "thirty-nine thousand two hundred and thirty".
+# Only the distinctive ones: "one" and "two" appear everywhere and anchor nothing.
+_ONES = ["", "one", "two", "three", "four", "five", "six", "seven", "eight",
+         "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen",
+         "sixteen", "seventeen", "eighteen", "nineteen"]
+_TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy",
+         "eighty", "ninety"]
+_STOPWORDS = {"the", "a", "an", "of", "in", "on", "to", "and", "or", "for",
+              "it", "its", "that", "this", "as", "at", "by", "is", "was",
+              "crore", "lakh", "rupees", "per", "cent", "percent"}
+
+
+def _spell(n):
+    """A number as the narration says it: 39230 -> 'thirty nine thousand two
+    hundred thirty'.
+
+    Needed because a FIGURE line carries digits and the script carries words —
+    they are the same fact written for two different readers, and matching them
+    is the whole basis of putting a figure on screen as it is spoken. Extracting
+    only the leading tens ('thirty') was not enough: it lost to the label's
+    rarer words and anchored the ₹39,230 card to the wrong sentence.
+    """
+    if n < 0 or n > 999_999:
+        return []
+    if n < 20:
+        return [_ONES[n]] if n else []
+    if n < 100:
+        return [w for w in (_TENS[n // 10], _ONES[n % 10]) if w]
+    if n < 1000:
+        return [_ONES[n // 100], "hundred"] + _spell(n % 100)
+    return _spell(n // 1000) + ["thousand"] + _spell(n % 1000)
+def _anchor_terms(asset):
+    """Distinctive words that should appear in the sentence where this asset
+    belongs. Empty when there is nothing to go on, which means "do not guess"."""
+    import re as _re
+
+    if asset["kind"] == "quote":
+        return [asset["text"]]            # exact — it IS a sentence of the take
+    if asset["kind"] == "figure":
+        f = asset["figure"]
+        # The VALUE twice: a figure belongs where its number is spoken, not
+        # where its label happens to echo. Without this weighting the ₹39,230
+        # card anchored to the sentence describing KIIFB rather than the one
+        # saying the amount, because the label simply has more rare words in it.
+        src = f"{f.get('value','')} {f.get('value','')} {f.get('label','')}"
+    elif asset["kind"] == "table":
+        src = asset["table"].get("title", "")
+    elif asset["kind"] == "record":
+        src = asset["record"].get("quote") or asset["record"].get("description", "")
+    else:
+        return []
+
+    terms = []
+    for tok in _re.findall(r"[A-Za-z]{4,}|\d[\d,.]*", src):
+        if tok.lower() in _STOPWORDS:
+            continue
+        if tok[0].isdigit():
+            head = tok.replace(",", "").split(".")[0]
+            try:
+                words = _spell(int(head))
+            except ValueError:
+                words = []
+            # The spoken form as ONE term where it is long enough to be
+            # distinctive — "thirty nine thousand" matches a sentence, "thirty"
+            # matches half the script — plus the individual words as backup.
+            if len(words) >= 2:
+                terms.append(" ".join(words[:3]))
+            terms.extend(words)
+        else:
+            terms.append(tok.lower())
+    return terms
+
+
+def cuts_from_anchors(assets, marks, dur, pauses, plan_cuts):
+    """Shot lengths that put each asset on screen while it is being spoken.
+
+    The renderer used to place assets in declaration order and cut on a
+    stopwatch, which is only right when the writer happens to list them in
+    narration order. Now every chunk's start time is known exactly — the chunks
+    were synthesised separately — so an asset that can be located in the text
+    gets its shot boundary at that chunk.
+
+    Assets that cannot be located keep their relative order and share out the
+    space between the ones that can. Falling back to an even split for those is
+    the old behaviour, which was never wrong, only imprecise.
+
+    Returns lengths summing to exactly `dur`, same contract as plan_cuts.
+    """
+    k = len(assets)
+    if k <= 1 or not marks:
+        return plan_cuts(dur, k, pauses)
+
+    anchors = [anchor_chunk(a, marks) for a in assets]
+    starts = [None] * k
+    for i, ci in enumerate(anchors):
+        if ci is not None:
+            starts[i] = marks[ci][0]
+
+    # An anchor that would reorder the assets is dropped: the script's order is
+    # the argument's order, and a figure jumping ahead of the sentence that sets
+    # it up reads as a mistake even when the timing is right.
+    last = -1.0
+    for i in range(k):
+        if starts[i] is not None and starts[i] <= last:
+            starts[i] = None
+        elif starts[i] is not None:
+            last = starts[i]
+
+    if not any(s is not None for s in starts):
+        return plan_cuts(dur, k, pauses)
+
+    # Fill the gaps evenly between known anchors, keeping the first shot at 0.
+    starts[0] = 0.0
+    known = [i for i, s in enumerate(starts) if s is not None]
+    for a, b in zip(known, known[1:]):
+        span, n = starts[b] - starts[a], b - a
+        for j in range(1, n):
+            starts[a + j] = starts[a] + span * j / n
+    tail = [i for i in range(known[-1] + 1, k)]
+    if tail:
+        span = dur - starts[known[-1]]
+        for j, i in enumerate(tail, start=1):
+            starts[i] = starts[known[-1]] + span * j / (len(tail) + 1)
+
+    # No shot shorter than this, or an anchored figure can flash past unread.
+    MIN = 3.0
+    for i in range(1, k):
+        if starts[i] - starts[i - 1] < MIN:
+            starts[i] = starts[i - 1] + MIN
+    if starts[-1] > dur - MIN:
+        for i in range(k - 1, 0, -1):
+            starts[i] = min(starts[i], dur - MIN * (k - i))
+
+    lengths = [round(starts[i + 1] - starts[i], 3) for i in range(k - 1)]
+    lengths.append(round(dur - sum(lengths), 3))
+    return lengths
+
+
+def anchor_chunk(asset, marks):
+    """Index of the chunk where this asset's content is spoken, or None.
+
+    None means "no evidence" — the caller then falls back to spreading assets
+    evenly, which is what the renderer did for everything before this. Guessing
+    an anchor is worse than admitting there isn't one: a figure placed on the
+    strength of one shared common word lands somewhere arbitrary and looks
+    deliberate.
+    """
+    terms = _anchor_terms(asset)
+    if not terms or not marks:
+        return None
+    if asset["kind"] == "quote":
+        needle = " ".join(terms[0].lower().split())
+        for i, (_t, text) in enumerate(marks):
+            if needle[:40] in " ".join(text.lower().split()):
+                return i
+        return None
+
+    best, best_score = None, 0
+    for i, (_t, text) in enumerate(marks):
+        low = " ".join(text.lower().split())
+        score = sum(1 for term in terms if term in low)
+        if score > best_score:
+            best, best_score = i, score
+    # One shared word is coincidence; two is a match. A single term is accepted
+    # only when that is all the asset had to offer.
+    if best_score >= 2 or (best_score == 1 and len(terms) == 1):
+        return best
+    return None
 
 
 def plan_assets(chapter, fallback_image=None):
@@ -1028,7 +1211,7 @@ def render(parsed, out_mp4, work_dir=None, voice=None, illustrate=True,
     # 2. Plan what each unit puts on screen, against those real durations.
     #    Figures and records first, illustrations last — see plan_assets.
     plans = []          # per unit: [(asset, seconds)]
-    for (key, chap, text), (_wav, dur, pauses) in zip(units, voiced):
+    for (key, chap, text), (_wav, dur, pauses, marks) in zip(units, voiced):
         if chap:
             unit, fallback = chap, None
         else:  # noqa: E701
@@ -1055,7 +1238,9 @@ def render(parsed, out_mp4, work_dir=None, voice=None, illustrate=True,
                            or ([fallback] if fallback else []))
         assets = with_filler(assets, text, want, images=declared_images)
         k = min(want, len(assets)) or 1
-        plans.append(list(zip(assets[:k], plan_cuts(dur, k, pauses))))
+        plans.append(list(zip(assets[:k],
+                              cuts_from_anchors(assets[:k], marks, dur,
+                                                pauses, plan_cuts))))
 
     # 3. Fetch and render the documents. Before illustration, because a record
     #    that fails to fetch demotes its shot to an illustration and that has to
@@ -1121,7 +1306,7 @@ def render(parsed, out_mp4, work_dir=None, voice=None, illustrate=True,
     _p(0.6, "Assembling…")
 
     segs, marks, clock = [], [], 0.0
-    for i, ((key, chap, _t), (wav, _dur, _pauses)) in enumerate(zip(units, voiced)):
+    for i, ((key, chap, _t), (wav, _dur, _pauses, _marks)) in enumerate(zip(units, voiced)):
         label = (chap or {}).get("title", "")
         if chap:
             card = draw_chapter_card(chap["n"], chap["title"],
