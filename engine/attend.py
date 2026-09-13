@@ -256,6 +256,50 @@ def cmd_reel(args):
     _postamble()
 
 
+def cmd_longform(args):
+    """Write a queued story's long-form script attended — no API call.
+
+    The script is the one model step in the long-form chain, and it is the step
+    that most wants a human's session rather than a cold call: it has to hold a
+    whole article, its verification report, and a frame vocabulary with four
+    kinds of evidence in it. The first API-written script came back with no
+    tables at all and the safety net carrying more than half the frames.
+
+    Everything downstream is unchanged. It still stops at SCRIPTED — gate 1 is a
+    person reading the script, and writing it attended does not skip that.
+    """
+    from publishing.longform_script import write_script
+    from shared.db import longform_item, longform_queue
+    from publishing import longform
+
+    qid = args.queue_id
+    if qid is None:
+        queued = longform_queue(status=longform.QUEUED)
+        if not queued:
+            print("  nothing queued for long-form. Use /longform <run_id> "
+                  "in Telegram, or publishing.longform.request_longform().")
+            return
+        qid = queued[0]["id"]
+
+    row = longform_item(qid)
+    if not row:
+        print(f"  no long-form queue item #{qid}")
+        return
+    _preamble(f"long-form script for #{qid} (run #{row.get('run_id')})")
+
+    res = write_script(qid)
+    if not res.get("ok"):
+        print(f"\n  ✗ {res.get('error')}")
+        return
+    print(f"\n  ✓ #{qid} scripted — {res['words']} words, {res['chapters']} chapters")
+    for b in res.get("blockers") or []:
+        print(f"      ⚠ {b}")
+    print(f"\n  {res.get('budget','')}")
+    print(f"  written to {res['path']}")
+    print("\n  It is at SCRIPTED. Gate 1 is still a person reading it — the card "
+          "is in Telegram.")
+
+
 def cmd_clear(_args):
     quota.clear()
     print("  breaker closed — the agent will resume automated cycles within 2 minutes.")
@@ -301,6 +345,11 @@ def main():
                          "the command centre's Remake (steers the script; it cannot "
                          "override the article)")
     rl.set_defaults(fn=cmd_reel)
+    lf = sub.add_parser("longform",
+                        help="write a queued story's long-form script attended (no API)")
+    lf.add_argument("queue_id", nargs="?", type=int,
+                    help="long-form queue id; omit to take the first queued one")
+    lf.set_defaults(fn=cmd_longform)
     sub.add_parser("clear", help="close the breaker early (after a top-up)").set_defaults(fn=cmd_clear)
     args = p.parse_args()
     args.fn(args)
