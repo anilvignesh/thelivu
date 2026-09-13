@@ -633,12 +633,12 @@ def _render_with_stubs(tmp, illustrate=False):
 
     durations = {}
 
-    def fake_synth_beats(beats, backend, work_dir, voice=None):
+    def fake_synth_units(texts, backend, work_dir, voice=None):
         from pathlib import Path
         work_dir = Path(work_dir)
         work_dir.mkdir(parents=True, exist_ok=True)
         out = []
-        for i, (spoken, _cap) in enumerate(beats):
+        for i, spoken in enumerate(texts):
             # Long enough that the two- and three-image chapters really do get
             # cut, short enough that the suite stays under a minute.
             secs = 30.0 if len(spoken.split()) > 15 else 8.0
@@ -648,8 +648,8 @@ def _render_with_stubs(tmp, illustrate=False):
             out.append((wav, secs + reel.GAP_SECS, []))
         return out
 
-    real = reel.synth_beats
-    reel.synth_beats = fake_synth_beats
+    real = lfr.synth_units
+    lfr.synth_units = fake_synth_units
     try:
         parsed = longform.parse_script(SCRIPT)
         out_mp4 = os.path.join(tmp, "out.mp4")
@@ -657,7 +657,7 @@ def _render_with_stubs(tmp, illustrate=False):
             parsed, out_mp4, work_dir=os.path.join(tmp, "work"),
             illustrate=illustrate), durations
     finally:
-        reel.synth_beats = real
+        lfr.synth_units = real
 
 
 def t_the_whole_chain_renders(state):
@@ -1042,26 +1042,25 @@ class _stub_voice:
     """Silent narration of known length, so a chain test costs seconds."""
     def __enter__(self):
         from publishing import reel
-        self._real = reel.synth_beats
+        self._real = lfr.synth_units
 
-        def fake(beats, backend, work_dir, voice=None):
+        def fake(texts, backend, work_dir, voice=None):
             from pathlib import Path
             work_dir = Path(work_dir)
             work_dir.mkdir(parents=True, exist_ok=True)
             out = []
-            for i, (spoken, _c) in enumerate(beats):
+            for i, spoken in enumerate(texts):
                 secs = 30.0 if len(spoken.split()) > 15 else 8.0
                 wav = work_dir / f"a{i}.wav"
                 _silence(wav, secs)
                 out.append((wav, secs + reel.GAP_SECS, []))
             return out
 
-        reel.synth_beats = fake
+        lfr.synth_units = fake
         return self
 
     def __exit__(self, *a):
-        from publishing import reel
-        reel.synth_beats = self._real
+        lfr.synth_units = self._real
         return False
 
 
@@ -1393,14 +1392,14 @@ def t_the_render_is_not_started_without_an_upload_credential(state=None):
     voiced = []
     real_mod = sys.modules.get("publishing.youtube")
     real_attr = getattr(publishing, "youtube", None)
-    real_synth = reel.synth_beats
+    real_synth = lfr.synth_units
     sys.modules["publishing.youtube"] = NoCreds
     publishing.youtube = NoCreds
-    reel.synth_beats = lambda *a, **k: voiced.append(1) or []
+    lfr.synth_units = lambda *a, **k: voiced.append(1) or []
     try:
         res = lb.render_pending()
     finally:
-        reel.synth_beats = real_synth
+        lfr.synth_units = real_synth
         if real_mod is not None:
             sys.modules["publishing.youtube"] = real_mod
         if real_attr is not None:
