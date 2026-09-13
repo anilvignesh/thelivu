@@ -1,11 +1,16 @@
-"""One-time local script to mint a YouTube Data API refresh token.
+"""Mint a YouTube Data API refresh token, locally, for one of two roles.
 
-Run this ONCE, locally, after creating the OAuth client (Desktop app type) in
-Google Cloud Console — see docs/HANDOFF.md for the console steps. It opens a
-browser consent screen, you approve as the Thelivu Google account, and it
-prints the refresh token to store as YOUTUBE_REFRESH_TOKEN on Railway.
+Run locally, with the OAuth client (Desktop app type) already created in Google
+Cloud Console — see docs/HANDOFF.md. It opens a browser consent screen, you
+approve as the Thelivu account, and it writes the credential to a 0600 file.
 
-    venv/bin/python -m publishing.youtube_auth --client-id ... --client-secret ...
+    venv/bin/python -m publishing.youtube_auth --role publish   # Railway
+    venv/bin/python -m publishing.youtube_auth --role upload    # reel-worker VM
+
+The client id and secret come from the environment or a hidden prompt, and the
+refresh token is written to a FILE and never printed. Argv is visible in the
+process table and in shell history; stdout ends up in scrollback and in any
+transcript of the session. A credential belongs in neither.
 
 Never run this from Railway or any unattended context — it needs a real
 browser and a human clicking "Allow". That's a one-time cost; the resulting
@@ -17,8 +22,12 @@ stays in "Testing" publishing status, Google expires this refresh token after
 "In production" (needed for the youtube.upload scope specifically).
 """
 import argparse
+import getpass
+import os
+import stat
 import sys
 import webbrowser
+from pathlib import Path
 from urllib.parse import urlencode
 
 import requests
@@ -35,21 +44,60 @@ _SCOPE = ("https://www.googleapis.com/auth/youtube.upload "
          "https://www.googleapis.com/auth/youtube.readonly")
 _REDIRECT = "http://localhost:8734/"
 
+# Two credentials, deliberately unequal — see publishing/longform_build.py.
+#
+# The reel-worker box renders the long video and stages it UNLISTED. It must be
+# able to upload and must NOT be able to publish: gate 2 is a person watching
+# the cut, and the guarantee that an automated box cannot skip that gate should
+# be the credential itself, not only the state machine. Code has bugs; a token
+# without the scope cannot be talked into it.
+#
+# Railway holds the publishing credential. It never has the video bytes, so it
+# cannot upload anything of its own — it can only flip something already staged,
+# after a human tapped Post.
+#
+# videos.insert needs youtube.upload. videos.update (the flip that publishes)
+# and videos.delete (the reject path) need youtube or youtube.force-ssl —
+# confirmed against Google's documentation 2026-09-11, not assumed.
+ROLES = {
+    "upload": ("https://www.googleapis.com/auth/youtube.upload",
+               "the reel-worker box — can stage an unlisted cut, cannot publish it"),
+    "publish": ("https://www.googleapis.com/auth/youtube.upload "
+                "https://www.googleapis.com/auth/youtube.readonly "
+                "https://www.googleapis.com/auth/youtube.force-ssl",
+                "Railway — can publish, delete, and read insights"),
+}
+
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--client-id", required=True)
-    ap.add_argument("--client-secret", required=True)
+    ap.add_argument("--role", choices=sorted(ROLES), default="publish",
+                    help="which credential to mint: 'publish' for Railway, "
+                         "'upload' for the reel-worker box")
+    ap.add_argument("--out", default=None,
+                    help="where to write the result (default "
+                         "~/.thelivu/youtube-<role>.env, mode 0600)")
     ap.add_argument("--code", default=None,
                     help="Skip the interactive prompt — pass the code directly "
                          "(e.g. when driving the browser step separately).")
     args = ap.parse_args()
 
+    scope, who = ROLES[args.role]
+    print(f"\nMinting the '{args.role}' credential — for {who}.\n")
+
+    # Never on the command line: argv is visible to anything reading the process
+    # table, lands in shell history, and shows up in any terminal transcript.
+    client_id = os.environ.get("YOUTUBE_CLIENT_ID") or input("client id: ").strip()
+    client_secret = (os.environ.get("YOUTUBE_CLIENT_SECRET")
+                     or getpass.getpass("client secret (hidden): ").strip())
+    if not (client_id and client_secret):
+        sys.exit("need both a client id and a client secret")
+
     params = {
-        "client_id": args.client_id,
+        "client_id": client_id,
         "redirect_uri": _REDIRECT,
         "response_type": "code",
-        "scope": _SCOPE,
+        "scope": scope,
         "access_type": "offline",   # required to get a refresh_token back
         "prompt": "consent",        # forces one even on a re-run for the same account
     }
@@ -69,8 +117,8 @@ def main():
 
     resp = requests.post(_TOKEN_URL, data={
         "code": code,
-        "client_id": args.client_id,
-        "client_secret": args.client_secret,
+        "client_id": client_id,
+        "client_secret": client_secret,
         "redirect_uri": _REDIRECT,
         "grant_type": "authorization_code",
     })
@@ -82,10 +130,33 @@ def main():
                  "before for the same account, Google may not re-issue one; try "
                  "revoking prior access at https://myaccount.google.com/permissions "
                  "and running this again.")
-    print("\n✓ Got a refresh token. Set it on Railway:\n")
-    print(f"  railway variable set YOUTUBE_REFRESH_TOKEN={refresh} --service thelivu-agent")
-    print(f"  railway variable set YOUTUBE_CLIENT_ID={args.client_id} --service thelivu-agent")
-    print(f"  railway variable set YOUTUBE_CLIENT_SECRET={args.client_secret} --service thelivu-agent")
+    # Written to a file, never printed. A refresh token pasted into a terminal
+    # is a refresh token in scrollback, in shell history, and in any transcript
+    # of the session — including one an assistant can read.
+    out = Path(args.out or (Path.home() / ".thelivu" / f"youtube-{args.role}.env"))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(
+        f"YOUTUBE_CLIENT_ID={client_id}\n"
+        f"YOUTUBE_CLIENT_SECRET={client_secret}\n"
+        f"YOUTUBE_REFRESH_TOKEN={refresh}\n")
+    out.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+    granted = (tokens.get("scope") or "").split()
+    print(f"\n✓ Got a '{args.role}' refresh token — written to {out} (mode 0600).")
+    print(f"  fingerprint: {refresh[:6]}…{refresh[-4:]} (len {len(refresh)})")
+    print("  granted scopes:")
+    for sc in granted:
+        print(f"    {sc}")
+    can_publish = any(sc.endswith(("/youtube", "/youtube.force-ssl")) for sc in granted)
+    print(f"  can upload : {any(sc.endswith('/youtube.upload') for sc in granted)}")
+    print(f"  can publish: {can_publish}")
+    if args.role == "upload" and can_publish:
+        print("\n  ⚠ This token CAN publish. That defeats the point of the "
+              "upload-only credential — revoke it at "
+              "https://myaccount.google.com/permissions and re-run.")
+    print(f"\n  Copy the three values out of {out} into the right place:")
+    print("    publish -> Railway (service thelivu-agent)")
+    print("    upload  -> the reel-worker VM, ops/oracle-vm/reel-worker.env")
 
 
 if __name__ == "__main__":
