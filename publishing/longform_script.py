@@ -322,6 +322,26 @@ def write_script(queue_id, model=None, dry_run=False):
         _note_attempt(queue_id)
         return {"ok": False, "error": f"script parsed to zero chapters; raw kept at {bad}"}
 
+    words = parsed.get("word_count", 0)
+    if words < longform.LONGFORM_TARGET_MIN:
+        # Not a judgement call about length — a script this short is almost
+        # always the model running out of room and stopping, not deciding. The
+        # first successful run produced 318 words against a 750 floor: five
+        # chapters, ~2 minutes, which is a reel with chapter cards.
+        #
+        # Counted, so the existing 2-attempt bound applies. If it comes back
+        # short twice the item parks and says so, which is the useful signal —
+        # the skill needs work — rather than spending a human's attention at
+        # gate 1 on something that was never long-form.
+        _note_attempt(queue_id)
+        DRAFTS_DIR.mkdir(parents=True, exist_ok=True)
+        short = DRAFTS_DIR / f"longform-{queue_id}-SHORT.txt"
+        short.write_text(raw)
+        return {"ok": False, "words": words, "error": (
+            f"script came back {words} words against a {longform.LONGFORM_TARGET_MIN}"
+            f"-word floor — that is a reel with chapter cards, not a long video. "
+            f"Kept at {short}")}
+
     blockers = mechanical_blockers(parsed)
     ok_budget, budget_msg = longform.budget_check(parsed)
     if not ok_budget:

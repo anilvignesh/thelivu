@@ -1092,6 +1092,53 @@ def t_every_kind_of_script_failure_is_counted():
           kv_get(f"longform_script_fails_{qid}") or "", "")
 
 
+def t_a_script_under_the_floor_does_not_reach_the_human():
+    """318 words against a 750 floor is a reel with chapter cards.
+
+    The first script that parsed cleanly was exactly that. It is almost always
+    the model running out of room and stopping, not deciding — so it is counted
+    as a failed attempt rather than handed to a reviewer, and two of them park
+    the item with the reason. Spending a person's attention on something that
+    was never long-form is the cost worth avoiding here."""
+    import publishing.longform_script as ls
+    from publishing import longform
+    from engine.agents import skill_runner
+    from shared.db import (init_db, _conn, kv_get, kv_set, longform_item,
+                           longform_queue, queue_longform)
+
+    init_db()
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM pipeline_runs WHERE id = 8802")
+        cur.execute("INSERT INTO pipeline_runs (id, throughline, draft_text, status)"
+                    " VALUES (8802, 'short script', 'the article', 'published')")
+        conn.commit()
+    finally:
+        conn.close()
+    queue_longform(run_id=8802, title="short", reason="test")
+    qid = [r for r in longform_queue(status="queued")
+           if r.get("run_id") == 8802][-1]["id"]
+    kv_set(f"longform_script_fails_{qid}", "")
+
+    tiny = ("TITLE: A short one\nCOLD_OPEN: The ministry said the road was fine.\n"
+            "CHAPTER 1 TITLE: One\nCHAPTER 1: " + " ".join(["word"] * 60) + "\n"
+            "CLOSE: That is all there is.\n")
+    real = skill_runner.run_skill
+    skill_runner.run_skill = lambda *a, **k: tiny
+    try:
+        res = ls.write_script(qid)
+    finally:
+        skill_runner.run_skill = real
+
+    check("a short script is refused", res.get("ok"), False)
+    check("the reason names the floor",
+          str(longform.LONGFORM_TARGET_MIN) in res["error"], True)
+    check("it never reached the gate", longform_item(qid)["status"], "queued")
+    check("and it counted as an attempt",
+          kv_get(f"longform_script_fails_{qid}"), "1")
+
+
 def t_the_token_ceiling_stays_under_the_streaming_limit():
     """Above roughly 21k the SDK refuses a non-streaming request outright. 32000
     hit that wall the moment it deployed; the fix is not a bigger number."""
@@ -1281,6 +1328,7 @@ def main():
               t_the_render_is_not_started_without_an_upload_credential):
         t(state)
     for t in (t_every_kind_of_script_failure_is_counted,
+              t_a_script_under_the_floor_does_not_reach_the_human,
               t_the_token_ceiling_stays_under_the_streaming_limit,
               t_a_chapter_with_no_record_is_flagged,
               t_a_chapter_with_a_record_is_not_flagged,
