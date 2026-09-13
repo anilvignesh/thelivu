@@ -251,9 +251,20 @@ def _long_holds(parsed):
         if not words:
             continue
         secs = words / (longform.SPOKEN_WORDS_PER_MINUTE / 60.0)
+        # Computed the way render() computes it, INCLUDING the quote frames that
+        # fill whatever the writer did not declare. The first version used
+        # plan_assets alone — it predates with_filler — and so reported holds of
+        # 27 to 76 seconds on a script the renderer would have cut every 13.
+        # Six of the eight blockers on the first real gate-1 card were that bug,
+        # and a card with six wrong warnings on it teaches the reviewer to skim,
+        # which is the one thing the blocker list must never do.
         assets = longform_render.plan_assets(chap or {}, fallback_image=fallback)
-        shots = longform_render._shot_count(secs, len(assets)) if assets else 1
-        hold = secs / max(1, shots)
+        want = longform_render._shot_count(
+            secs, max(len(assets) + 1, longform_render._shot_count(secs, 99)))
+        declared = ((chap or {}).get("images") or ([fallback] if fallback else []))
+        filled = longform_render.with_filler(assets, text, want, images=declared)
+        shots = max(1, min(want, len(filled)))
+        hold = secs / shots
         if hold > MAX_HOLD_SECONDS:
             out.append(f"{name} holds one frame for {hold:.0f}s — declares "
                        f"{len(assets)} asset(s) for {secs:.0f}s of narration; "
