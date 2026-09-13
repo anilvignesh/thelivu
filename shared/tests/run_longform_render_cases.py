@@ -1015,6 +1015,60 @@ class _stub_voice:
 # is point a reviewer at what reading 1,500 words of confident prose will not
 # make them notice.
 
+def t_every_kind_of_script_failure_is_counted():
+    """The bound has to cover the call RAISING, not just returning badly.
+
+    The first version counted empty output and unparseable output. A raising
+    call — a max_tokens the SDK refuses, a dead key, a provider outage —
+    returned early without counting, so it retried every two minutes forever.
+    That is the exact loop the bound exists to stop, and it shipped inside the
+    commit that added the bound (2026-09-13).
+    """
+    import publishing.longform_script as ls
+    from shared.db import init_db, kv_get, kv_set, longform_item, queue_longform, longform_queue
+    from engine.agents import skill_runner
+
+    init_db()
+    from shared.db import _conn
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM pipeline_runs WHERE id = 8801")
+        cur.execute("INSERT INTO pipeline_runs (id, throughline, draft_text, status) "
+                    "VALUES (8801, 'counts its failures', 'the article', 'published')")
+        conn.commit()
+    finally:
+        conn.close()
+    queue_longform(run_id=8801, title="counts its failures", reason="test")
+    qid = [r for r in longform_queue(status="queued")
+           if r.get("run_id") == 8801][-1]["id"]
+    kv_set(f"longform_script_fails_{qid}", "")
+
+    real = skill_runner.run_skill
+    skill_runner.run_skill = lambda *a, **k: (_ for _ in ()).throw(
+        ValueError("Streaming is required for operations that may take longer"))
+    try:
+        r1 = ls.write_script(qid)
+        check("a raising call fails cleanly", r1.get("ok"), False)
+        check("and is counted", kv_get(f"longform_script_fails_{qid}"), "1")
+        ls.write_script(qid)
+    finally:
+        skill_runner.run_skill = real
+
+    check("the second failure parks it",
+          longform_item(qid)["status"], "dropped")
+    check("and the counter is cleared for next time",
+          kv_get(f"longform_script_fails_{qid}") or "", "")
+
+
+def t_the_token_ceiling_stays_under_the_streaming_limit():
+    """Above roughly 21k the SDK refuses a non-streaming request outright. 32000
+    hit that wall the moment it deployed; the fix is not a bigger number."""
+    from publishing.longform_script import MAX_TOKENS
+    check("under the non-streaming limit", MAX_TOKENS <= 20000, True)
+    check("and still far above what a script needs", MAX_TOKENS >= 8000, True)
+
+
 def t_a_chapter_with_no_record_is_flagged():
     from publishing import longform
     from publishing.longform_script import mechanical_blockers
@@ -1194,7 +1248,9 @@ def main():
               t_dropping_removes_the_unlisted_upload,
               t_the_render_is_not_started_without_an_upload_credential):
         t(state)
-    for t in (t_a_chapter_with_no_record_is_flagged,
+    for t in (t_every_kind_of_script_failure_is_counted,
+              t_the_token_ceiling_stays_under_the_streaming_limit,
+              t_a_chapter_with_no_record_is_flagged,
               t_a_chapter_with_a_record_is_not_flagged,
               t_figures_spelled_out_still_count_as_figures,
               t_publishing_needs_a_wider_scope_than_uploading):

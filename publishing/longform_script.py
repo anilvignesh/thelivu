@@ -62,7 +62,16 @@ DRAFTS_DIR = Path(os.environ.get(
 #
 # A 1,700-word script is ~2,500 tokens of output. The rest is headroom for the
 # thinking that precedes it, which is what actually needed the room.
-MAX_TOKENS = 32000
+#
+# But not unlimited headroom: above roughly 21k the Anthropic SDK refuses a
+# non-streaming request outright — "Streaming is required for operations that
+# may take longer than 10 minutes" — because a response that large could exceed
+# the timeout. 32000 hit that wall immediately (2026-09-13). 16000 clears it and
+# is still 6x what the script itself needs.
+#
+# If a script ever legitimately needs more than this, the fix is to stream in
+# _run_claude, not to raise the number again.
+MAX_TOKENS = 16000
 
 # A script that will not parse will not parse the next time either — the input
 # has not changed. This is the run #237 lesson (see publishing/reel_worker.py)
@@ -269,6 +278,10 @@ def write_script(queue_id, model=None, dry_run=False):
     try:
         material, meta = material_for(queue_id)
     except Exception as e:
+        # Counted too. A run that has vanished, or has no draft, will still be
+        # missing on the next tick — so this is a loop like any other, even
+        # though it costs no model call. Silence for a day is its own failure.
+        _note_attempt(queue_id)
         return {"ok": False, "error": str(e)}
 
     if meta["status"] != longform.QUEUED:
@@ -282,6 +295,12 @@ def write_script(queue_id, model=None, dry_run=False):
         raw = run_skill("long-form-script", material, max_tokens=MAX_TOKENS,
                         run_id=meta["run_id"])
     except Exception as e:
+        # Counted like any other failed attempt. The first version of the bound
+        # only covered empty and unparseable OUTPUT, so a raising call — a bad
+        # max_tokens, a dead key, a provider outage — retried unbounded, which
+        # is the exact loop the bound exists to stop (2026-09-13: a ValueError
+        # from the SDK, every two minutes, uncounted).
+        _note_attempt(queue_id)
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
     if not (raw or "").strip():
