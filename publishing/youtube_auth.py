@@ -28,7 +28,7 @@ import stat
 import sys
 import webbrowser
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import unquote, urlencode
 
 import requests
 
@@ -77,19 +77,35 @@ def main():
     ap.add_argument("--out", default=None,
                     help="where to write the result (default "
                          "~/.thelivu/youtube-<role>.env, mode 0600)")
+    ap.add_argument("--step", choices=("url", "exchange"), default=None,
+                    help="Split the flow in two. 'url' asks for the client "
+                         "id/secret, stores them, and prints the consent URL. "
+                         "'exchange' reads them back and takes the code. "
+                         "Omitted, both happen in one sitting.")
     ap.add_argument("--code", default=None,
-                    help="Skip the interactive prompt — pass the code directly "
-                         "(e.g. when driving the browser step separately).")
+                    help="Skip the interactive prompt — pass the code directly.")
     args = ap.parse_args()
 
     scope, who = ROLES[args.role]
+    out = Path(args.out or (Path.home() / ".thelivu" / f"youtube-{args.role}.env"))
+    pending = out.with_suffix(".pending")
     print(f"\nMinting the '{args.role}' credential — for {who}.\n")
 
-    # Never on the command line: argv is visible to anything reading the process
-    # table, lands in shell history, and shows up in any terminal transcript.
-    client_id = os.environ.get("YOUTUBE_CLIENT_ID") or input("client id: ").strip()
-    client_secret = (os.environ.get("YOUTUBE_CLIENT_SECRET")
-                     or getpass.getpass("client secret (hidden): ").strip())
+    # --step exchange reads the id/secret back rather than asking again, because
+    # the whole point of splitting the flow is that you can close the terminal,
+    # go to the browser in your own time, and come back.
+    if args.step == "exchange":
+        if not pending.exists():
+            sys.exit(f"nothing pending — run `--role {args.role} --step url` first")
+        kv = dict(l.split("=", 1) for l in pending.read_text().splitlines() if "=" in l)
+        client_id, client_secret = kv.get("id", ""), kv.get("secret", "")
+    else:
+        # Never on the command line: argv is visible to anything reading the
+        # process table, lands in shell history, and shows up in any terminal
+        # transcript.
+        client_id = os.environ.get("YOUTUBE_CLIENT_ID") or input("client id: ").strip()
+        client_secret = (os.environ.get("YOUTUBE_CLIENT_SECRET")
+                         or getpass.getpass("client secret (hidden): ").strip())
     if not (client_id and client_secret):
         sys.exit("need both a client id and a client secret")
 
@@ -110,8 +126,28 @@ def main():
 
     print(f"After approving, Google redirects to {_REDIRECT}?code=... — that page")
     print("will fail to load (nothing is listening on that port), which is fine.")
-    print("Copy the 'code' value out of the browser's address bar and paste it here.\n")
+
+    if args.step == "url":
+        pending.parent.mkdir(parents=True, exist_ok=True)
+        pending.write_text(f"id={client_id}\nsecret={client_secret}\n")
+        pending.chmod(stat.S_IRUSR | stat.S_IWUSR)
+        print("\nTake your time in the browser. When you have the code, run:\n")
+        print(f"  venv/bin/python -m publishing.youtube_auth --role {args.role} "
+              f"--step exchange\n")
+        print("The code expires about 10 minutes after you approve, so run that")
+        print("soon after clicking Allow — but the terminal does NOT have to stay")
+        print("open in the meantime.")
+        return
+
+    print("Copy the 'code' value out of the browser's address bar and paste it here.")
+    print("Just the part between 'code=' and '&scope=' — or paste the whole URL,")
+    print("it will be trimmed for you.\n")
     code = args.code or input("code: ").strip()
+    # Paste the whole redirect URL if that is easier; three attempts were lost to
+    # pasting the URL somewhere other than this prompt, so accept both.
+    if "code=" in code:
+        code = code.split("code=", 1)[1].split("&", 1)[0]
+    code = unquote(code).strip()
     if not code:
         sys.exit("no code given")
 
@@ -133,7 +169,6 @@ def main():
     # Written to a file, never printed. A refresh token pasted into a terminal
     # is a refresh token in scrollback, in shell history, and in any transcript
     # of the session — including one an assistant can read.
-    out = Path(args.out or (Path.home() / ".thelivu" / f"youtube-{args.role}.env"))
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(
         f"YOUTUBE_CLIENT_ID={client_id}\n"
@@ -157,6 +192,10 @@ def main():
     print(f"\n  Copy the three values out of {out} into the right place:")
     print("    publish -> Railway (service thelivu-agent)")
     print("    upload  -> the reel-worker VM, ops/oracle-vm/reel-worker.env")
+    try:
+        pending.unlink()
+    except FileNotFoundError:
+        pass
 
 
 if __name__ == "__main__":
