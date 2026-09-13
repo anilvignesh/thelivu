@@ -515,6 +515,102 @@ def t_no_unverified_host_rewrites():
           routing.alternates("https://example.gov.in/x"), [])
 
 
+def t_a_scanned_pdf_falls_back_to_ocr():
+    """Until 2026-09-13 a PDF with no text layer was a dead end, and that is
+    most of the Indian public record: older audit reports, state records, court
+    orders, RTI replies. The documents nobody else is reading.
+
+    The original decision said Tesseract is the memory-hungry path. That was an
+    assumption about Tesseract, not a measurement of what liteparse bundles —
+    measured on a scanned CAG page it recovered 4,120 chars in 8.1s at 50MB
+    peak, against the digger unit's 256MB cap. The cost is TIME, which is why
+    it is a fallback bounded to OCR_MAX_PAGES and not the default.
+    """
+    from engine.digger import fetch as fetch_mod
+
+    calls = []
+
+    class FakeResult:
+        def __init__(self, text): self.text = text; self.pages = []
+
+    class FakeParser:
+        def __init__(self, ocr): self.ocr = ocr
+        def parse(self, _data):
+            calls.append("ocr" if self.ocr else "plain")
+            return FakeResult("Overview The Report of the Comptroller and "
+                              "Auditor General of India on State Revenues" * 6
+                              if self.ocr else "")
+        def close(self): pass
+
+    real = fetch_mod._new_parser
+    fetch_mod._new_parser = lambda ocr=False: FakeParser(ocr)
+    try:
+        text = fetch_mod.pdf_to_text(b"%PDF-1.4 scanned")
+    finally:
+        fetch_mod._new_parser = real
+
+    check("the plain pass runs first", calls[0], "plain")
+    check("and OCR is the fallback", calls, ["plain", "ocr"])
+    check("text is recovered", "Comptroller" in text, True)
+
+
+def t_a_pdf_with_a_text_layer_never_pays_for_ocr():
+    """8 seconds a page is the whole reason this is a fallback. A document that
+    already has text must not be OCR'd."""
+    from engine.digger import fetch as fetch_mod
+
+    calls = []
+
+    class FakeResult:
+        def __init__(self, text): self.text = text; self.pages = []
+
+    class FakeParser:
+        def __init__(self, ocr): self.ocr = ocr
+        def parse(self, _data):
+            calls.append("ocr" if self.ocr else "plain")
+            return FakeResult("A real text layer. " * 40)
+        def close(self): pass
+
+    real = fetch_mod._new_parser
+    fetch_mod._new_parser = lambda ocr=False: FakeParser(ocr)
+    try:
+        fetch_mod.pdf_to_text(b"%PDF-1.4 digital")
+    finally:
+        fetch_mod._new_parser = real
+    check("OCR never ran", calls, ["plain"])
+
+
+def t_ocr_failing_is_an_honest_miss_not_a_crash():
+    """OCR is a recovery path. A document that defeats it falls back to the
+    same miss as before rather than taking the cycle down."""
+    from engine.digger import fetch as fetch_mod
+
+    class Boom:
+        def __init__(self, ocr): pass
+        def parse(self, _d): raise RuntimeError("pdfium exploded")
+        def close(self): pass
+
+    real = fetch_mod._new_parser
+    fetch_mod._new_parser = lambda ocr=False: Boom(ocr) if ocr else _Empty()
+    try:
+        try:
+            fetch_mod.pdf_to_text(b"%PDF-1.4 bad")
+            check("a scan OCR cannot read still raises", "returned", "FetchError")
+        except fetch_mod.FetchError as e:
+            check("a scan OCR cannot read still raises",
+                  "OCR recovered nothing" in str(e), True)
+    finally:
+        fetch_mod._new_parser = real
+
+
+class _Empty:
+    def __init__(self, *a, **k): pass
+    def parse(self, _d):
+        class R: text = ""; pages = []
+        return R()
+    def close(self): pass
+
+
 def t_sansad_question_urls_are_retried_at_the_current_path():
     """Every search-indexed sansad.in question URL now answers HTTP 500.
 
@@ -1216,6 +1312,9 @@ def main():
               t_robots_4xx_means_allowed_per_rfc9309,
               t_robots_5xx_means_back_off,
               t_robots_check_raises_with_a_clear_reason,
+              t_a_scanned_pdf_falls_back_to_ocr,
+              t_a_pdf_with_a_text_layer_never_pays_for_ocr,
+              t_ocr_failing_is_an_honest_miss_not_a_crash,
               t_sansad_question_urls_are_retried_at_the_current_path,
               t_only_server_errors_earn_the_retry,
               t_missing_key_says_what_to_do,

@@ -34,6 +34,17 @@ MAX_PDF_BYTES = 15_000_000
 MAX_PDF_PAGES = 40
 PDF_PARSE_TIMEOUT = 60
 
+# OCR is the second pass, tried only when the first returns almost nothing.
+# Measured 2026-09-13: 8.1s and 50MB peak for one scanned page, so memory is a
+# non-issue against the unit's 256MB cap and TIME is the whole constraint.
+#
+# Twelve pages is ~100 seconds — enough to establish what a scanned document is
+# and whether it carries the figure we came for, which is all a LEAD needs. A
+# document worth more than that has earned a human opening it.
+OCR_MIN_CHARS = 200          # below this, the first pass found no text layer
+OCR_MAX_PAGES = 12
+OCR_PARSE_TIMEOUT = 180
+
 USER_AGENT = (
     "Mozilla/5.0 (compatible; ThelivuDigger/1.0; +https://thelivu.com) "
     "python-urllib"
@@ -337,9 +348,20 @@ def fetch_index(url, pattern=None, timeout=TIMEOUT):
 # 2.8MB / 8-page CAG circular: 0.06s, 35MB peak RSS, 24k chars.
 #
 # Settings are chosen for a 945MB box, not for maximum fidelity:
-#   ocr_enabled=False  — Tesseract is the memory-hungry path, and a scanned PDF
-#                        yielding little text is an honest miss, not a reason to
-#                        burn the box's whole memory budget on OCR.
+#   ocr_enabled        — OFF for the first pass, ON for a second pass when the
+#                        first yields almost nothing. The original note here
+#                        said Tesseract is the memory-hungry path and a scanned
+#                        PDF was an honest miss; that was an assumption about
+#                        Tesseract, never a measurement of what liteparse
+#                        actually bundles. Measured 2026-09-13 on a
+#                        scanned-equivalent CAG page: 4,120 chars, 8.1s,
+#                        **50MB peak RSS** against this unit's 256MB cap.
+#
+#                        So the cost is TIME, not memory — which is why it is a
+#                        fallback and not the default. A 250-page scanned report
+#                        at 8s a page is half an hour, so OCR_MAX_PAGES bounds
+#                        it. A scanned PDF is no longer an honest miss; it is
+#                        most of the Indian public record.
 #   num_workers=1      — this is a burstable 1/8-OCPU shape; parallel page
 #                        workers buy nothing and cost memory.
 #   max_pages/timeout  — a 900-page audit report must not become an unbounded job.
@@ -349,7 +371,7 @@ def fetch_index(url, pattern=None, timeout=TIMEOUT):
 # laptop do not need the dependency.
 # ---------------------------------------------------------------------------
 
-def _new_parser():
+def _new_parser(ocr=False):
     """A fresh parser per call, closed explicitly.
 
     NOT a module-level singleton. liteparse runs a worker pool with daemon
@@ -367,11 +389,11 @@ def _new_parser():
     """
     import liteparse
     return liteparse.LiteParse(
-        ocr_enabled=False,
-        max_pages=MAX_PDF_PAGES,
+        ocr_enabled=ocr,
+        max_pages=OCR_MAX_PAGES if ocr else MAX_PDF_PAGES,
         num_workers=1,
         pool_size=1,
-        parse_timeout=PDF_PARSE_TIMEOUT,
+        parse_timeout=OCR_PARSE_TIMEOUT if ocr else PDF_PARSE_TIMEOUT,
         quiet=True,
     )
 
@@ -408,14 +430,55 @@ def pdf_to_text(data):
         except Exception:
             pass
 
+    if len(text) < OCR_MIN_CHARS:
+        # No usable text layer — almost always a scan. Until 2026-09-13 that was
+        # where this stopped, and it is most of the Indian public record: older
+        # audit reports, state records, court orders, RTI replies. The documents
+        # nobody else is reading, which is where a finding nobody else has comes
+        # from.
+        ocr_text = _ocr_to_text(data)
+        if ocr_text:
+            log.info("no text layer — OCR recovered %d chars from the first "
+                     "%d pages", len(ocr_text), OCR_MAX_PAGES)
+            return ocr_text
+
     if not text:
-        # Almost always a scanned/image-only PDF with no text layer. Say so:
-        # an empty extraction that reads as "nothing found" is worse than a miss.
         raise FetchError(
-            "PDF has no extractable text layer (likely scanned; OCR is disabled "
-            "on this host by design)"
+            "PDF has no extractable text layer and OCR recovered nothing "
+            "(image quality, or not a document at all)"
         )
     return text
+
+
+def _ocr_to_text(data):
+    """Second pass over a PDF that had no text layer. Returns "" on any failure.
+
+    Never raises: OCR is a recovery path, and a document that defeats it should
+    fall back to the same honest miss as before rather than taking the cycle
+    down with it.
+    """
+    try:
+        lp = _new_parser(ocr=True)
+    except Exception as e:
+        log.info("OCR unavailable (%s) — treating as a scan we cannot read",
+                 type(e).__name__)
+        return ""
+    try:
+        result = lp.parse(data)
+        text = (getattr(result, "text", None) or "").strip()
+        if not text:
+            pages = getattr(result, "pages", None) or []
+            text = "\n\n".join(
+                (getattr(pg, "text", "") or "").strip() for pg in pages).strip()
+        return text[:MAX_TEXT_CHARS]
+    except Exception as e:
+        log.info("OCR failed: %s: %s", type(e).__name__, str(e)[:120])
+        return ""
+    finally:
+        try:
+            lp.close()
+        except Exception:
+            pass
 
 # A source that answers with a CAPTCHA has said no to automated access. Detect it
 # and say so plainly: without this, RBI's challenge page arrived as a 46KB "PDF"
