@@ -321,6 +321,29 @@ def t_every_source_on_screen_reaches_the_description():
     check("and it is the one with the URL", "sansad.in" in lines[0], True)
 
 
+def t_licensed_media_is_credited_in_the_description_too():
+    """Anil, 2026-09-13: "if we cant show the item on the video, due to
+    copyright, we can atleast add them as source in the video description."
+
+    For CC-BY and CC-BY-SA material that is not a courtesy, it is the LICENCE
+    CONDITION. The burned-in caption satisfies it on screen; the description is
+    where a viewer actually goes to find the original. Clips and photographs
+    reached neither list before this — a breach we would not have noticed
+    ourselves committing.
+    """
+    parsed = longform.parse_script(
+        "TITLE: t\nCOLD_OPEN: x\nCHAPTER 1 TITLE: A\n"
+        "CHAPTER 1: words words words words words words\n"
+        "CHAPTER 1 PHOTO: The embankment after the collapse | https://x/a.jpg"
+        " | CC BY-SA 4.0, A Photographer | Malappuram, 19 May 2025\n"
+        "CHAPTER 1 CLIP: Site footage | https://x.gov.in/c.mp4"
+        " | GODL-India, PIB 2130592 | Kasaragod, June 2025\nCLOSE: y\n")
+    desc = longform.build_description(parsed)
+    for needed in ("A Photographer", "CC BY-SA 4.0", "GODL-India",
+                   "Malappuram", "https://x/a.jpg"):
+        check(f"description carries {needed!r}", needed in desc, True)
+
+
 def t_a_shared_year_is_not_a_shared_source():
     """Nearly every citation carries a year, so counting one as identity merged
     two different ministry replies into one line."""
@@ -1385,6 +1408,7 @@ def main():
               t_a_table_is_a_frame_the_viewer_can_check,
               t_a_table_ranks_with_the_figures_not_the_pictures,
               t_every_source_on_screen_reaches_the_description,
+              t_licensed_media_is_credited_in_the_description_too,
               t_a_shared_year_is_not_a_shared_source,
               t_a_shot_moves_and_a_very_short_one_does_not,
               t_credit_is_the_condition_on_some_licences_and_not_on_others,

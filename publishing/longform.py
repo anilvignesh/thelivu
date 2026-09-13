@@ -455,6 +455,18 @@ def _revive(queue_id, why):
     set_longform_status(queue_id, QUEUED)
 
 
+def _media_credit(item):
+    """One citation line for a clip or a photograph: what it shows, when and
+    where, and under what licence. All three, because a licence without
+    provenance still leaves the viewer unable to check the subject."""
+    bits = [(item.get("shows") or "").strip()]
+    if item.get("provenance"):
+        bits.append(item["provenance"].strip())
+    if item.get("licence"):
+        bits.append(item["licence"].strip())
+    return " · ".join(b for b in bits if b)
+
+
 def build_description(parsed):
     """The YouTube description: the writer's blurb, then EVERY source used.
 
@@ -518,6 +530,16 @@ def build_description(parsed):
             add(f.get("source"))
         for t in c.get("tables") or []:
             add(t.get("source"))
+        # Footage and photographs, which were missing entirely. For CC-BY and
+        # CC-BY-SA material attribution is the LICENCE CONDITION, not a
+        # courtesy — the burned-in caption satisfies it on screen and the
+        # description is where a viewer actually goes to find the original. A
+        # licensed photo credited nowhere but in a frame that flashes past is a
+        # breach we would not notice ourselves committing.
+        for ph in c.get("photos") or []:
+            add(_media_credit(ph), ph.get("src", ""))
+        for cl in c.get("clips") or []:
+            add(_media_credit(cl), cl.get("src", ""))
 
     if sources:
         parts.append("Sources")
