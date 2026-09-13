@@ -347,6 +347,17 @@ _CLAUDE_SKILL_TOOLS = {
     # Chief of staff sweeps the backlog and must check "what moved since" on the
     # open web before recommending recheck/kill/revive.
     "chief-of-staff": [WEB_SEARCH_TOOL],
+    # Long-form is told to put the actual document on screen and was given no
+    # way to find one. Asked for a URL it cannot check, a model supplies a
+    # plausible one: the first script it wrote cited the same generic index page
+    # four times (2026-09-13). Search does not make it honest, but without
+    # search the instruction is impossible to follow, and an impossible
+    # instruction gets answered by invention.
+    #
+    # It does NOT get search to find new FACTS — the material is the verified
+    # article and the contract above still forbids adding to it. This is for
+    # locating the document a fact already came from.
+    "long-form-script": [WEB_SEARCH_TOOL],
 }
 
 

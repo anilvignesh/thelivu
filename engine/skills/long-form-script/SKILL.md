@@ -295,6 +295,19 @@ CHAPTER 5 CLIP: <what it shows> | <url or path> | <licence basis> | <when and wh
 CHAPTER 5 CLIP: The embankment at Kooriyad after the collapse | https://…/clip.mp4 | GODL-India, PIB release 2130592 | Malappuram, 19 May 2025
 ```
 
+**Find the document before you cite it.** You have web search. A RECORD line
+whose URL you have not opened is worse than no RECORD at all — it renders as the
+appearance of evidence, and the frame will quietly demote to an illustration
+when the fetch returns a web page instead of a PDF. Gate 1 now fetches every
+RECORD url and reports what came back, so a guessed one will be caught; the
+point is not to need catching.
+
+Search for the report, open the result, and use the URL that actually serves the
+PDF. Most Indian government documents are one search away — `sansad.in` for
+parliamentary answers, `cag.gov.in/ag2/<state>` for audit reports, ministry
+sites for press releases. If you genuinely cannot find the document, write no
+RECORD line and say so in the chapter: the FIGURE lines still carry the source.
+
 **The licence field is required and it is not a credit line.** Naming the outlet
 does not create permission to use their footage, and YouTube's Content ID does
 not read credits — it matches fingerprints and claims automatically. A clip
