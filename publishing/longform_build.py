@@ -228,6 +228,16 @@ def render_pending(limit=MAX_PER_PASS, voice=None, illustrate=True):
     from shared.db import longform_queue
 
     rows = longform_queue(status=longform.SCRIPT_OK)[:limit]
+    # One renderer at a time. render_pending is called from the reel-worker's
+    # poll AND by hand; on the first real run both fired and the same script was
+    # rendered and uploaded twice, leaving two unlisted videos on the channel
+    # with only one recorded. A render is an hour long, so the window for this
+    # is enormous.
+    from shared.db import kv_get, kv_set
+    holder = kv_get("longform_render_lock") or ""
+    if rows and holder:
+        log.info("another renderer holds the lock (%s) — skipping this pass", holder)
+        return []
     if rows:
         # Before an hour of narration, not after it. This box needs to be able
         # to UPLOAD; it deliberately does not need to publish.
@@ -238,8 +248,12 @@ def render_pending(limit=MAX_PER_PASS, voice=None, illustrate=True):
             return [{"id": r["id"], "ok": False,
                      "error": f"YouTube upload unavailable on this box: {why}"}
                     for r in rows]
+    import os
+    import socket
+    kv_set("longform_render_lock", f"{socket.gethostname()}:{os.getpid()}")
     out = []
-    for row in rows:
+    try:
+      for row in rows:
         qid = row["id"]
         try:
             video_path, parsed = _render_one(row, voice=voice,
@@ -260,6 +274,8 @@ def render_pending(limit=MAX_PER_PASS, voice=None, illustrate=True):
         except Exception as e:
             log.exception("#%s did not stage", qid)
             out.append({"id": qid, "ok": False, "error": f"{type(e).__name__}: {e}"})
+    finally:
+        kv_set("longform_render_lock", "")
     return out
 
 

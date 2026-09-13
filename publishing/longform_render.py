@@ -610,6 +610,86 @@ def _shot_count(duration, available):
     return max(1, k)
 
 
+# Chatterbox generates a bounded number of tokens per call and silently returns
+# whatever it managed — there is no error and no flag. A reel beat is ~30 words
+# and always fits, so the daily path has never seen this. Long-form chapters run
+# 130-210 words, and on the first real render two of them came back with NINE
+# PERCENT of their audio: 1,157 words became 2.7 minutes, which is 421 words a
+# minute. Nobody spoke most of that script.
+#
+# So a unit is synthesised in sentence-sized pieces and stitched. This is the
+# one place long-form must NOT reuse reel.synth_beats as-is: that function
+# deliberately voices a whole beat in one call to keep one prosody contour, and
+# that is right for 30 words and impossible for 200.
+MAX_SYNTH_WORDS = 34
+
+
+def _chunk_for_synth(text, max_words=MAX_SYNTH_WORDS):
+    """Sentence-aligned pieces, each small enough to survive the voice server.
+
+    Split on sentence ends, never mid-clause: a chunk boundary is a breath, and
+    a boundary inside a clause is audible. A single sentence longer than the cap
+    is passed whole rather than cut — truncating it is the failure we are
+    fixing, and a slightly long chunk is better than a severed one.
+    """
+    import re as _re
+
+    out, cur = [], []
+    for sent in _re.split(r"(?<=[.?!])\s+", (text or "").strip()):
+        if not sent:
+            continue
+        if cur and len(" ".join(cur).split()) + len(sent.split()) > max_words:
+            out.append(" ".join(cur))
+            cur = []
+        cur.append(sent)
+    if cur:
+        out.append(" ".join(cur))
+    return out or [""]
+
+
+def synth_units(units, backend, work_dir, voice=None):
+    """Voice each unit in pieces and stitch, returning reel.synth_beats' shape.
+
+    [(wav_path, duration_including_gap, [pause_times])], aligned with `units`.
+    Pauses are found on the STITCHED wav so cut planning sees the real thing.
+    """
+    import wave
+
+    from publishing import reel
+
+    work_dir = Path(work_dir)
+    work_dir.mkdir(parents=True, exist_ok=True)
+    out = []
+    for i, text in enumerate(units):
+        chunks = _chunk_for_synth(text)
+        parts = []
+        for j, chunk in enumerate(chunks):
+            part = work_dir / f"a{i}_{j}.wav"
+            reel._synth(chunk, part, backend, voice=voice)
+            parts.append(part)
+
+        joined = work_dir / f"a{i}.wav"
+        with wave.open(str(parts[0]), "rb") as first:
+            params = first.getparams()
+        with wave.open(str(joined), "wb") as w:
+            w.setparams(params)
+            for part in parts:
+                with wave.open(str(part), "rb") as r:
+                    w.writeframes(r.readframes(r.getnframes()))
+
+        dur = reel._duration(joined) + reel.GAP_SECS
+        words = len((text or "").split())
+        spoken = words / (dur / 60.0) if dur else 0
+        if words > 20 and spoken > 260:
+            # Loud, because this is exactly the failure that shipped silently.
+            log.warning("unit %s reads at %.0f words/min over %d chunks — the "
+                        "voice server is still dropping text", i, spoken, len(chunks))
+        log.info("voiced unit %s: %d words, %d chunks, %.1fs (%.0f wpm)",
+                 i, words, len(chunks), dur, spoken)
+        out.append((joined, dur, reel.find_pauses(joined)))
+    return out
+
+
 def _sentences(text):
     """Narration split into sentences, long ones only. Short connectives ("That
     figure is real.") are true but make a weak frame."""
@@ -915,7 +995,7 @@ def render(parsed, out_mp4, work_dir=None, voice=None, illustrate=True,
     lands mid-sentence is worse than no mark, and the estimate is only good
     enough to plan with.
     """
-    from publishing.reel import plan_cuts, synth_beats
+    from publishing.reel import plan_cuts
 
     def _p(frac, msg):
         if progress:
@@ -942,7 +1022,7 @@ def render(parsed, out_mp4, work_dir=None, voice=None, illustrate=True,
     units = [u for u in units if (u[2] or "").strip()]
 
     _p(0.05, f"Voicing {len(units)} sections…")
-    voiced = synth_beats([(text, "") for _k, _c, text in units],
+    voiced = synth_units([text for _k, _c, text in units],
                          "chatterbox", tmp / "vo", voice=voice)
 
     # 2. Plan what each unit puts on screen, against those real durations.
