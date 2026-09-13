@@ -382,6 +382,16 @@ def run_once():
     # something substantial which needs a long video we do that").
     try:
         from publishing.longform_build import render_pending
+        # Re-imported every pass rather than held from process start: this
+        # service runs for days, and on 2026-09-13 a pass executing code from
+        # before a fix clobbered a live render that was using the fixed code.
+        import importlib
+
+        import publishing.longform_build as _lb
+        import publishing.longform_render as _lr
+        importlib.reload(_lr)
+        importlib.reload(_lb)
+        render_pending = _lb.render_pending
         for res in render_pending():
             did_something = True
             if res.get("ok"):

@@ -163,7 +163,19 @@ def _render_one(row, voice=None, illustrate=True):
 
     LONGFORM_DIR.mkdir(parents=True, exist_ok=True)
     out = LONGFORM_DIR / f"longform_{qid}.mp4"
-    work = LONGFORM_DIR / f"work_{qid}"
+    # Unique per render, not per item. Two renders of the same script used to
+    # claim the same directory and overwrite each other's audio file by file —
+    # which is exactly what happened on 2026-09-13: a stale long-running service
+    # re-voiced units 0-2 into a live render's work dir, and the finished video
+    # had twelve seconds of speech where chapter one should have had
+    # seventy-three, padded out with silence.
+    #
+    # The lock added the same day is the first defence and it failed, because a
+    # service that has been running since before the lock existed does not have
+    # the lock. A directory no other process can name does not depend on the
+    # other process cooperating.
+    import time
+    work = LONGFORM_DIR / f"work_{qid}_{int(time.time())}"
     log.info("#%s rendering %s words to %s", qid, parsed.get("word_count"), out)
     res = longform_render.render(parsed, str(out), work_dir=str(work),
                                  voice=voice, illustrate=illustrate)
