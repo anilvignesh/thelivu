@@ -677,9 +677,29 @@ def _record_claude(skill_name, total_in, total_out, run_id, model=None,
 
 
 def _extract_claude_text(response):
-    return "\n".join(
+    """The text blocks, joined. Empty is a real answer shape and a real bug.
+
+    A response can carry NO text block at all — most often when the whole
+    max_tokens budget went to reasoning and the model never reached its answer.
+    That returns "" here, and every caller downstream then reports whatever it
+    makes of an empty string: the long-form writer said "script parsed to zero
+    chapters", which sent me looking at the parser for a fault that was three
+    layers away (2026-09-13, three 12,000-token calls, all empty).
+
+    So an empty extraction says so, with the one fact that explains it.
+    """
+    text = "\n".join(
         block.text for block in response.content if hasattr(block, "text")
     ).strip()
+    if not text:
+        kinds = sorted({getattr(b, "type", "?") for b in response.content})
+        log.warning(
+            "model returned NO text — stop_reason=%s, output_tokens=%s, "
+            "block types=%s. If stop_reason is max_tokens, raise max_tokens for "
+            "this skill; the answer was never reached.",
+            getattr(response, "stop_reason", "?"),
+            getattr(response.usage, "output_tokens", "?"), kinds)
+    return text
 
 
 # ── Attended mode — the human-operated provider ───────────────────────────────

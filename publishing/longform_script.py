@@ -52,9 +52,23 @@ DRAFTS_DIR = Path(os.environ.get(
     "LONGFORM_DRAFTS_DIR",
     Path(__file__).resolve().parent.parent / "articles" / "drafts"))
 
-# A long-form script is 5-10x a reel's. 4096 truncates one mid-chapter, which
-# parses cleanly into a script that simply stops.
-MAX_TOKENS = 12000
+# A long-form script is 5-10x a reel's, and the model reasons before it writes.
+#
+# 12,000 was a guess and it was wrong in the worst way: the whole budget went to
+# reasoning, the model never reached its answer, and the response came back with
+# no text block at all. Measured 2026-09-13 — three consecutive calls, each
+# output_tokens exactly 12000, each returning "". The failure then reported
+# itself as "script parsed to zero chapters", which points at the parser.
+#
+# A 1,700-word script is ~2,500 tokens of output. The rest is headroom for the
+# thinking that precedes it, which is what actually needed the room.
+MAX_TOKENS = 32000
+
+# A script that will not parse will not parse the next time either — the input
+# has not changed. This is the run #237 lesson (see publishing/reel_worker.py)
+# applied to the path it was written for and then not applied to: three retries
+# at two-minute intervals, ~$0.18 each, and it would have run all day.
+MAX_SCRIPT_ATTEMPTS = 2
 
 # A figure in a chapter with no record behind it is the thing a reviewer should
 # be pointed at. Deliberately loose — it is a prompt to look, not a verdict.
@@ -270,6 +284,15 @@ def write_script(queue_id, model=None, dry_run=False):
     except Exception as e:
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
+    if not (raw or "").strip():
+        # Distinct from "would not parse". Nothing came back at all, which is
+        # almost always the token ceiling — see MAX_TOKENS.
+        _note_attempt(queue_id)
+        return {"ok": False, "error": (
+            "the model returned no text — most likely the whole token budget "
+            f"went to reasoning (MAX_TOKENS={MAX_TOKENS}). Check the engine log "
+            "for the stop_reason line.")}
+
     parsed = longform.parse_script(raw or "")
     if not parsed.get("chapters"):
         # Almost always a truncated or fenced response. Keep it on disk: a script
@@ -277,6 +300,7 @@ def write_script(queue_id, model=None, dry_run=False):
         DRAFTS_DIR.mkdir(parents=True, exist_ok=True)
         bad = DRAFTS_DIR / f"longform-{queue_id}-UNPARSED.txt"
         bad.write_text(raw or "")
+        _note_attempt(queue_id)
         return {"ok": False, "error": f"script parsed to zero chapters; raw kept at {bad}"}
 
     blockers = mechanical_blockers(parsed)
@@ -299,12 +323,37 @@ def write_script(queue_id, model=None, dry_run=False):
     res = attach_script(queue_id, str(path), blockers=blockers)
     if not res.get("ok"):
         return {"ok": False, "error": res.get("error"), "path": str(path)}
+    from shared.db import kv_set
+    kv_set(f"longform_script_fails_{queue_id}", "")
     log.info("#%s scripted: %s words, %s chapters, %s blocker(s)",
              queue_id, parsed.get("word_count"), len(parsed["chapters"]),
              len(blockers))
     return {"ok": True, "path": str(path), "words": parsed.get("word_count", 0),
             "chapters": len(parsed["chapters"]), "blockers": blockers,
             "budget": budget_msg}
+
+
+def _note_attempt(queue_id):
+    """Count a failed scripting attempt, and park the item once it is clearly
+    not going to work. Bounded because the input does not change between tries."""
+    from shared.db import kv_get, kv_set, set_longform_status
+
+    key = f"longform_script_fails_{queue_id}"
+    n = int(kv_get(key) or 0) + 1
+    kv_set(key, str(n))
+    if n >= MAX_SCRIPT_ATTEMPTS:
+        set_longform_status(queue_id, "dropped")
+        kv_set(key, "")
+        log.error("long-form #%s parked after %d failed scripting attempts — "
+                  "re-queue it once the cause is fixed", queue_id, n)
+        try:
+            from engine.agents.orchestrator import _notify
+            _notify(f"⏸️ Long-form #{queue_id} parked after {n} failed attempts "
+                    f"to write its script. Each attempt is a paid call and the "
+                    f"input does not change between them, so it stops here. "
+                    f"Re-queue with /longform once the cause is fixed.")
+        except Exception:
+            pass
 
 
 def write_pending(limit=1, model=None):
