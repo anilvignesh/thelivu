@@ -96,7 +96,7 @@ _PAGE = """<!DOCTYPE html>
   }}
 
   /* Hero — the newest story, full-bleed, scroll-scrubbed media */
-  .hero {{ margin-bottom: 3.5rem; }}
+  .hero {{ display: block; margin-bottom: 3.5rem; color: var(--fg); text-decoration: none; }}
   .hero-media-wrap {{
     width: 100vw; margin-left: calc(50% - 50vw); overflow: hidden;
     max-height: 62vh; background: var(--line);
@@ -230,7 +230,7 @@ def _hero_html(item, contact_handle):
     media = ""
     if kind == "video":
         media = (
-            f'<div class="hero-media-wrap"><video class="hero-media" muted loop playsinline '
+            f'<div class="hero-media-wrap"><video class="hero-media" muted loop playsinline autoplay '
             f'preload="metadata" controls><source src="{url}" type="video/mp4"></video></div>'
         )
     elif kind == "img":
@@ -261,7 +261,7 @@ def _story_html(item, contact_handle):
     media = ""
     if tier != "compact" and kind == "video":
         media = (
-            f'<video class="story-media" muted loop playsinline preload="metadata">'
+            f'<video class="story-media" muted loop playsinline autoplay preload="metadata">'
             f'<source src="{url}" type="video/mp4"></video>'
         )
     elif tier != "compact" and kind == "img":
