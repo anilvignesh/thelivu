@@ -47,6 +47,32 @@ def _kv_set(key, value):
         log.warning("could not persist %s: %s", key, e)
 
 
+def _warn_about_barren_targets():
+    """Say out loud when a target has stopped earning its slot.
+
+    A broken target is indistinguishable from a quiet one in any single cycle —
+    both log "0 candidate(s)" — so the signal only exists across runs, and
+    nobody reads a week of journal. Four of nine targets had produced nothing
+    EVER when this was first checked by hand on 2026-09-14.
+
+    Logged, not raised: a target reading the wrong page is a configuration
+    problem for a person to fix, not a reason to fail the cycle that noticed.
+    """
+    try:
+        barren = db.barren_targets()
+    except Exception as e:                                  # noqa: BLE001
+        log.debug("could not check for barren targets: %s", e)
+        return
+    for key, runs, docs in barren:
+        if docs:
+            log.warning("target %s has fetched %d document(s) over %d runs and "
+                        "found NOTHING — it is reading the wrong pages, check "
+                        "its index_url and link_pattern", key, docs, runs)
+        else:
+            log.warning("target %s has run %d times and fetched nothing at all "
+                        "— check whether its index still exists", key, runs)
+
+
 def run_cycle(target=None, dry_run=False):
     """One target, fetched and read. Returns the candidate dicts recorded."""
     if target is None:
@@ -141,6 +167,7 @@ def run_cycle(target=None, dry_run=False):
             db.finish_digger_run(run_id, ok=True, docs_fetched=docs,
                                  candidates_found=len(recorded), model_calls=calls)
             _kv_set(_LAST_KEY, target["key"])
+            _warn_about_barren_targets()
         return recorded
 
     except (fetch.FetchError, freellm.FreeLLMError) as e:

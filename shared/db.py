@@ -3489,6 +3489,47 @@ def finish_digger_run(run_id, ok, docs_fetched=0, candidates_found=0,
         conn.close()
 
 
+def barren_targets(min_runs=5, days=7):
+    """Targets that have run repeatedly and never found anything.
+
+    [(key, runs, docs_fetched)], worst first.
+
+    A digger target fails SILENTLY. It fetches, the extractor reads, nothing is
+    grounded, the cycle logs "0 candidate(s)" and sleeps — which is also exactly
+    what a healthy target on a quiet day looks like. Over a week the difference
+    is unmistakable and nobody is reading a week of logs.
+
+    Found on 2026-09-14 by asking this question by hand: four of nine targets
+    had produced ZERO candidates in every run they had ever made. cag-reports
+    was pointed at cag.gov.in/en/audit-report, whose PDFs are the whistleblower
+    policy and a training compendium; cag-press-releases had no link_pattern at
+    all and was reading the "About the CAG of India" page once an hour.
+
+    Distinguishing "no news" from "broken" is the whole value: a target with
+    docs_fetched > 0 and no candidates is reading the wrong documents, which is
+    a different fix from one that cannot fetch at all.
+    """
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        since = ("NOW() - INTERVAL '%d days'" % int(days) if _is_postgres()
+                 else "datetime('now', '-%d days')" % int(days))
+        cur.execute(
+            f"""SELECT target_key, count(*) AS runs,
+                       coalesce(sum(docs_fetched), 0) AS docs
+                  FROM digger_runs
+                 WHERE started_at > {since} AND target_key IS NOT NULL
+              GROUP BY target_key
+                HAVING count(*) >= {ph}
+                   AND coalesce(sum(candidates_found), 0) = 0
+              ORDER BY runs DESC""",
+            (int(min_runs),))
+        return [(r[0], r[1], r[2]) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
 def record_archived_doc(sha256, url, final_url=None, content_type=None,
                         byte_size=None, fetched_at=None, ocr_used=False,
                         wayback_url=None, pulled_at=None):

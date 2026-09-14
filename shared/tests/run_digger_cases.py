@@ -515,6 +515,50 @@ def t_no_unverified_host_rewrites():
           routing.alternates("https://example.gov.in/x"), [])
 
 
+def t_a_target_that_finds_nothing_says_so():
+    """A digger target fails SILENTLY, and that is the whole problem.
+
+    It fetches, the extractor reads, nothing is grounded, the cycle logs
+    "0 candidate(s)" and sleeps — which is also exactly what a healthy target on
+    a quiet day looks like. The difference only exists ACROSS runs, and nobody
+    reads a week of journal.
+
+    Checked by hand on 2026-09-14: four of nine targets had produced zero
+    candidates in every run they had ever made. cag-reports was pointed at
+    cag.gov.in/en/audit-report, whose PDFs are the whistleblower policy and a
+    training compendium — it had been fetching HR documents once an hour for
+    weeks and looked healthy doing it. cag-press-releases had no link_pattern at
+    all and was reading the "About the CAG of India" page.
+
+    Neither was found by a failure. Both were found by asking a question nothing
+    in the system asked on its own.
+    """
+    from shared import db
+
+    rows = [("healthy", 8, 8, 6), ("reading-wrong-pages", 12, 12, 0),
+            ("cannot-fetch", 9, 0, 0), ("too-new", 2, 2, 0)]
+
+    def fake_query(min_runs=5, days=7):
+        return [(k, runs, docs) for k, runs, docs, cands in rows
+                if runs >= min_runs and cands == 0]
+
+    real = db.barren_targets
+    db.barren_targets = fake_query
+    try:
+        got = dict((k, (r, d)) for k, r, d in db.barren_targets())
+        check("a target that finds things is not flagged", "healthy" in got, False)
+        check("one reading the wrong pages is", "reading-wrong-pages" in got, True)
+        check("and one fetching nothing at all is", "cannot-fetch" in got, True)
+        check("a target with too few runs is left alone", "too-new" in got, False)
+        # The distinction that decides the fix: docs fetched but nothing found
+        # means the wrong pages, which is a different repair from a dead index.
+        check("docs fetched is reported, because it names the fix",
+              got["reading-wrong-pages"][1] > 0 and got["cannot-fetch"][1] == 0,
+              True)
+    finally:
+        db.barren_targets = real
+
+
 def t_every_document_we_read_is_kept():
     """We used to keep a URL and a short quote. The document was read and
     dropped — so a figure challenged six months later was backed by an
@@ -1383,6 +1427,7 @@ def main():
               t_robots_4xx_means_allowed_per_rfc9309,
               t_robots_5xx_means_back_off,
               t_robots_check_raises_with_a_clear_reason,
+              t_a_target_that_finds_nothing_says_so,
               t_every_document_we_read_is_kept,
               t_a_full_disk_does_not_fail_the_dig,
               t_a_scanned_pdf_falls_back_to_ocr,

@@ -107,10 +107,23 @@ TARGETS = [
     },
     {
         "key": "cag-reports",
-        "name": "CAG audit reports index",
-        "index_url": "https://cag.gov.in/en/audit-report",
-        "link_pattern": r"\.pdf$|/audit-report/|/ag[0-9]?/",
-        "verified": True,   # yields real PDF links; PDFs now parsed via liteparse
+        "name": "CAG audit reports (Kerala AG)",
+        # THE STATE AG PAGE, not cag.gov.in/en/audit-report. That landing page
+        # matches the pattern and yields PDFs, so this looked healthy for weeks
+        # — but the PDFs on it are the PIDPI whistleblower policy, a training
+        # compendium and delegation-of-financial-power rules. Administrative
+        # documents with no findings in them, which is why this target produced
+        # 0 candidates in every run it has ever made (checked 2026-09-14).
+        #
+        # One level down are the actual reports: State Finances, the full audit
+        # report for the year ended March 2024, AMRUT. The two this desk's first
+        # long-form cites are both on this page.
+        "index_url": "https://cag.gov.in/ag2/kerala/en/audit-report",
+        # \.pdf$ ALONE. The old pattern also matched /audit-report/ and /ag[0-9]/,
+        # which are navigation, and a looser pattern on an index page is how a
+        # digger spends its cycles reading about-pages.
+        "link_pattern": r"\.pdf$",
+        "verified": True,   # yields real audit-report PDFs, checked 2026-09-14
         "brief": (
             "Audit findings: the department or scheme audited, the period "
             "covered, and any rupee figure, unresolved objection or compliance "
