@@ -426,15 +426,27 @@ def t_a_gap_is_filled_with_evidence_before_more_subtitles():
     """
     text = " ".join(f"Sentence number {i} carries the argument onward a step."
                     for i in range(1, 14))
+    # A RECORD WITH A URL is what makes the gap fillable with a document rather
+    # than a subtitle. Without one there is nothing to crop, and the unit
+    # correctly falls back to quote frames — see encore().
     assets = [{"kind": "figure", "figure": {"value": "30,308 crore", "label": "a"}},
-              {"kind": "record", "record": {"quote": "b"}}]
+              {"kind": "record", "record": {"quote": "b", "url": "https://x/a.pdf"}}]
     out = lfr.with_filler(assets, text, 10, anchored=True)
     kinds = [a["kind"] for a in out]
     check("the declared evidence is kept", kinds[:2], ["figure", "record"])
     check("quotes do not take the whole budget",
           kinds.count("quote") <= max(1, round(10 * lfr.QUOTE_SHARE)), True)
-    check("evidence comes back instead",
-          any(a.get("encore") for a in out), True)
+    check("the gap is filled with the document, not a repeat of the card",
+          any(a["kind"] == "excerpt" for a in out), True)
+    check("and no figure card is simply shown twice",
+          kinds.count("figure"), 1)
+
+    # No URL anywhere: nothing to crop, so quote frames are the honest fallback
+    # and a generated illustration still is not.
+    bare = [{"kind": "figure", "figure": {"value": "30,308 crore", "label": "a"}}]
+    out2 = lfr.with_filler(bare, text, 10, images=["a ledger"], anchored=True)
+    check("with no document to show it falls back to words, not pictures",
+          any(a["kind"] == "image" for a in out2), False)
 
 
 def t_an_encore_never_steals_its_own_beat():
@@ -466,6 +478,10 @@ def t_an_illustration_never_outstays_the_evidence():
     with_ev = lfr.with_filler([fig], text, 8, images=["a ledger"], anchored=True)
     check("a unit with evidence shows no illustration",
           any(a["kind"] == "image" for a in with_ev), False)
+    # The regression this guards: the condition briefly keyed on whether the
+    # GAP-FILLER produced anything rather than on whether the unit has evidence,
+    # so a figure with no declared document looked evidence-free and got a
+    # generated scene back.
     without = lfr.with_filler([], text, 8, images=["a ledger"], anchored=True)
     check("a unit with none still gets one",
           any(a["kind"] == "image" for a in without), True)

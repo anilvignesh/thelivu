@@ -87,6 +87,133 @@ def render_pages(pdf_path, pages, out_dir, stem="record", dpi=DEFAULT_DPI):
     return out
 
 
+# How far above and below a matched line to take, in PDF points. A figure on its
+# own proves nothing — "30,308.52" is a number until you can see the row label
+# and the column head next to it. 90pt is roughly six lines of an audit report.
+BAND_POINTS = 90
+# Breathing room around the crop so the excerpt does not look guillotined.
+CROP_PAD_POINTS = 14
+# Below this the crop is a fragment, not a readable excerpt, and the whole page
+# is the more honest thing to show.
+MIN_CROP_POINTS = 40
+
+
+def locate(pdf_path, needle, dpi=DEFAULT_DPI):
+    """Where in a PDF a figure actually appears. [(page, (x0,y0,x1,y1))] in points.
+
+    Anil, 2026-09-14: *"what we are looking for is not like a subtitle right.
+    Materials related to the audio should be shown on the page... we can show
+    the official table of the collections pending on the screen when 30308 is
+    told."*
+
+    That is the difference between a data card and evidence. A card restates the
+    number in our own typography and asks to be believed; this finds the number
+    IN THE DOCUMENT and puts that on screen, so the row label and the column
+    head are visible next to it and a viewer can read the claim themselves.
+
+    The box returned is a BAND, not the matched line. A figure alone proves
+    nothing — what makes it evidence is the context printed around it — so the
+    lines above and below come too.
+    """
+    from engine.digger.fetch import _new_parser
+
+    needle = _norm(needle)
+    if not needle:
+        return []
+    lp = _new_parser()
+    try:
+        result = lp.parse(str(pdf_path) if not hasattr(pdf_path, "read")
+                          else pdf_path.read())
+    except Exception as e:                                  # noqa: BLE001
+        log.info("could not parse %s to locate %r: %s", pdf_path, needle, e)
+        return []
+    finally:
+        try:
+            lp.close()
+        except Exception:
+            pass
+
+    out = []
+    for page in getattr(result, "pages", None) or []:
+        items = [t for t in (getattr(page, "text_items", None) or [])
+                 if (getattr(t, "text", "") or "").strip()]
+        hits = [t for t in items if needle in _norm(t.text)]
+        if not hits:
+            continue
+        hit = hits[0]
+        band = [t for t in items
+                if hit.y - BAND_POINTS <= t.y <= hit.y + BAND_POINTS]
+        if not band:
+            band = [hit]
+        box = (min(t.x for t in band),
+               min(t.y for t in band),
+               max(t.x + t.width for t in band),
+               max(t.y + t.height for t in band))
+        out.append((page.page_num, box))
+    return out
+
+
+def _norm(s):
+    return re.sub(r"\s+", " ", (s or "")).strip().lower()
+
+
+def excerpt(pdf_path, needle, out_dir, stem="excerpt", dpi=DEFAULT_DPI):
+    """The region of the real document where `needle` appears, as a PNG.
+
+    Returns {"path", "page", "cropped"} or None. `cropped` is False when the
+    figure was found but the band was too small to be worth cutting to — the
+    whole page goes up instead, which is less striking and never misleading.
+
+    Cropping is allowed (see the module docstring) precisely because it does not
+    change what the page SAYS. Anything that would — redrawing, retyping,
+    rearranging — is not this function's business and never will be.
+    """
+    found = locate(pdf_path, needle, dpi=dpi)
+    if not found:
+        log.info("%r does not appear in %s — no excerpt", needle, pdf_path)
+        return None
+    page_no, (x0, y0, x1, y1) = found[0]
+
+    shots = render_pages(pdf_path, [page_no], out_dir, stem=stem, dpi=dpi)
+    if not shots:
+        return None
+    _p, page_png = shots[0]
+
+    from PIL import Image
+    im = Image.open(page_png)
+    # liteparse reports geometry in POINTS and renders in PIXELS; the ratio is
+    # dpi/72 but is taken from the image so a renderer that rounds differently
+    # cannot silently shift every crop.
+    from engine.digger.fetch import _new_parser
+    lp = _new_parser()
+    try:
+        pw = lp.parse(str(pdf_path)).pages[page_no - 1].width
+    except Exception:                                       # noqa: BLE001
+        pw = im.width * 72.0 / dpi
+    finally:
+        try:
+            lp.close()
+        except Exception:
+            pass
+
+    if (y1 - y0) < MIN_CROP_POINTS:
+        return {"path": page_png, "page": page_no, "cropped": False}
+
+    sc = im.width / float(pw or 1)
+    box = (max(0, int((x0 - CROP_PAD_POINTS) * sc)),
+           max(0, int((y0 - CROP_PAD_POINTS) * sc)),
+           min(im.width, int((x1 + CROP_PAD_POINTS) * sc)),
+           min(im.height, int((y1 + CROP_PAD_POINTS) * sc)))
+    if box[2] - box[0] < 80 or box[3] - box[1] < 40:
+        return {"path": page_png, "page": page_no, "cropped": False}
+
+    crop_path = os.path.join(out_dir, f"{stem}_p{page_no}_crop.png")
+    im.crop(box).save(crop_path)
+    log.info("excerpt %r -> %s page %s, %dx%d px", needle, crop_path, page_no,
+             box[2] - box[0], box[3] - box[1])
+    return {"path": crop_path, "page": page_no, "cropped": True}
+
+
 def find_pages(pdf_text_by_page, needle):
     """Which 1-indexed pages contain `needle`?
 

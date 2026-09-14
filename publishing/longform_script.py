@@ -193,6 +193,12 @@ def review_notes(parsed):
         info(f"No document shown in chapter{'s' if len(recordless) > 1 else ''} "
              f"{which} — their sources still reach the description")
 
+    for fig, n in repeated_figures(parsed):
+        checkn(f"'{fig}' is said {n} times in the narration — a figure restated "
+               f"is the script reaching for the one fact it is sure of. State it "
+               f"once, then refer to it ('that arrears figure'), and give the "
+               f"other chapters their own evidence")
+
     if not parsed.get("why_long_form"):
         checkn("No WHY_LONG_FORM line — the script does not say why this is not "
                "a reel, which is the first thing to disagree with")
@@ -265,6 +271,81 @@ def _record_problems(parsed, check=True):
                     f"All {len(real)} records cite the SAME url — one document "
                     f"passed off as several, or a landing page"))
     return out
+
+
+# How often one figure may be restated before it stops carrying weight. Two is
+# the statement plus one deliberate callback.
+MAX_FIGURE_MENTIONS = 2
+
+
+def repeated_figures(parsed):
+    """Figures the narration says over and over. [(figure, count)], worst first.
+
+    Anil, 2026-09-14, watching the third cut: *"i think we should rewrite the
+    script itself, 30308 cr is repeated at least half a dozen times."* He was
+    under-counting: eight times in digits, eleven including the spoken form.
+
+    A number restated is not emphasis, it is the script running out of things to
+    say and reaching for the one fact it is sure of. It compounds on screen too,
+    because the renderer reaches for the same figure when it needs something to
+    show — which is how one crore figure ends up owning a quarter of a video.
+
+    COUNTS THE SPOKEN FORM, which is the only form that appears. The narration
+    is read aloud, so it says "thirty thousand three hundred and eight crore"
+    and never "30,308.52" — a first version of this counted digit groups in the
+    body and found zero every time, in a script that repeated one figure eleven
+    times. A check that cannot fire is worse than no check.
+
+    The declared FIGURE lines supply the numbers; _spell turns each into what
+    the narration would have to say; the body is searched for that.
+    """
+    import re as _re
+    from publishing.longform_render import _spell
+
+    spoken = [parsed.get("cold_open") or "", parsed.get("close") or ""]
+    spoken += [c.get("text") or "" for c in parsed.get("chapters") or []]
+    body = _re.sub(r"[^a-z0-9 ]+", " ", " ".join(spoken).lower())
+    body = _re.sub(r"\s+", " ", body)
+
+    declared = []
+    for c in parsed.get("chapters") or []:
+        declared += c.get("figures") or []
+    for key in ("cold_open_figures", "close_figures"):
+        declared += parsed.get(key) or []
+
+    spelled, seen = {}, set()
+    for fig in declared:
+        raw = (fig.get("value") or "").strip()
+        head = _re.sub(r"[^\d]", "", raw.split(".")[0])
+        if not head or head in seen:
+            continue
+        seen.add(head)
+        try:
+            words = _spell(int(head))
+        except (ValueError, TypeError):
+            continue
+        if len(words) >= 3:
+            spelled[raw] = words
+
+    # THE SHORTEST NEEDLE THAT IS STILL UNAMBIGUOUS. A script refers back to a
+    # figure in a rounded form — "thirty thousand crore" for 30,308.52 — and a
+    # three-word needle ("thirty thousand three") misses every one of those,
+    # which is how the first version reported 2 mentions of a figure the
+    # narration used eleven times.
+    #
+    # Two words would catch them, but two words collide: 236 and 262 are both
+    # "two hundred". So the prefix is only shortened when nothing else declared
+    # shares it.
+    out = []
+    for raw, words in spelled.items():
+        two = " ".join(words[:2])
+        clash = any(other is not words and " ".join(other[:2]) == two
+                    for other in spelled.values())
+        needle = " ".join(words[:3]) if clash else two
+        n = body.count(needle)
+        if n > MAX_FIGURE_MENTIONS:
+            out.append((raw, n))
+    return sorted(out, key=lambda p: -p[1])
 
 
 def _no_evidence_chapters(parsed):

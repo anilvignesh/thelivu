@@ -263,6 +263,47 @@ should be a TABLE.
 Four to seven rows. The renderer does not sort, compute or round — every number
 on screen is one you wrote and a reviewer approved.
 
+### Say a figure ONCE. Then refer to it.
+
+Anil, 2026-09-14, watching the third cut: *"i think we should rewrite the script
+itself, 30308 cr is repeated at least half a dozen times."*
+
+He was under-counting. Measured on that script, 30,308 appeared eight times in
+digits and eleven including the spoken form, and on screen it held six shots for
+44.8 seconds — more than a tenth of the video showing one number.
+
+A figure restated is not emphasis. It is the script running out of things to say
+and reaching for the one fact it is sure of, and a viewer hears it as padding.
+
+State it once, in full, where it lands hardest. After that refer to it — *"that
+arrears figure"*, *"the money that was never collected"*, *"the same thirty
+thousand crore"* — and give the other chapters their own evidence. Gate 1 counts
+this for you and flags any figure the narration says more than twice.
+
+### Pair every FIGURE with the RECORD it came from
+
+This is what lets the renderer show the DOCUMENT instead of a caption.
+
+Anil, same message: *"what we are looking for is not like a subtitle right.
+Materials related to the audio should be shown on the page, it needn't be like
+the exact words. For eg, we can show the official table of the collections
+pending on the screen when 30308 is told."*
+
+That is now a real capability. `publishing/evidence_shot.excerpt()` finds a
+figure's digits inside a PDF, takes the band of lines around it, and puts that on
+screen — so the row label and the column head are visible beside the number and
+the viewer reads the claim rather than our rendering of it.
+
+It needs one thing from you: **a RECORD line somewhere in the script whose URL is
+the document that figure is printed in.** The renderer pairs them itself and
+will reach across chapters to do it, so the URL does not have to sit in the same
+chapter as the figure. But if no chapter declares the document, there is nothing
+to crop and the gap falls back to a quote frame — a subtitle, which is the thing
+we are trying to stop showing.
+
+So: every figure that matters should be traceable to a declared RECORD. Where
+one document carries several of your figures, one RECORD line for it is enough.
+
 ### PHOTO lines — real photographs
 
 ```

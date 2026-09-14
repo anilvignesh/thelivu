@@ -425,6 +425,64 @@ def draw_table_frame(table, out_png, chapter_label=""):
     return out_png
 
 
+def draw_excerpt_frame(excerpt_png, out_png, chapter_label="", caption="",
+                       source=""):
+    """A band of the real document, as wide as the frame will take it.
+
+    Anil, 2026-09-14: *"what we are looking for is not like a subtitle right.
+    Materials related to the audio should be shown on the page... we can show
+    the official table of the collections pending on the screen when 30308 is
+    told."*
+
+    That sentence is the difference between this frame and draw_data_card. The
+    card restates a number in our own typography and asks to be believed. This
+    shows the number where it was PRINTED, with the row label and column head
+    around it, so a viewer reads the claim rather than our rendering of it.
+
+    Landscape and full-bleed-ish on purpose: a cropped band is already the right
+    shape for 16:9, which a full A4 page never is — that is why draw_record_frame
+    needs two columns and this does not.
+    """
+    img = Image.open(_ground(out_png.with_name(out_png.stem + "_bg.png"),
+                             variant=2)).convert("RGB")
+    d = ImageDraw.Draw(img)
+    d.text((120, 96), "THELIVU", font=_font(MONO_BOLD, 38), fill=ACCENT)
+    if chapter_label:
+        d.text((120, 148), chapter_label.upper()[:60],
+               font=_font(MONO, 30), fill=MUTED)
+
+    TOP, BOTTOM = 240, 200
+    avail_w, avail_h = W - 240, H - TOP - BOTTOM
+    try:
+        ex = Image.open(excerpt_png).convert("RGB")
+    except Exception as e:                                  # noqa: BLE001
+        log.warning("excerpt %s unreadable (%s)", excerpt_png, e)
+        img.save(out_png)
+        return out_png
+
+    scale = min(avail_w / ex.width, avail_h / ex.height)
+    # Never upscale past 2x: an audit report rendered at 150dpi and blown up
+    # further is mush, and mush reads as a fake document.
+    scale = min(scale, 2.0)
+    ex = ex.resize((max(1, int(ex.width * scale)), max(1, int(ex.height * scale))),
+                   Image.LANCZOS)
+
+    x = 120
+    y = TOP + max(0, (avail_h - ex.height) // 2)
+    # A paper-white plate behind the excerpt: the page is white, the ground is
+    # near-black, and butting them together looks like a rendering mistake.
+    d.rectangle([x - 16, y - 16, x + ex.width + 16, y + ex.height + 16],
+                fill=(232, 228, 218))
+    img.paste(ex, (x, y))
+
+    if caption:
+        d.text((120, min(H - 150, y + ex.height + 34)),
+               caption[:110], font=_font(MONO, 28), fill=ACCENT)
+    stamp_source(d, source)
+    img.save(out_png)
+    return out_png
+
+
 def draw_record_frame(page_png, caption, out_png, chapter_label="", quote=""):
     """The actual page of the actual document, with the line that matters beside it.
 
@@ -745,7 +803,8 @@ LEAD_IN = 2.0
 # the same three seconds meant the evidence flashed past while the subtitles sat
 # there.
 MIN_SHOT_BY_KIND = {
-    "record": 7.0,      # a page of a PDF, with a quote pulled out beside it
+    "record":  7.0,     # a page of a PDF, with a quote pulled out beside it
+    "excerpt": 7.0,     # a band of a real page, cropped to where the figure is
     "table":  7.0,      # rows to scan
     "figure": 6.0,      # number + label + source
     "photo":  5.0,
@@ -782,6 +841,7 @@ MAX_QUOTE_HOLD = 10.0
 # This is the same policy applied to TIME, which is the half that was missing.
 KIND_WEIGHT = {
     "record": 4.0,
+    "excerpt": 4.0,
     "figure": 4.0,
     "table":  3.0,
     "photo":  3.0,
@@ -1235,7 +1295,8 @@ def _best_monotone(times, scores):
     return max(best.values(), key=lambda rs: (rs[1], len(rs[0])))[0]
 
 
-def fit_unit(assets, text, want, images, marks, dur, pauses, plan_cuts):
+def fit_unit(assets, text, want, images, marks, dur, pauses, plan_cuts,
+             sources=()):
     """(assets in screen order, shot lengths) for one unit, with no long holds.
 
     `want` is a budget derived from duration alone, and duration alone cannot
@@ -1257,7 +1318,7 @@ def fit_unit(assets, text, want, images, marks, dur, pauses, plan_cuts):
     best = None
     for extra in range(0, MAX_EXTRA_SHOTS + 1):
         filled = with_filler(assets, text, want + extra, images=images,
-                             anchored=bool(marks))
+                             anchored=bool(marks), sources=sources)
         k = min(want + extra, len(filled)) or 1
         ordered, cuts = align_to_narration(filled[:k], marks, dur, pauses, plan_cuts)
         over = overrun(ordered, cuts)
@@ -1432,7 +1493,7 @@ def plan_assets(chapter, fallback_image=None):
     return figures + tables + photos + clips + records
 
 
-def with_filler(assets, text, want, images=(), anchored=False):
+def with_filler(assets, text, want, images=(), anchored=False, sources=()):
     """Fill a unit's shot budget: evidence, then narration, then at most one
     picture — and the picture only if the unit can spare a slot.
 
@@ -1454,7 +1515,7 @@ def with_filler(assets, text, want, images=(), anchored=False):
     if room <= 0:
         return out[:want]
     quotes = quote_fill(text, len(out), want, anchored=anchored)
-    encores = encore(assets, want)
+    encores = encore(assets, want, sources=sources)
     # An illustration only earns a slot in a unit with NO evidence to show
     # again. "Atmosphere is what you add once the argument is already on screen"
     # was always the rule; before encores existed there was nothing else to
@@ -1462,8 +1523,16 @@ def with_filler(assets, text, want, images=(), anchored=False):
     # 58-shot cut that was 64 seconds of generated scene competing with figures
     # for the same gaps — and when the daily image cap is spent, competing as a
     # blank background.
+    # An illustration earns a slot only in a unit with NO EVIDENCE AT ALL. This
+    # keyed on "no encores" for one revision, which quietly reintroduced the
+    # generated scene: once encore() needed a declared RECORD to build a
+    # document excerpt, every unit without one looked evidence-free and got a
+    # picture back. What matters is whether the unit has anything real to show,
+    # not whether the gap-filler happened to produce something.
+    has_evidence = any(a.get("kind") in ("figure", "table", "record", "photo",
+                                         "clip", "excerpt") for a in assets)
     picture = (list(images)[:MAX_IMAGES_PER_UNIT]
-               if want >= MIN_SHOTS_FOR_IMAGE and not encores else [])
+               if want >= MIN_SHOTS_FOR_IMAGE and not has_evidence else [])
     budget = want - len(picture)
 
     # INTERLEAVED, evidence first. Appending the encores after the quotes left
@@ -1490,26 +1559,68 @@ def with_filler(assets, text, want, images=(), anchored=False):
     return out[:want]
 
 
-def encore(assets, n):
-    """Evidence shown again, hardest first. Never the same thing twice running.
+def encore(assets, n, sources=()):
+    """What to show when a unit has room left. NEVER the same card twice.
 
-    A repeat is not padding. The narration comes back to a number — that is what
-    a chapter DOES — and when it does, the number belongs on screen again. The
-    alternative this replaced was another line of subtitles, which is the screen
-    admitting it has nothing to show.
+    The first version of this re-showed the evidence itself, and it produced
+    exactly what Anil objected to on 2026-09-14: *"30308 cr is repeated at least
+    half a dozen times."* Measured on that cut, 30,308 was on screen SIX times
+    across two variants for 44.8 seconds — more than a tenth of the video
+    showing one number, and most of those repeats came from here.
+
+    So a repeat is now a different KIND of look at the same fact: the page of the
+    document where that figure is printed. Anil, same message: *"Materials
+    related to the audio should be shown on the page, it needn't be like the
+    exact words. For eg, we can show the official table of the collections
+    pending on the screen when 30308 is told."*
+
+    The figure supplies the number to find; a RECORD declared in the same unit
+    supplies the document to find it in. Both are already in the script — the
+    pairing was simply never used.
     """
     if n <= 0:
         return []
-    pool = [a for a in assets if a.get("kind") in ("figure", "record", "table",
-                                                   "photo")]
-    if not pool:
+    figures = [a for a in assets if a.get("kind") == "figure"]
+    # Records declared ANYWHERE in the script, not only in this chapter. A
+    # chapter states a figure from an audit report that a different chapter
+    # happens to declare the URL for — the document is the same document, and
+    # restricting the pairing to one chapter left the gaps to be filled with
+    # subtitles instead. Anil: "what we are looking for is not like a subtitle."
+    pool = [a["record"] for a in assets
+            if a.get("kind") == "record" and (a["record"].get("url") or "").strip()]
+    pool += [r for r in sources
+             if (r.get("url") or "").strip() and r not in pool]
+    if not figures or not pool:
         return []
+    sources = pool
+
     out = []
     for i in range(n):
-        again = dict(pool[i % len(pool)])
-        again["encore"] = True
-        out.append(again)
+        fig = figures[i % len(figures)]
+        rec = sources[i % len(sources)]
+        needle = _figure_needle(fig["figure"])
+        if not needle:
+            continue
+        out.append({"kind": "excerpt", "figure": fig["figure"], "record": rec,
+                    "needle": needle, "encore": True})
     return out
+
+
+def _figure_needle(figure):
+    """The digits to look for in the document. "30,308.52 crore" -> "30,308".
+
+    The decimal is dropped on purpose: a report states a figure to two places in
+    its table and rounds it in the surrounding prose, and the crore/lakh suffix
+    is ours, not the page's.
+    """
+    import re as _re
+
+    raw = (figure.get("value") or "").strip()
+    m = _re.search(r"\d{1,3}(?:,\d{2,3})+", raw)
+    if m:
+        return m.group(0)
+    m = _re.search(r"\d[\d.]*", raw)
+    return m.group(0) if m else ""
 
 
 # What makes a clip usable, and which of those needs a human to say yes.
@@ -1676,6 +1787,39 @@ def _render_record(record, out_dir, stem):
         return None
 
 
+def _render_excerpt(asset, out_dir, stem):
+    """Fetch the document and crop to where this figure is printed.
+
+    Returns {path, caption} or None. Never raises, for the same reason
+    _render_record does not: an hour of voice synthesis is already spent, and a
+    source that is down costs one frame rather than the render.
+
+    A miss here demotes the shot rather than repeating a card — which is the
+    whole point of the change. See encore().
+    """
+    record = asset.get("record") or {}
+    url = (record.get("url") or "").strip()
+    needle = asset.get("needle") or ""
+    if not url or not needle:
+        return None
+    try:
+        from engine.digger import fetch as digfetch
+        from publishing import evidence_shot
+
+        out_dir = Path(out_dir)
+        pdf = digfetch.fetch_file(url, out_dir / f"{stem}.pdf")
+        got = evidence_shot.excerpt(pdf, needle, out_dir, stem=stem)
+        if not got:
+            return None
+        page = got.get("page")
+        return {"path": got["path"],
+                "caption": f"Page {page} — {record.get('description') or 'the record'}"[:110]}
+    except Exception as e:                                  # noqa: BLE001
+        log.warning("excerpt for %s could not be shown (%s: %s)",
+                    url[:70], type(e).__name__, e)
+        return None
+
+
 def _page_texts(pdf_path):
     """Per-page text, so find_pages() can put the RIGHT page on screen.
 
@@ -1746,6 +1890,11 @@ def render(parsed, out_mp4, work_dir=None, voice=None, illustrate=True,
     # 2. Plan what each unit puts on screen, against those real durations.
     #    Figures and records first, illustrations last — see plan_assets.
     plans = []          # per unit: [(asset, seconds)]
+    # Every record the script declares, so a chapter can show the document its
+    # figure came from even when a different chapter carried the URL.
+    all_records = [r for c in chapters for r in (c.get("records") or [])
+                   if (r.get("url") or "").strip()]
+
     for (key, chap, text), (_wav, dur, pauses, marks) in zip(units, voiced):
         if chap:
             unit, fallback = chap, None
@@ -1772,14 +1921,16 @@ def render(parsed, out_mp4, work_dir=None, voice=None, illustrate=True,
         declared_images = ((chap or {}).get("images")
                            or ([fallback] if fallback else []))
         ordered, cuts = fit_unit(assets, text, want, declared_images,
-                                 marks, dur, pauses, plan_cuts)
+                                 marks, dur, pauses, plan_cuts,
+                                 sources=all_records)
         plans.append(list(zip(ordered, cuts)))
 
     # 3. Fetch and render the documents. Before illustration, because a record
     #    that fails to fetch demotes its shot to an illustration and that has to
     #    be known before the batch is sent — one batched FLUX call is the whole
     #    reason illustration is cheap.
-    n_ev = sum(1 for pl in plans for a, _ in pl if a["kind"] in ("record", "clip"))
+    n_ev = sum(1 for pl in plans for a, _ in pl
+               if a["kind"] in ("record", "clip", "excerpt"))
     if n_ev:
         _p(0.20, f"Fetching {n_ev} record(s) and clip(s)…")
     for i, pl in enumerate(plans):
@@ -1787,6 +1938,10 @@ def render(parsed, out_mp4, work_dir=None, voice=None, illustrate=True,
             got = None
             if asset["kind"] == "record":
                 got = _render_record(asset["record"], tmp / "records", f"u{i}_{j}")
+                if got:
+                    asset["shot"] = got
+            elif asset["kind"] == "excerpt":
+                got = _render_excerpt(asset, tmp / "records", f"x{i}_{j}")
                 if got:
                     asset["shot"] = got
             elif asset["kind"] == "clip":
@@ -1881,6 +2036,11 @@ def render(parsed, out_mp4, work_dir=None, voice=None, illustrate=True,
                 draw_record_frame(shot["path"], shot["caption"], png,
                                   chapter_label=label,
                                   quote=asset["record"].get("quote", ""))
+            elif asset["kind"] == "excerpt":
+                shot = asset["shot"]
+                draw_excerpt_frame(shot["path"], png, chapter_label=label,
+                                   caption=shot.get("caption", ""),
+                                   source=(asset["figure"].get("source") or ""))
             else:
                 art = asset.get("art") or _ground(
                     tmp / f"ground_{i:03d}_{j}.png", variant=(i + j) % 3)
