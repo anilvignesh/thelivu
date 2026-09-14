@@ -638,6 +638,93 @@ def t_the_sourced_portrait_outranks_the_search_hit():
             real_portrait, real_office, real_search)
 
 
+def t_a_frame_fills_itself():
+    """Anil, watching the cut: "there is a huge gap where nothing is shown...
+    lots of blank part, just audio." A frame with text on it can still read as
+    empty, and ours did.
+
+    Every fitter here started at a fixed size and only ever stepped DOWN until
+    the text fit, so a long sentence was handled and a short one kept the
+    starting size and left the rest of the frame dark. Measured against
+    ColdFusion by vertical content coverage: theirs 94%, ours 74%.
+    """
+    from PIL import Image, ImageDraw
+
+    img = Image.new("RGB", (lfr.W, lfr.H))
+    d = ImageDraw.Draw(img)
+    box_w, box_h = lfr.W - 300, 660
+
+    short = "The money never came in."
+    long = ("It is not, on his reading, a direct liability sitting on Kerala's "
+            "balance sheet today, and the department has not said otherwise in "
+            "any of the four replies we were able to obtain from it.")
+    s_size, s_lines = lfr.fit_block(d, short, box_w, box_h, lfr.SERIF_BOLD)
+    l_size, l_lines = lfr.fit_block(d, long, box_w, box_h, lfr.SERIF_BOLD)
+
+    check("a short line is set larger than a long one", s_size > l_size, True)
+    check("and it grows past the old fixed starting size", s_size > 84, True)
+    for label, size, lines in (("short", s_size, s_lines), ("long", l_size, l_lines)):
+        used = len(lines) * int(size * 1.34)
+        check(f"the {label} one still fits its box", used <= box_h, True)
+        # The point of the change: fill it, do not merely fit inside it.
+        check(f"and uses most of the {label} box", used > box_h * 0.55, True)
+
+
+def t_a_short_list_is_spread_not_clustered():
+    """The second half of the same bug, and the one the first fix missed.
+
+    Table rows are monospaced and already near the margin at 52pt, so their size
+    is bound by WIDTH, not height — growing the type cannot fill the frame. A
+    three-row list has to be spread down it instead, or it clusters under the
+    title and leaves the bottom third dark.
+    """
+    import tempfile
+    from pathlib import Path
+
+    table = {"title": "Three findings, one direction",
+             "source": "CAG reports tabled 23 June 2026",
+             "rows": [{"text": "Not collected — ₹30,308.52 crore"},
+                      {"text": "Raised outside the budget — ₹39,230.33 crore"},
+                      {"text": "Locked in unfinished projects — ₹2,043.10 crore",
+                       "highlight": True}]}
+    with tempfile.TemporaryDirectory() as tmp:
+        out = lfr.draw_table_frame(table, Path(tmp) / "t.png", chapter_label="X")
+        from PIL import Image
+        im = Image.open(out).convert("L").resize((320, 180))
+        px = im.load()
+        bands = []
+        for b in range(9):
+            v = [px[x, y] for y in range(b * 20, (b + 1) * 20) for x in range(0, 320, 3)]
+            bands.append(max(v) - min(v) > 40)
+        covered = sum(bands) / len(bands)
+        check("the frame is not empty in its lower half", covered > 0.8, True)
+        # The band the old version left dark: rows stopped around 55% down.
+        check("there is content below the midline", any(bands[5:]), True)
+
+
+def t_every_evidence_frame_carries_its_source():
+    """ColdFusion burns provenance into the corner of every archival shot —
+    `cnet`, `CBS News Archives`. On an accountability channel that matters more,
+    not less: a viewer who screenshots one number should still have where it
+    came from."""
+    import tempfile
+    from pathlib import Path
+    from PIL import Image, ImageDraw
+
+    img = Image.new("RGB", (lfr.W, lfr.H))
+    d = ImageDraw.Draw(img)
+    before = img.tobytes()
+    lfr.stamp_source(d, "CAG Report No. 2 of 2026, State Finances")
+    check("the stamp actually draws", img.tobytes() != before, True)
+
+    blank = Image.new("RGB", (lfr.W, lfr.H))
+    bd = ImageDraw.Draw(blank)
+    unchanged = blank.tobytes()
+    lfr.stamp_source(bd, "")
+    check("an absent source draws nothing rather than an empty rule",
+          blank.tobytes(), unchanged)
+
+
 def t_with_no_marks_it_falls_back_to_the_old_split():
     """Every unit rendered before this had no chunk timing. The fallback is the
     previous behaviour, which was imprecise and never wrong."""
@@ -1983,6 +2070,9 @@ def main():
               t_an_office_resolves_to_whoever_held_it_during_the_audited_period,
               t_a_possible_change_of_government_is_flagged_not_hidden,
               t_the_sourced_portrait_outranks_the_search_hit,
+              t_a_frame_fills_itself,
+              t_a_short_list_is_spread_not_clustered,
+              t_every_evidence_frame_carries_its_source,
               t_with_no_marks_it_falls_back_to_the_old_split,
               t_a_short_unit_keeps_one_picture,
               t_a_long_unit_uses_the_pictures_it_was_given,

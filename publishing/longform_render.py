@@ -145,6 +145,53 @@ def _ground(out_png, variant=0):
     return out_png
 
 
+def fit_block(d, text, box_w, box_h, font_name, max_size=170, min_size=30,
+              leading=1.34):
+    """Largest size at which `text` wraps into box_w x box_h. (size, lines).
+
+    GROWS as well as shrinks, which is the whole point. Every frame here used to
+    start at a fixed size and only ever step DOWN until the text fit — so a long
+    sentence was handled correctly and a short one kept the starting size and
+    left the rest of the frame empty.
+
+    Measured against ColdFusion on 2026-09-14, sampling vertical content
+    coverage: theirs 94%, ours 74%. Our quote and table frames put everything in
+    the top half and left the bottom 40% dark. Anil, watching the cut: "there is
+    a huge gap where nothing is shown... lots of blank part, just audio." A
+    frame with text on it can still read as empty, and ours did.
+    """
+    best = (min_size, _wrap(d, text, _font(font_name, min_size), box_w))
+    lo, hi = min_size, max_size
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        f = _font(font_name, mid)
+        lines = _wrap(d, text, f, box_w)
+        if len(lines) * int(mid * leading) <= box_h:
+            best = (mid, lines)
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return best
+
+
+def stamp_source(d, source, extra=""):
+    """The source, bottom-left, on every evidence frame. Always.
+
+    ColdFusion burns the provenance into the corner of every archival shot —
+    `cnet`, `CBS News Archives`, `CNN Business` — rather than leaving it to the
+    description. On an accountability channel that matters more, not less: the
+    claim and the thing it rests on should be legible in the same frame, so a
+    viewer who screenshots one number still has where it came from.
+    """
+    if not source:
+        return
+    line = source.upper()[:96]
+    d.text((120, H - 118), line, font=_font(MONO, 28), fill=MUTED)
+    if extra:
+        d.text((120, H - 78), extra.upper()[:96], font=_font(MONO, 24),
+               fill=(96, 86, 68))
+
+
 def draw_data_card(figure, out_png, chapter_label=""):
     """The number, as type, at the size it deserves.
 
@@ -187,12 +234,9 @@ def draw_data_card(figure, out_png, chapter_label=""):
             d.text((120, y), line, font=lf, fill=ACCENT)
             y += 66
 
-    source = (figure.get("source") or "").strip()
-    if source:
-        # The source line is what separates a figure from a poster. Small, always
-        # present, never the same colour as the number.
-        d.text((120, H - 120), source.upper()[:90],
-               font=_font(MONO, 28), fill=MUTED)
+    # The source line is what separates a figure from a poster. Small, always
+    # present, never the same colour as the number.
+    stamp_source(d, (figure.get("source") or "").strip())
     img.save(out_png)
     return out_png
 
@@ -233,24 +277,19 @@ def draw_quote_frame(text, out_png, chapter_label="", attribution=""):
         return out_png
 
     # Fit rather than truncate: a sentence cut mid-clause on screen while the
-    # voice says the rest of it is the worst of both.
-    size, lines = 84, []
-    while size > 34:
-        f = _font(SERIF_BOLD, size)
-        lines = _wrap(d, text, f, W - 300)
-        if len(lines) * int(size * 1.34) <= H - 460:
-            break
-        size -= 4
+    # voice says the rest of it is the worst of both. fit_block grows as well as
+    # shrinks — the previous version started at 84 and only stepped down, so a
+    # short sentence sat in the top third of a dark frame.
+    TOP, BOTTOM = 250, 170
+    size, lines = fit_block(d, text, W - 300, H - TOP - BOTTOM, SERIF_BOLD)
     f = _font(SERIF_BOLD, size)
     lead = int(size * 1.34)
-    y = max(250, (H - len(lines) * lead) // 2 - 30)
+    y = max(TOP, (H - BOTTOM - len(lines) * lead) // 2)
     d.line([(120, y - 46), (300, y - 46)], fill=ACCENT, width=6)
     for line in lines:
         d.text((120, y), line, font=f, fill=PAPER)
         y += lead
-    if attribution:
-        d.text((120, H - 110), attribution.upper()[:100],
-               font=_font(MONO, 28), fill=MUTED)
+    stamp_source(d, attribution)
     img.save(out_png)
     return out_png
 
@@ -280,21 +319,40 @@ def draw_table_frame(table, out_png, chapter_label=""):
     title = (table.get("title") or "").strip()
     y = 250
     if title:
-        tf = _font(SERIF_BOLD, 60)
-        for line in _wrap(d, title, tf, W - 240)[:2]:
+        tsize, tlines = fit_block(d, title, W - 240, 180, SERIF_BOLD,
+                                  max_size=78, min_size=44)
+        tf = _font(SERIF_BOLD, tsize)
+        for line in tlines[:2]:
             d.text((120, y), line, font=tf, fill=PAPER)
-            y += 72
-        y += 20
+            y += int(tsize * 1.2)
+        y += 30
 
     rows = table.get("rows") or []
     # Fit the rows into what is left rather than assuming a count: five states
     # and twelve want different leading, and a fixed one either overflows the
     # frame or strands the list in its top third.
-    avail = H - y - 150
-    size = 52
-    while size > 26 and len(rows) * int(size * 1.55) > avail:
-        size -= 2
+    #
+    # This grows too. Capped at 52 only when the longest row would otherwise run
+    # past the margin — a three-row list should fill the frame, not sit in it.
+    avail = H - y - 170
+    size = 26
+    while size < 86:
+        nxt = size + 2
+        if len(rows) * int(nxt * 1.55) > avail:
+            break
+        if max((d.textlength(r.get("text", "")[:60], font=_font(MONO, nxt))
+                for r in rows), default=0) > W - 300:
+            break
+        size = nxt
+
+    # Type size here is bound by WIDTH, not height: these rows are monospaced
+    # and already near the margin at 52pt, so growing them cannot fill the
+    # frame. A short list therefore has to be SPREAD rather than enlarged —
+    # otherwise three rows cluster under the title and leave the bottom third
+    # dark, which is exactly what the first version of this fix missed.
     lead = int(size * 1.55)
+    if rows:
+        lead = max(lead, min(avail // len(rows), int(size * 3.2)))
     rf, rfb = _font(MONO, size), _font(MONO_BOLD, size)
 
     for row in rows:
@@ -312,10 +370,7 @@ def draw_table_frame(table, out_png, chapter_label=""):
             d.text((140, y), row["text"][:60], font=rf, fill=PAPER)
         y += lead
 
-    source = (table.get("source") or "").strip()
-    if source:
-        d.text((120, H - 110), source.upper()[:100],
-               font=_font(MONO, 26), fill=MUTED)
+    stamp_source(d, (table.get("source") or "").strip())
     img.save(out_png)
     return out_png
 
