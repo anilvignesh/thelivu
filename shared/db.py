@@ -381,6 +381,40 @@ CREATE TABLE IF NOT EXISTS archived_docs (
 );
 CREATE INDEX IF NOT EXISTS idx_archived_docs_pending ON archived_docs (pulled_at, created_at);
 
+-- The full text of every document we have read, kept so it can be READ AGAIN.
+--
+-- Anil, 2026-09-14, on why our findings look like a normal agency's: "the what
+-- we find is on par with a normal news agency." The measurement that explained
+-- it: Kerala's 2024 audit report is 258 pages and 561,598 characters, and the
+-- digger read 40,000 of them — 7.1%%. What it kept afterwards was a 125-char
+-- excerpt.
+--
+-- So every finding came from the executive summary of a report whose findings
+-- the auditor had already announced, and nothing could ever be compared with
+-- anything else, because nothing was retained. A better model reading the first
+-- 7%% of one document still produces a one-document finding.
+--
+-- THE TEXT LIVES HERE AND THE BYTES LIVE ON THE LAPTOP. Text is small (a
+-- 258-page report is ~0.5MB) and has to be queryable from anywhere; the PDF is
+-- 2MB and only has to be producible on demand. archived_docs is the index of
+-- the bytes; this is the index of the words.
+--
+-- Deliberately NOT filled by the digger. That box is 945MB and stalls parsing a
+-- 258-page PDF (measured 2026-09-14) — full reads happen on the laptop or the
+-- worker, which is also where an attended pass would run.
+CREATE TABLE IF NOT EXISTS documents (
+    sha256      TEXT PRIMARY KEY,
+    url         TEXT NOT NULL,
+    title       TEXT,
+    source_key  TEXT,          -- which target/office it came from
+    published   TEXT,          -- the year or date on the document, when known
+    pages       INTEGER,
+    chars       INTEGER,
+    text        TEXT NOT NULL,
+    read_at     TIMESTAMP DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_documents_source ON documents (source_key, published);
+
 CREATE TABLE IF NOT EXISTS digger_runs (
     id               SERIAL PRIMARY KEY,
     target_key       TEXT,
@@ -819,6 +853,40 @@ CREATE TABLE IF NOT EXISTS archived_docs (
     created_at   TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_archived_docs_pending ON archived_docs (pulled_at, created_at);
+
+-- The full text of every document we have read, kept so it can be READ AGAIN.
+--
+-- Anil, 2026-09-14, on why our findings look like a normal agency's: "the what
+-- we find is on par with a normal news agency." The measurement that explained
+-- it: Kerala's 2024 audit report is 258 pages and 561,598 characters, and the
+-- digger read 40,000 of them — 7.1%%. What it kept afterwards was a 125-char
+-- excerpt.
+--
+-- So every finding came from the executive summary of a report whose findings
+-- the auditor had already announced, and nothing could ever be compared with
+-- anything else, because nothing was retained. A better model reading the first
+-- 7%% of one document still produces a one-document finding.
+--
+-- THE TEXT LIVES HERE AND THE BYTES LIVE ON THE LAPTOP. Text is small (a
+-- 258-page report is ~0.5MB) and has to be queryable from anywhere; the PDF is
+-- 2MB and only has to be producible on demand. archived_docs is the index of
+-- the bytes; this is the index of the words.
+--
+-- Deliberately NOT filled by the digger. That box is 945MB and stalls parsing a
+-- 258-page PDF (measured 2026-09-14) — full reads happen on the laptop or the
+-- worker, which is also where an attended pass would run.
+CREATE TABLE IF NOT EXISTS documents (
+    sha256      TEXT PRIMARY KEY,
+    url         TEXT NOT NULL,
+    title       TEXT,
+    source_key  TEXT,          -- which target/office it came from
+    published   TEXT,          -- the year or date on the document, when known
+    pages       INTEGER,
+    chars       INTEGER,
+    text        TEXT NOT NULL,
+    read_at     TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_documents_source ON documents (source_key, published);
 
 CREATE TABLE IF NOT EXISTS digger_runs (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3521,6 +3589,84 @@ def digger_seen_titles(target_key, limit=400):
                  WHERE target_key = {ph}
               ORDER BY created_at DESC LIMIT {int(limit)}""", (target_key,))
         return {r[0] for r in cur.fetchall() if r and r[0]}
+    finally:
+        conn.close()
+
+
+def store_document(sha256, url, text, title=None, source_key=None,
+                   published=None, pages=None):
+    """Keep a document's full text. Idempotent on the hash.
+
+    Re-reading a document must be free, because the corpus is built by a backfill
+    that will be interrupted and resumed — and because the same report is often
+    linked from two places.
+    """
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cols = "sha256, url, title, source_key, published, pages, chars, text"
+        vals = ", ".join([ph] * 8)
+        row = (sha256, url, title, source_key, published, pages, len(text or ""), text)
+        if _is_postgres():
+            cur.execute(f"INSERT INTO documents ({cols}) VALUES ({vals}) "
+                        "ON CONFLICT (sha256) DO NOTHING", row)
+        else:
+            cur.execute(f"INSERT OR IGNORE INTO documents ({cols}) VALUES ({vals})", row)
+        conn.commit()
+        return sha256
+    finally:
+        conn.close()
+
+
+def have_document(sha256):
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(f"SELECT 1 FROM documents WHERE sha256 = {ph}", (sha256,))
+        return cur.fetchone() is not None
+    finally:
+        conn.close()
+
+
+def corpus_stats():
+    """(documents, total characters, distinct sources)."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT count(*), coalesce(sum(chars),0), "
+                    "count(DISTINCT source_key) FROM documents")
+        n, c, s = cur.fetchone()
+        return int(n or 0), int(c or 0), int(s or 0)
+    finally:
+        conn.close()
+
+
+def search_corpus(phrase, limit=20, source_key=None):
+    """Documents containing `phrase`. [(sha256, title, source_key, published)].
+
+    LIKE, not a full-text index. The corpus is a few hundred documents; a
+    sequential scan answers in well under a second and needs no extension, no
+    tsvector column and no reindex step. When it stops being fast enough, that
+    is the moment to add one — not before.
+    """
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        sql = (f"SELECT sha256, title, source_key, published FROM documents "
+               f"WHERE text ILIKE {ph}" if _is_postgres() else
+               f"SELECT sha256, title, source_key, published FROM documents "
+               f"WHERE lower(text) LIKE lower({ph})")
+        args = [f"%{phrase}%"]
+        if source_key:
+            sql += f" AND source_key = {ph}"
+            args.append(source_key)
+        sql += f" ORDER BY published DESC NULLS LAST LIMIT {int(limit)}" if _is_postgres() \
+               else f" ORDER BY published DESC LIMIT {int(limit)}"
+        cur.execute(sql, tuple(args))
+        return [tuple(r) for r in cur.fetchall()]
     finally:
         conn.close()
 
