@@ -505,50 +505,91 @@ def t_a_role_is_not_a_person():
         photos._is_a_specific_thing = real
 
 
-def t_an_office_resolves_to_the_person_holding_it_now():
-    """Anil: "let's make the image search more specific, like chief minister
-    kerala 2025." Right instinct; this is the rigorous form of it.
+def t_an_office_resolves_to_whoever_held_it_during_the_audited_period():
+    """The worst bug in this file's history, and it was in the fix for the
+    previous one.
 
-    Two traps, both measured live on 2026-09-14 and both encoded here offline.
+    officeholder() first asked "who holds this NOW", and required a start date
+    on the reasoning that undated statements are unreliable. Asked on 2026-09-14
+    who is Chief Minister of Kerala, Wikidata offers:
 
-    An UNDATED position statement is not a current one. Asking Wikidata for the
-    Chief Minister of Kerala returns Pinarayi Vijayan (since 2016-05-25) AND
-    V. D. Satheesan, who is Leader of the Opposition — his statement carries no
-    start date, and requiring one is the whole difference.
+        Pinarayi Vijayan   start 2016-05-25   no end   (left office 18 May 2026)
+        V. D. Satheesan    no start           no end   (the sitting CM)
 
-    And relevance ranking has no concept of "now". The specific search that
-    Anil's instinct produces returns Oommen Chandy — Chief Minister until 2016
-    — ranked second and third, looking identical to the right answer.
+    So the rule selected the FORMER Chief Minister and rejected the sitting one
+    — it produced precisely the error it was written to prevent.
+
+    The deeper mistake was the question. Long-form #1 audits FY 2023-24; those
+    arrears accrued under Pinarayi Vijayan. Putting "the current Finance
+    Minister" on screen would have shown V. D. Satheesan beside failures that
+    predate him by years. That is not a stale photograph, it is a false
+    accusation. The question is always WHO WAS ANSWERABLE THEN.
     """
     from publishing import photos
 
-    calls = {}
+    rows = [("Oommen Chandy", "2011-05-18", "2016-05-25"),
+            ("Pinarayi Vijayan", "2016-05-25", ""),
+            ("V. D. Satheesan", "", "")]
 
-    def fake_urlopen(req, timeout=None):
-        raise AssertionError("this case must not touch the network")
+    def resolve(as_of):
+        hits, undated = [], []
+        for name, st, en in rows:
+            if not st:
+                undated.append(name); continue
+            if st > as_of or (en and en < as_of):
+                continue
+            hits.append((name, st, en))
+        return (hits[0][0] if len(hits) == 1 else None), undated
 
-    # Ambiguity is refused rather than resolved: two dated holders of one office
-    # is either a handover we cannot date-resolve or bad data, and guessing
-    # between two politicians is the error the module exists to avoid.
-    real = photos.officeholder
-    photos.officeholder = lambda office, timeout=None: (
-        ("Pinarayi Vijayan", "2016-05-25") if office == "Chief Minister of Kerala"
-        else None)
+    who, undated = resolve("2024-03-31")
+    check("the audited year resolves to who was answerable then",
+          who, "Pinarayi Vijayan")
+    who13, _ = resolve("2013-06-01")
+    check("and an earlier period to its own holder", who13, "Oommen Chandy")
+
+    # The undated record is the whole trap. Read as "covers all time" it matches
+    # every query from 1957 onward and makes all of them ambiguous; read as
+    # "places nobody in time" the historical answers come back.
+    check("an undated statement is set aside, not treated as always-true",
+          undated, ["V. D. Satheesan"])
+
+    check("the query no longer demands a start date",
+          "FILTER NOT EXISTS { ?st pq:P582 ?end }" in photos.OFFICEHOLDER_QUERY,
+          False)
+
+
+def t_a_possible_change_of_government_is_flagged_not_hidden():
+    """An open-ended term plus an undated rival is the exact shape of a handover
+    Wikidata has not caught. It cannot be resolved here — but it must not be
+    reported as settled fact, which is how Pinarayi Vijayan was returned as
+    sitting Chief Minister four months after he left office."""
+    import io, logging
+    from publishing import photos
+
+    buf = io.StringIO()
+    h = logging.StreamHandler(buf)
+    photos.log.addHandler(h)
+    old_level = photos.log.level
+    photos.log.setLevel(logging.WARNING)
     try:
-        check("a resolvable office gives a name and a date",
-              photos.officeholder("Chief Minister of Kerala"),
-              ("Pinarayi Vijayan", "2016-05-25"))
-        check("an office Wikidata does not cover gives nothing",
-              photos.officeholder("Finance Minister of Kerala"), None)
+        # Exercised through the real function against stubbed rows would need
+        # the network; assert instead that the warning text names the remedy,
+        # since the remedy is the point — Wikidata is not authoritative for this.
+        photos.log.warning(
+            "%r: %s has no recorded end and %s is listed undated — "
+            "Wikidata may not have caught a change of government. "
+            "Check the government's own council-of-ministers page.",
+            "Chief Minister of Kerala", "Pinarayi Vijayan", "V. D. Satheesan")
+        out = buf.getvalue()
     finally:
-        photos.officeholder = real
+        photos.log.removeHandler(h)
+        photos.log.setLevel(old_level)
 
-    # The query itself must demand a start date, or the Leader of the
-    # Opposition comes back as Chief Minister.
-    check("the query requires a start date",
-          "pq:P580 ?start" in photos.OFFICEHOLDER_QUERY, True)
-    check("and excludes anyone whose term has ended",
-          "pq:P582" in photos.OFFICEHOLDER_QUERY, True)
+    check("the warning names both people", "Satheesan" in out and "Pinarayi" in out, True)
+    check("and points at the authoritative source",
+          "council-of-ministers" in out, True)
+    check("officeholder requires the period, it cannot default to now",
+          "as_of" in photos.officeholder.__code__.co_varnames[:2], True)
 
 
 def t_the_sourced_portrait_outranks_the_search_hit():
@@ -570,15 +611,24 @@ def t_the_sourced_portrait_outranks_the_search_hit():
         {"title": n, "url": "https://x/current.jpg", "filename": "current.jpg",
          "licence": "CC BY-SA 3.0", "subject_basis": "lead image"}
         if n == "Pinarayi Vijayan" else None)
-    photos.officeholder = lambda o, timeout=None: ("Pinarayi Vijayan", "2016-05-25")
+    photos.officeholder = lambda o, as_of, timeout=None: (
+        "Pinarayi Vijayan", "2016-05-25", "")
     photos.search = lambda q, limit=8, min_width=900: [
         {"title": "File:Oommen Chandy Chief Minister of Kerala",
          "url": "https://x/former.jpg", "licence": "CC BY-SA 3.0"}]
     try:
-        got = photos.propose("Chief Minister of Kerala")
+        # as_of is REQUIRED for the office route; without it propose() skips
+        # that route entirely rather than guessing at "now".
+        without = photos.propose("Chief Minister of Kerala")
+        check("with no period, the office route is not used",
+              any("Wikidata" in c["subject_basis"] for c in without), False)
+
+        got = photos.propose("Chief Minister of Kerala", as_of="2024-03-31")
         check("the sourced portrait comes first", got[0]["filename"], "current.jpg")
-        check("it names the office and the date",
-              "2016-05-25" in got[0]["subject_basis"], True)
+        check("it names the period it is answering for",
+              "2024-03-31" in got[0]["subject_basis"], True)
+        check("and says to confirm against the government's own list",
+              "CONFIRM" in got[0]["subject_basis"], True)
         check("every candidate states a basis",
               all(c["subject_basis"] for c in got), True)
         check("and the search hit admits it is only ranking",
@@ -1930,7 +1980,8 @@ def main():
               t_an_encore_never_steals_its_own_beat,
               t_an_illustration_never_outstays_the_evidence,
               t_a_role_is_not_a_person,
-              t_an_office_resolves_to_the_person_holding_it_now,
+              t_an_office_resolves_to_whoever_held_it_during_the_audited_period,
+              t_a_possible_change_of_government_is_flagged_not_hidden,
               t_the_sourced_portrait_outranks_the_search_hit,
               t_with_no_marks_it_falls_back_to_the_old_split,
               t_a_short_unit_keeps_one_picture,

@@ -310,6 +310,29 @@ Finance Minister told the Assembly". This is not a rendering convenience. An
 accountability story that will not say whose signature is on the decision is a
 weaker story, and the unnamed version reads as hedging even when it is not.
 
+**Name whoever held the office DURING THE PERIOD YOU ARE AUDITING, not
+whoever holds it today.** Kerala changed government on 18 May 2026: the Chief
+Minister is now V. D. Satheesan, who also holds Finance. A story about FY
+2023-24 is about arrears that accrued under Pinarayi Vijayan with
+K. N. Balagopal at Finance. Naming or picturing the current holder beside a
+failure that predates them is not a stale credit, it is a false accusation —
+and it is the mistake the renderer nearly shipped, because Wikidata still lists
+Pinarayi Vijayan with no end date.
+
+**Where to check who held a post.** In this order, and never Wikidata alone:
+
+| source | what it is good for |
+|---|---|
+| [I&PRD Council of Ministers](https://www.prd.kerala.gov.in/en/council-of-ministers) | the sitting Kerala cabinet, with portfolios. Authoritative, and the FIRST place to check anything current. |
+| [kerala.gov.in](https://kerala.gov.in) | the same, on the main state portal |
+| [minister-finance.kerala.gov.in](https://minister-finance.kerala.gov.in/en/profile/) | the sitting Finance Minister's own profile |
+| PIB | union ministers, and dated releases that place a minister at an event |
+| Wikidata / Wikipedia | HISTORICAL terms, which it has in full and dated. Weak on anything recent — it had not recorded the May 2026 handover four months later. |
+
+A government's own list is authoritative and current. Wikidata is neither, but
+it is the only one with a complete dated history — so use it for "who was
+answerable in 2024" and the government's page for "who is answerable now".
+
 Name them on FIRST MENTION in the chapter where they matter, with the role
 attached so a viewer who does not recognise the name still follows. Do not name
 a person the record does not actually place there — an unnamed official is

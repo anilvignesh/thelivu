@@ -36,3 +36,6 @@ articles/drafts/
 # the VM by ops/oracle-vm/deploy-secrets.sh, never committed. See plan 06.
 ops/oracle-vm/reel-worker.env
 .youtube_client.json
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/

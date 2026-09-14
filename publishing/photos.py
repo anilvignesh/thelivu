@@ -287,67 +287,107 @@ WIKIDATA_SPARQL = "https://query.wikidata.org/sparql"
 
 # How long a role stays resolvable without anyone checking. A ministry changes
 # hands; a cached answer from last year is a wrong face, not a stale one.
+# Who held an office ON A GIVEN DATE. Not "now" — see officeholder().
 OFFICEHOLDER_QUERY = """
-SELECT ?person ?personLabel ?start WHERE {
+SELECT ?person ?personLabel ?start ?end WHERE {
   ?office rdfs:label %s@en .
   ?person p:P39 ?st .
   ?st ps:P39 ?office .
-  ?st pq:P580 ?start .
-  FILTER NOT EXISTS { ?st pq:P582 ?end }
+  OPTIONAL { ?st pq:P580 ?start }
+  OPTIONAL { ?st pq:P582 ?end }
   SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
 }
-ORDER BY DESC(?start) LIMIT 5
 """
 
+def officeholder(office, as_of, timeout=TIMEOUT):
+    """Who held `office` ON THE DATE `as_of` (YYYY-MM-DD). (name, start, end) or None.
 
-def officeholder(office, timeout=TIMEOUT):
-    """Who currently holds a named office, per Wikidata. (name, since) or None.
+    `as_of` IS REQUIRED, AND THAT IS THE WHOLE POINT. The first version of this
+    asked "who holds it now", which is the wrong question for accountability
+    journalism and dangerous in a specific way.
 
-    Anil, 2026-09-14: *"let's make the image search more specific, like chief
-    minister kerala 2025."* Right instinct, and this is the rigorous form of it
-    — a structured claim about who holds a post, with a start date, rather than
-    a search engine's opinion about which photo is relevant.
+    Long-form #1 audits Kerala's FY 2023-24. Those arrears accrued under Chief
+    Minister Pinarayi Vijayan with K. N. Balagopal at Finance. Kerala changed
+    government on 18 May 2026; the Chief Minister is now V. D. Satheesan, who
+    also holds Finance. "The current Finance Minister" would therefore have put
+    Satheesan's face beside 30,308 crore of failures that predate him by years.
+    That is not a stale photograph. It is a false accusation.
 
-    A START DATE IS REQUIRED, and that is not pedantry. Asking Wikidata for the
-    Chief Minister of Kerala returns Pinarayi Vijayan (since 2016-05-25) AND
-    V. D. Satheesan, who is Leader of the Opposition — his statement carries no
-    start date, and dropping undated statements is what separates them.
+    So the caller must say WHICH PERIOD the story covers, and this returns who
+    was answerable then.
 
-    Ambiguity is refused rather than resolved. Two dated holders of one office
-    means either a genuine handover we cannot date-resolve or bad data, and
-    guessing between two politicians is exactly the error this whole module
-    exists to avoid.
+    WIKIDATA GOES STALE AND NO RULE HERE FIXES THAT. Asked on 2026-09-14 who
+    holds the Chief Ministership of Kerala, it offers:
 
-    COVERAGE IS THE REAL LIMIT, not the method. Measured 2026-09-14: the Chief
-    Minister of Kerala resolves; the state Finance Minister does not, because
-    Wikidata records no current position for K. N. Balagopal at all. A role that
-    does not resolve returns None and the caller falls back to asking a person.
+        Pinarayi Vijayan   start 2016-05-25   no end date   (left office in May)
+        V. D. Satheesan    no start date      no end date   (the actual CM)
+
+    An earlier version required a start date, on the reasoning that an undated
+    statement is unreliable. That rule selected the FORMER Chief Minister and
+    rejected the sitting one — it produced exactly the error it was written to
+    prevent. Undated statements are now kept and reported as unverified rather
+    than silently dropped, and a result whose term does not cover `as_of` is
+    refused outright.
+
+    For WHO HOLDS AN OFFICE TODAY, do not use this. Use the government's own
+    council-of-ministers page; it is authoritative and Wikidata is not.
     """
-    literal = json.dumps(office)          # quotes and escapes it for SPARQL
+    literal = json.dumps(office)
     try:
         url = WIKIDATA_SPARQL + "?" + urllib.parse.urlencode(
             {"query": OFFICEHOLDER_QUERY % literal, "format": "json"})
         req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            rows = json.loads(resp.read().decode("utf-8", "replace"))
+            body = json.loads(resp.read().decode("utf-8", "replace"))
     except Exception as e:                                  # noqa: BLE001
         log.info("officeholder lookup failed for %r: %s", office, e)
         return None
 
-    hits = (rows.get("results") or {}).get("bindings") or []
+    hits, undated = [], []
+    for row in (body.get("results") or {}).get("bindings") or []:
+        name = row["personLabel"]["value"]
+        start = (row.get("start") or {}).get("value", "")[:10]
+        end = (row.get("end") or {}).get("value", "")[:10]
+        # A STATEMENT WITH NO START DATE PLACES NOBODY IN TIME. Treating it as
+        # "covers all time" is not conservative, it is useless: V. D. Satheesan's
+        # undated Kerala record then matched every query from 1957 onward and
+        # made every single one ambiguous. Undated statements are set aside and
+        # reported, not counted.
+        if not start:
+            undated.append(name)
+            continue
+        if start > as_of:
+            continue
+        if end and end < as_of:
+            continue
+        hits.append((name, start, end))
+
     if not hits:
-        log.info("wikidata records no current holder of %r", office)
+        log.info("wikidata names nobody holding %r on %s%s", office, as_of,
+                 (" (undated records exist for %s)" % ", ".join(undated[:3]))
+                 if undated else "")
         return None
     if len(hits) > 1:
-        names = ", ".join(h["personLabel"]["value"] for h in hits[:3])
-        log.info("%r has %d current holders (%s) — refusing to choose",
-                 office, len(hits), names)
+        # Ambiguity is refused, never resolved — guessing between two
+        # politicians is the error this module exists to avoid.
+        log.info("%r on %s is ambiguous (%s) — refusing to choose",
+                 office, as_of, ", ".join(h[0] for h in hits[:3]))
         return None
-    return (hits[0]["personLabel"]["value"],
-            (hits[0].get("start") or {}).get("value", "")[:10])
+
+    name, start, end = hits[0]
+    if not end and undated:
+        # An open-ended term plus an undated rival is the exact shape of a
+        # change of government Wikidata has not caught up with. It is how
+        # Pinarayi Vijayan was returned as Kerala's sitting Chief Minister four
+        # months after V. D. Satheesan replaced him.
+        log.warning("%r: %s has no recorded end and %s is listed undated — "
+                    "Wikidata may not have caught a change of government. "
+                    "Check the government's own council-of-ministers page.",
+                    office, name, ", ".join(undated[:2]))
+    return name, start, end
 
 
-def propose(subject, timeout=TIMEOUT):
+def propose(subject, as_of=None, timeout=TIMEOUT):
     """Photo candidates for a subject, each carrying HOW we think it is right.
 
     Three routes, strongest first, because they fail in different ways and the
@@ -355,8 +395,10 @@ def propose(subject, timeout=TIMEOUT):
 
       named person   portrait() on a name. The lead image of that person's
                      article — editors chose it AS a depiction. Strongest.
-      named office   officeholder() resolves the post to a name, then the
-                     above. As strong, where Wikidata has the coverage.
+      named office   officeholder() resolves the post AS OF the date the story
+                     covers, then the above. Requires `as_of`; without it this
+                     route is skipped entirely, because "the current minister"
+                     is the wrong question for a story about a past period.
       text search    Commons relevance. WEAKEST, and the one that returned a
                      correctly-licensed photograph of the Auditor General of
                      PAKISTAN for a search about India's CAG.
@@ -372,15 +414,18 @@ def propose(subject, timeout=TIMEOUT):
     if direct:
         out.append(direct)
 
-    holder = officeholder(subject, timeout=timeout)
-    if holder:
-        name, since = holder
-        got = portrait(name, timeout=timeout)
-        if got:
-            when = since or "an unrecorded date"
-            got["subject_basis"] = (
-                f"Wikidata: {name} has held '{subject}' since {when}")
-            out.append(got)
+    if as_of:
+        holder = officeholder(subject, as_of, timeout=timeout)
+        if holder:
+            name, start, end = holder
+            got = portrait(name, timeout=timeout)
+            if got:
+                term = f"{start or 'an unrecorded date'} to {end or 'no recorded end'}"
+                got["subject_basis"] = (
+                    f"Wikidata: {name} held '{subject}' on {as_of} (term: {term}). "
+                    f"CONFIRM against the government's own list — Wikidata lags "
+                    f"a change of government.")
+                out.append(got)
 
     for cand in search(subject, limit=6):
         ok, _why = usable(cand.get("licence", ""))

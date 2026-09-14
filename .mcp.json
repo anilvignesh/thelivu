@@ -3,6 +3,10 @@
     "om": {
       "command": "node",
       "args": ["/home/jarvis/second-brain/.claude/scripts/om-mcp.mjs"]
+    },
+    "graft": {
+      "command": "npx",
+      "args": ["-y", "@nanonets/graft", "mcp"]
     }
   }
 }
