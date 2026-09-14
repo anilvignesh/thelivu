@@ -589,6 +589,78 @@ def t_an_api_is_not_a_loophole_around_robots():
         robots.check = real
 
 
+def t_a_uniform_failure_is_still_a_finding():
+    """Anil, on the one target still finding nothing: "And how do we fix that
+    problem?"
+
+    anomalies() compares each row against the table's OWN distribution, and its
+    docstring states the design plainly: "a 40% shortfall is unremarkable in a
+    table where everyone is at 40%." That is right for finding an outlier STATE
+    and exactly wrong for accountability journalism.
+
+    The MoRTH national highways table proved it: 27 of 27 states, median 44.7%
+    of projects delayed, not one row far enough from the mean to flag. The
+    target produced zero candidates in its entire history while the table said
+    nearly half the national highway programme is late.
+
+    A uniform failure is a BIGGER story than an outlier. It is just not an
+    outlier, and a detector that can only see variance cannot see it.
+    """
+    from engine.digger import dataset_watch as dw
+
+    # The real MoRTH distribution, read off the live resource on 2026-09-14.
+    flat = [0.253, 0.875, 0.205, 0.432, 0.600, 0.710, 0.409, 0.273, 0.447, 0.5,
+            0.45, 0.38, 0.62, 0.33, 0.29, 0.55, 0.41, 0.48, 0.36, 0.44, 0.52,
+            0.31, 0.58, 0.47, 0.40, 0.35, 0.43]
+    rows = [(f"State {i}", 100, int(100 * f), f) for i, f in enumerate(flat)]
+    lv = dw.level_finding(rows, "projects", "delayed", "state_ut")
+    check("a table where everyone fails is reported", bool(lv), True)
+    check("and it says so in the title", "not one of them is exempt" in lv["title"], True)
+    check("the excerpt is the arithmetic, so nothing generated it",
+          "median=" in lv["excerpt"] and "worst" in lv["excerpt"], True)
+
+    # An ordinary table must NOT trip it, or every dataset becomes a finding.
+    calm = [0.02, 0.03, 0.01, 0.05, 0.02, 0.04, 0.30, 0.02, 0.03, 0.01]
+    calm_rows = [(f"S{i}", 100, int(100 * f), f) for i, f in enumerate(calm)]
+    check("a table with one bad row is left to anomalies()",
+          dw.level_finding(calm_rows, "a", "b", "k"), None)
+
+    # And a table that is almost certainly two mismatched columns is refused
+    # upstream by IMPLAUSIBLE_MEDIAN, so this must not resurrect it.
+    broken = [0.97, 0.98, 1.0, 0.99, 0.96, 1.0, 0.98, 0.97, 0.99, 1.0]
+    broken_rows = [(f"S{i}", 100, int(100 * f), f) for i, f in enumerate(broken)]
+    check("a mismatched-column table is not turned into a finding",
+          dw.level_finding(broken_rows, "a", "b", "k"), None)
+
+
+def t_one_finding_is_recorded_once():
+    """The bug that was inflating the review queue fivefold.
+
+    The dataset path deduplicates by TITLE — every row of one dataset shares a
+    URL, so per-URL dedup would keep only the first anomaly. The comment said
+    exactly that; the code then called digger_seen_urls and compared titles
+    against URLs. Nothing matched, so nothing was ever deduplicated.
+
+    By 2026-09-14 four findings had been re-recorded eight and nine times each,
+    and roughly 35 of the 43 candidates in the queue were copies of the same
+    four rows. A queue full of a finding they already read is how a reviewer
+    stops reading the queue.
+    """
+    from shared import db
+
+    urls = {"https://api.data.gov.in/resource/abc"}
+    titles = {"Bihar: 33% shortfall in State/UT sanctioned budget vs actual"}
+    candidate = {"title": "Bihar: 33% shortfall in State/UT sanctioned budget vs actual"}
+
+    # The old comparison: a title against a set of URLs.
+    check("comparing a title to URLs never matches",
+          any(candidate["title"] == u for u in urls), False)
+    # The fix.
+    check("comparing a title to titles does", candidate["title"] in titles, True)
+    check("and the helper that returns titles exists",
+          callable(getattr(db, "digger_seen_titles", None)), True)
+
+
 def t_a_target_that_finds_nothing_says_so():
     """A digger target fails SILENTLY, and that is the whole problem.
 
@@ -1503,6 +1575,8 @@ def main():
               t_robots_check_raises_with_a_clear_reason,
               t_a_page_whose_documents_are_not_in_it_is_read_through_its_api,
               t_an_api_is_not_a_loophole_around_robots,
+              t_a_uniform_failure_is_still_a_finding,
+              t_one_finding_is_recorded_once,
               t_a_target_that_finds_nothing_says_so,
               t_every_document_we_read_is_kept,
               t_a_full_disk_does_not_fail_the_dig,

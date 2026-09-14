@@ -3498,6 +3498,33 @@ def finish_digger_run(run_id, ok, docs_fetched=0, candidates_found=0,
         conn.close()
 
 
+def digger_seen_titles(target_key, limit=400):
+    """Candidate TITLES already recorded for a target.
+
+    Exists because the dataset path deduplicates by title and was checking
+    against digger_seen_urls, which returns URLs. Every row of one dataset
+    shares a URL, so per-URL dedup would keep only the first anomaly — the
+    comment in loop.py says exactly that and the code then called the URL
+    function anyway. Nothing matched, so nothing was ever deduplicated.
+
+    Found on 2026-09-14: four findings had been re-recorded eight and nine times
+    each, and roughly 35 of the 43 candidates in the queue were copies of the
+    same four rows. A reviewer's queue full of a finding they already read is
+    how a reviewer stops reading the queue.
+    """
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(
+            f"""SELECT title FROM digger_candidates
+                 WHERE target_key = {ph}
+              ORDER BY created_at DESC LIMIT {int(limit)}""", (target_key,))
+        return {r[0] for r in cur.fetchall() if r and r[0]}
+    finally:
+        conn.close()
+
+
 def barren_targets(min_runs=5, days=7):
     """Targets that have run repeatedly and never found anything.
 

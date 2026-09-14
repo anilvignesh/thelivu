@@ -93,6 +93,23 @@ NEAR_TOTAL_GAP = 0.95
 # it costs 37 false candidates that all look arithmetically sound.
 IMPLAUSIBLE_MEDIAN = 0.90
 
+# When the MEDIAN itself is the finding.
+#
+# anomalies() compares each row against the table's own distribution, and its
+# docstring states the design plainly: "a 40% shortfall is unremarkable in a
+# table where everyone is at 40%." That is right for finding an outlier STATE
+# and exactly wrong for accountability journalism, which the MoRTH national
+# highways table proved on 2026-09-14: 27 of 27 states, median 44.7% of projects
+# delayed, and not one row far enough from the mean to flag. The target had
+# produced zero candidates in its entire history while the table said that
+# nearly half the national highway programme is late.
+#
+# A uniform failure is a bigger story than an outlier, not a smaller one. It is
+# just not an outlier, and a detector that can only see variance cannot see it.
+LEVEL_MEDIAN = 0.30          # the typical row is already this bad
+LEVEL_SHARE = 0.80           # and it is not a couple of rows dragging it there
+LEVEL_FLOOR = 0.15           # what counts as "bad" for that share
+
 
 def _norm(name):
     return (name or "").lower().replace("_", " ").strip()
@@ -249,6 +266,55 @@ def anomalies(rows, sigmas=OUTLIER_SIGMAS):
     return sorted(found, key=lambda a: -a["shortfall"])
 
 
+def level_finding(rows, expected_col, actual_col, key_field):
+    """The finding that is in the LEVEL rather than the variance, or None.
+
+    Returns a candidate dict in the same shape as an anomaly, or None.
+
+    anomalies() asks "which row is unlike the others". This asks "is the typical
+    row already indefensible", which is a different question and sometimes the
+    only one with an answer. The MoRTH highways table has no outliers because
+    every state is failing at roughly the same rate — 27 of 27 above 15%, median
+    44.7% — and that uniformity is the story.
+
+    Bounded on both sides. Below LEVEL_MEDIAN the table is ordinary; at or above
+    IMPLAUSIBLE_MEDIAN it is almost certainly two mismatched columns, which is
+    already refused upstream. In between is where a real nationwide failure
+    lives.
+
+    The excerpt is the arithmetic, exactly as it is for an anomaly: no model is
+    called, so there is nothing here that could be a hallucination.
+    """
+    if len(rows) < 8:
+        return None
+    fractions = sorted(f for _, _, _, f in rows)
+    median = statistics.median(fractions)
+    if not (LEVEL_MEDIAN <= median < IMPLAUSIBLE_MEDIAN):
+        return None
+    over = sum(1 for f in fractions if f >= LEVEL_FLOOR)
+    if over < LEVEL_SHARE * len(fractions):
+        return None
+
+    worst_key, worst_exp, worst_act, worst_frac = max(rows, key=lambda r: r[3])
+    best_frac = fractions[0]
+    return {
+        "title": (f"{median*100:.0f}% median shortfall across {len(rows)} "
+                  f"{key_field or 'row'}s — not one of them is exempt"),
+        "finding": (
+            f"Across {len(rows)} {key_field or 'row'}s, the median shortfall "
+            f"between '{expected_col}' and '{actual_col}' is {median*100:.0f}%, "
+            f"and {over} of {len(rows)} are at or above {LEVEL_FLOOR*100:.0f}%. "
+            f"The worst is {worst_key} at {worst_frac*100:.0f}%; even the best "
+            f"is {best_frac*100:.0f}%. No row is an outlier because the "
+            f"shortfall is general — which is the finding."),
+        "excerpt": (f"median={median*100:.1f}% over {len(rows)} rows; "
+                    f"{over} at or above {LEVEL_FLOOR*100:.0f}%; "
+                    f"worst {worst_key} {worst_act}/{worst_exp}; "
+                    f"best {best_frac*100:.1f}%"),
+        "kind": "level",
+    }
+
+
 def changes(previous, current, threshold=0.25):
     """Rows that moved sharply since the last poll.
 
@@ -301,6 +367,8 @@ def examine(records, previous=None):
         "rows": len(rows),
         "median_shortfall": median,
         "anomalies": anomalies(rows),
+        # A table can have no outlier and still be a finding — see level_finding.
+        "level": level_finding(rows, expected_col, actual_col, key),
         "changes": changes(previous or {}, rows),
         "state": {k: f for k, _, _, f in rows},
     }
@@ -326,6 +394,20 @@ def to_candidates(result, dataset_title, dataset_url, target_key="datagov"):
             "source_url": dataset_url,
             "agreement": "arithmetic",
         })
+    # The level finding, when the table has one. Emitted FIRST: if a table says
+    # both "one state is unusual" and "every state is failing", the second is
+    # the larger story and a reviewer should meet it first.
+    lv = result.get("level")
+    if lv:
+        out.insert(0, {
+            "target_key": target_key,
+            "title": f"{dataset_title[:58]}: {lv['title']}",
+            "finding": lv["finding"],
+            "excerpt": lv["excerpt"],
+            "source_url": dataset_url,
+            "agreement": "arithmetic",
+        })
+
     for c in result.get("changes", []):
         out.append({
             "target_key": target_key,

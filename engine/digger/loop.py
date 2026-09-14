@@ -277,14 +277,20 @@ def _run_dataset_cycle(target, dry_run=False):
             log.info("filtered: %s — %s", c["title"][:56], why[:60])
 
         recorded = []
-        seen = set() if dry_run else db.digger_seen_urls(key)
+        # Dedup by TITLE, not URL: every row of one dataset shares a URL, so
+        # per-URL dedup would keep only the first anomaly.
+        #
+        # This said exactly that and then called digger_seen_urls, comparing
+        # titles against URLs. Nothing ever matched, so nothing was ever
+        # deduplicated: by 2026-09-14 four findings had been re-recorded eight
+        # and nine times each and most of the review queue was copies.
+        seen = set() if dry_run else db.digger_seen_titles(key)
         for c in kept:
             if dry_run:
                 log.info("[dry-run] %s", c["title"][:100])
             else:
-                # Dedup by title here, not URL: every row of one dataset shares
-                # a URL, so per-URL dedup would record only the first anomaly.
-                if any(c["title"] == s for s in seen):
+                if c["title"] in seen:
+                    log.info("skip (already recorded): %s", c["title"][:70])
                     continue
                 db.record_digger_candidate(
                     target_key=key, title=c["title"], finding=c["finding"],
