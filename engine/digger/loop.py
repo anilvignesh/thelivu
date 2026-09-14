@@ -47,6 +47,34 @@ def _kv_set(key, value):
         log.warning("could not persist %s: %s", key, e)
 
 
+def _read_api_index(target):
+    """Document URLs from a JSON API instead of an HTML index.
+
+    For a page whose documents are not in its markup. See
+    engine/digger/jsonapi.py for why this is not a headless browser.
+    """
+    from engine.digger import jsonapi
+
+    name = target["reader"]
+    if name == "sansad-questions":
+        sessions = jsonapi.sansad_sessions()
+        if not sessions:
+            log.info("sansad: no sessions listed — nothing to read")
+            return []
+        lok, ses = sessions[0]
+        rows = jsonapi.sansad_questions(lok, ses,
+                                        page_size=target.get("page_size", 40))
+        log.info("sansad: Lok Sabha %s session %s — %d question(s)",
+                 lok, ses, len(rows))
+        # The API carries the subject, so a document arrives already described.
+        # fetch_index can only ever hand over a bare URL.
+        return [{"url": r["url"],
+                 "title": f"{r['subject']} — {r['ministry']}".strip(" —")}
+                for r in rows if r.get("url")]
+    log.warning("target %s names an unknown reader %r", target["key"], name)
+    return []
+
+
 def _warn_about_barren_targets():
     """Say out loud when a target has stopped earning its slot.
 
@@ -94,7 +122,15 @@ def run_cycle(target=None, dry_run=False):
 
         # 1. Index -> candidate document URLs. The index is never extracted from;
         #    it exists only to choose a document (see targets.py).
-        items = fetch.fetch_index(target["index_url"], target.get("link_pattern"))
+        #
+        # A JS-rendered index yields nothing to fetch_index — the documents are
+        # not in the HTML. Those targets name a `reader` instead, which calls the
+        # JSON API the page itself calls. Everything downstream is identical:
+        # this step only ever produced a list of document URLs.
+        if target.get("reader"):
+            items = _read_api_index(target)
+        else:
+            items = fetch.fetch_index(target["index_url"], target.get("link_pattern"))
         log.info("index: %d candidate document(s)", len(items))
 
         fresh = [i for i in items if i["url"] not in seen]

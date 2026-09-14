@@ -1062,6 +1062,15 @@ def init_db():
             # every candidate recorded before the archive existed has no
             # hash, and backfilling one would mean re-fetching URLs that
             # may already be gone — the problem the archive exists for.
+            # A DB-defined target may name a code READER instead of an
+            # HTML link_pattern, for a source whose documents are not in
+            # its markup (2026-09-14). See engine/digger/jsonapi.py.
+            for col, defn in [("reader", "TEXT")]:
+                try:
+                    cur.execute(f"ALTER TABLE digger_targets ADD COLUMN {col} {defn}")
+                    conn.commit()
+                except Exception:
+                    conn.rollback()  # column already exists
             for col, defn in [("doc_sha256", "TEXT")]:
                 try:
                     cur.execute(f"ALTER TABLE digger_candidates ADD COLUMN {col} {defn}")

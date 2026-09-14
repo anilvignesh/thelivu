@@ -515,6 +515,80 @@ def t_no_unverified_host_rewrites():
           routing.alternates("https://example.gov.in/x"), [])
 
 
+def t_a_page_whose_documents_are_not_in_it_is_read_through_its_api():
+    """Anil: "How can we read js rendered ones? Can you write something custom
+    to solve this?"
+
+    sansad.in is a Next.js shell. fetch_index finds nine links on the Lok Sabha
+    questions page and not one is a document, which is why that target produced
+    zero candidates in its entire history — the questions were never in the
+    HTML.
+
+    A headless browser is the obvious answer and the wrong one: Chromium wants
+    ~300MB against the digger's 256MB cap, on a 945MB box already taken down
+    once by a memory spike. The page is a shell over a JSON API, so the browser
+    is used ONCE to find the endpoint and never again.
+
+    Offline. What is worth protecting is the SHAPE handling — the two places a
+    silently-empty reader came from while writing this.
+    """
+    from engine.digger import jsonapi
+
+    # The sessions endpoint is NESTED: one row per Lok Sabha, each holding its
+    # own sessions. Read as a flat list of {loksabhaNo, sessionNo} it returned
+    # nothing at all, which would have pinned the reader to a hardcoded session
+    # and stopped finding new questions the day that session ended.
+    nested = [{"loksabha": 18, "sessions": [{"sessionNo": 7}, {"sessionNo": 8}]},
+              {"loksabha": 17, "sessions": [{"sessionNo": 1}]}]
+    real = jsonapi.get_json
+    jsonapi.get_json = lambda url, timeout=None: nested
+    try:
+        got = jsonapi.sansad_sessions()
+    finally:
+        jsonapi.get_json = real
+    check("every session is found, newest first", got[:2], [(18, 8), (18, 7)])
+    check("and older Lok Sabhas too", (17, 1) in got, True)
+
+    # The questions endpoint wraps its payload in a single-element LIST.
+    payload = [{"listOfQuestions": [
+        {"questionsFilePath": "https://sansad.in/getFile/lsapps/x/AS360.pdf?src=a",
+         "subjects": "Nuclear Power Generation", "ministry": "ATOMIC ENERGY",
+         "member": ["Dr. Prabha Mallikarjun"], "date": "12.08.2026",
+         "type": "STARRED", "questionText": "Will the Minister state..."},
+        {"subjects": "No file path on this one"}]}]
+    jsonapi.get_json = lambda url, timeout=None: payload
+    try:
+        rows = jsonapi.sansad_questions(18, 8)
+    finally:
+        jsonapi.get_json = real
+    check("the wrapped payload is unwrapped", len(rows), 1)
+    check("the query string is dropped from the document URL",
+          rows[0]["url"], "https://sansad.in/getFile/lsapps/x/AS360.pdf")
+    check("a row with no document is skipped, not half-recorded",
+          all(r["url"] for r in rows), True)
+    check("the API's own description comes with it",
+          rows[0]["subject"], "Nuclear Power Generation")
+
+
+def t_an_api_is_not_a_loophole_around_robots():
+    """A site that asked not to be crawled asked about both doors. The JSON
+    endpoint gets the same check as any other fetch."""
+    from engine.digger import jsonapi, robots
+
+    real = robots.check
+    def deny(url):
+        raise robots.RobotsDenied("robots.txt disallows ThelivuDigger at " + url)
+    robots.check = deny
+    try:
+        try:
+            jsonapi.get_json("https://example.gov.in/api/x")
+            check("a disallowed API is refused", "returned", "ApiError")
+        except jsonapi.ApiError as e:
+            check("a disallowed API is refused", "disallows" in str(e), True)
+    finally:
+        robots.check = real
+
+
 def t_a_target_that_finds_nothing_says_so():
     """A digger target fails SILENTLY, and that is the whole problem.
 
@@ -1427,6 +1501,8 @@ def main():
               t_robots_4xx_means_allowed_per_rfc9309,
               t_robots_5xx_means_back_off,
               t_robots_check_raises_with_a_clear_reason,
+              t_a_page_whose_documents_are_not_in_it_is_read_through_its_api,
+              t_an_api_is_not_a_loophole_around_robots,
               t_a_target_that_finds_nothing_says_so,
               t_every_document_we_read_is_kept,
               t_a_full_disk_does_not_fail_the_dig,

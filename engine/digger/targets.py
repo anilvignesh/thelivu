@@ -195,6 +195,9 @@ def db_targets():
             "name": r.get("name") or r["key"],
             "index_url": r["index_url"],
             "link_pattern": r.get("link_pattern"),
+            # A source whose documents are not in its markup names a code reader
+            # instead of a link pattern — see engine/digger/jsonapi.py.
+            "reader": r.get("reader"),
             "brief": r["brief"],
             "verified": bool(r.get("fetch_ok")),
             "source": "db",
