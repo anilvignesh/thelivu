@@ -352,6 +352,35 @@ CREATE INDEX IF NOT EXISTS idx_digger_candidates_target ON digger_candidates (ta
 -- Per-cycle accounting. Kept HERE and not in shared/budget.py on purpose: Tier 0
 -- is free-tier by definition, and a free-provider outage must never trip the
 -- $3/day cap that guards real Claude/Gemini spend.
+-- Every document the digger has read, by content hash.
+--
+-- Until 2026-09-13 a published Thelivu figure was backed by a URL and a short
+-- quote; the document itself was read and dropped. That is the wrong exposure
+-- for an outlet whose whole claim is that it runs on facts — government PDFs
+-- move and vanish, and sansad.in silently reshaped every question URL under us
+-- in the same week (see engine/digger/routing.py).
+--
+-- The bytes are NOT here. They go to the laptop, content-addressed: a 15MB
+-- audit report per row would turn a Railway Postgres into a file server, and
+-- the cheapest disk we own has 383GB free. This table is the index — what we
+-- read, when, from where, whether it took OCR, and whether the bytes have been
+-- collected yet (pulled_at IS NULL means still on the digger's spool).
+CREATE TABLE IF NOT EXISTS archived_docs (
+    sha256       TEXT PRIMARY KEY,
+    url          TEXT NOT NULL,
+    final_url    TEXT,
+    content_type TEXT,
+    byte_size    INTEGER,
+    fetched_at   TIMESTAMP,
+    ocr_used     BOOLEAN DEFAULT FALSE,
+    -- The copy we do not host. Independently timestamped and citable, and it
+    -- outlives us — which is the point of citing it rather than ourselves.
+    wayback_url  TEXT,
+    pulled_at    TIMESTAMP,
+    created_at   TIMESTAMP DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_archived_docs_pending ON archived_docs (pulled_at, created_at);
+
 CREATE TABLE IF NOT EXISTS digger_runs (
     id               SERIAL PRIMARY KEY,
     target_key       TEXT,
@@ -764,6 +793,33 @@ CREATE TABLE IF NOT EXISTS digger_candidates (
 CREATE INDEX IF NOT EXISTS idx_digger_candidates_status ON digger_candidates (status, created_at);
 CREATE INDEX IF NOT EXISTS idx_digger_candidates_target ON digger_candidates (target_key, created_at);
 
+-- Every document the digger has read, by content hash.
+--
+-- Until 2026-09-13 a published Thelivu figure was backed by a URL and a short
+-- quote; the document itself was read and dropped. That is the wrong exposure
+-- for an outlet whose whole claim is that it runs on facts — government PDFs
+-- move and vanish, and sansad.in silently reshaped every question URL under us
+-- in the same week (see engine/digger/routing.py).
+--
+-- The bytes are NOT here. They go to the laptop, content-addressed: a 15MB
+-- audit report per row would turn a Railway Postgres into a file server, and
+-- the cheapest disk we own has 383GB free. This table is the index — what we
+-- read, when, from where, whether it took OCR, and whether the bytes have been
+-- collected yet (pulled_at IS NULL means still on the digger's spool).
+CREATE TABLE IF NOT EXISTS archived_docs (
+    sha256       TEXT PRIMARY KEY,
+    url          TEXT NOT NULL,
+    final_url    TEXT,
+    content_type TEXT,
+    byte_size    INTEGER,
+    fetched_at   TEXT,
+    ocr_used     INTEGER DEFAULT 0,
+    wayback_url  TEXT,
+    pulled_at    TEXT,
+    created_at   TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_archived_docs_pending ON archived_docs (pulled_at, created_at);
+
 CREATE TABLE IF NOT EXISTS digger_runs (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     target_key       TEXT,
@@ -1002,6 +1058,16 @@ def init_db():
             # The script and the rendered video (2026-09-11). longform_queue
             # predates the renderer, so rows existed that recorded a story owed
             # a long video with nowhere to put the video once it had one.
+            # Which document this lead came out of (2026-09-14). Nullable:
+            # every candidate recorded before the archive existed has no
+            # hash, and backfilling one would mean re-fetching URLs that
+            # may already be gone — the problem the archive exists for.
+            for col, defn in [("doc_sha256", "TEXT")]:
+                try:
+                    cur.execute(f"ALTER TABLE digger_candidates ADD COLUMN {col} {defn}")
+                    conn.commit()
+                except Exception:
+                    conn.rollback()  # column already exists
             for col, defn in [("script_path", "TEXT"), ("video_path", "TEXT"),
                               ("youtube_video_id", "TEXT"), ("script_text", "TEXT")]:
                 try:
@@ -3423,9 +3489,58 @@ def finish_digger_run(run_id, ok, docs_fetched=0, candidates_found=0,
         conn.close()
 
 
+def record_archived_doc(sha256, url, final_url=None, content_type=None,
+                        byte_size=None, fetched_at=None, ocr_used=False,
+                        wayback_url=None, pulled_at=None):
+    """Record one document we hold a copy of. Idempotent on the hash.
+
+    An UPSERT rather than an insert because the same document legitimately
+    arrives twice — two URLs serving one PDF, or a re-pull after a crash between
+    storing the bytes and writing this row. Re-pulling must be free, or the
+    recovery path becomes a reason not to run the puller.
+    """
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cols = ("sha256, url, final_url, content_type, byte_size, fetched_at, "
+                "ocr_used, wayback_url, pulled_at")
+        vals = ", ".join([ph] * 9)
+        row = (sha256, url, final_url, content_type, byte_size, fetched_at,
+               bool(ocr_used) if _is_postgres() else int(bool(ocr_used)),
+               wayback_url, pulled_at)
+        # Keep a wayback_url we already have if this pass could not get one —
+        # the save endpoint times out often, and losing a good snapshot URL to a
+        # later failed lookup would be a silent downgrade of the citation.
+        cur.execute(
+            f"INSERT INTO archived_docs ({cols}) VALUES ({vals}) "
+            "ON CONFLICT (sha256) DO UPDATE SET "
+            "  wayback_url = COALESCE(EXCLUDED.wayback_url, archived_docs.wayback_url), "
+            "  pulled_at   = COALESCE(EXCLUDED.pulled_at, archived_docs.pulled_at)",
+            row)
+        conn.commit()
+        return sha256
+    finally:
+        conn.close()
+
+
+def archived_doc(sha256):
+    """One archived document's row, or None."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(f"SELECT * FROM archived_docs WHERE sha256 = {ph}", (sha256,))
+        row = cur.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
 def record_digger_candidate(target_key, title, finding, source_url, excerpt,
                             model_a=None, model_b=None, answer_a=None,
-                            answer_b=None, agreement="single", fetched_at=None):
+                            answer_b=None, agreement="single", fetched_at=None,
+                            doc_sha256=None):
     """Persist one lead. `source_url` is NOT NULL by design — a candidate that
     cannot point at the document it came from is exactly the ungrounded output
     this tier exists to avoid."""
@@ -3434,20 +3549,20 @@ def record_digger_candidate(target_key, title, finding, source_url, excerpt,
         cur = conn.cursor()
         ph = "%s" if _is_postgres() else "?"
         cols = ("target_key, title, finding, source_url, excerpt, model_a, "
-                "model_b, answer_a, answer_b, agreement, fetched_at")
-        vals = ", ".join([ph] * 11)
+                "model_b, answer_a, answer_b, agreement, fetched_at, doc_sha256")
+        vals = ", ".join([ph] * 12)
         if _is_postgres():
             cur.execute(
                 f"INSERT INTO digger_candidates ({cols}) VALUES ({vals}) RETURNING id",
                 (target_key, title, finding, source_url, excerpt, model_a,
-                 model_b, answer_a, answer_b, agreement, fetched_at),
+                 model_b, answer_a, answer_b, agreement, fetched_at, doc_sha256),
             )
             cand_id = cur.fetchone()[0]
         else:
             cur.execute(
                 f"INSERT INTO digger_candidates ({cols}) VALUES ({vals})",
                 (target_key, title, finding, source_url, excerpt, model_a,
-                 model_b, answer_a, answer_b, agreement, fetched_at),
+                 model_b, answer_a, answer_b, agreement, fetched_at, doc_sha256),
             )
             cand_id = cur.lastrowid
         conn.commit()

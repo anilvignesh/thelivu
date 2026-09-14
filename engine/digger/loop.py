@@ -94,6 +94,11 @@ def run_cycle(target=None, dry_run=False):
                      ", truncated" if doc["truncated"] else "")
             found, c = extract.cross_check(doc, target["brief"])
             calls += c
+            # Carry the document's hash onto every lead it produced, so a lead
+            # can be traced to the exact bytes it was read from rather than to a
+            # URL that may since have moved.
+            for f in found:
+                f["doc_sha256"] = doc.get("sha256")
             candidates.extend(found)
 
         log.info("%d grounded finding(s) from %d doc(s), %d model call(s)",
@@ -128,6 +133,7 @@ def run_cycle(target=None, dry_run=False):
                     answer_b=c["answer_b"],
                     agreement=c["agreement"],
                     fetched_at=c["fetched_at"],
+                    doc_sha256=c.get("doc_sha256"),
                 )
             recorded.append(c)
 

@@ -19,6 +19,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 from engine.digger import robots, routing
+from shared import archive
 
 log = logging.getLogger("digger.fetch")
 
@@ -41,6 +42,16 @@ PDF_PARSE_TIMEOUT = 60
 # Twelve pages is ~100 seconds — enough to establish what a scanned document is
 # and whether it carries the figure we came for, which is all a LEAD needs. A
 # document worth more than that has earned a human opening it.
+# Set by pdf_to_text, read by fetch() one call later, so the archive sidecar can
+# record whether the text came off a scan. Module state rather than a return
+# value because pdf_to_text's signature is load-bearing in three callers; safe
+# here only because the digger parses one document at a time (num_workers=1,
+# pool_size=1 — see _new_parser), and pdf_to_text clears it on entry. That matters when a figure is later questioned:
+# OCR of a scanned page is a transcription and the archived PDF is what settles
+# it — the difference between "the report says" and "our reading of the report
+# says", which for an accountability outlet is not a small difference.
+_LAST_USED_OCR = False
+
 OCR_MIN_CHARS = 200          # below this, the first pass found no text layer
 OCR_MAX_PAGES = 12
 OCR_PARSE_TIMEOUT = 180
@@ -215,16 +226,22 @@ def fetch(url, timeout=TIMEOUT, max_bytes=MAX_BYTES, _retrying=False):
     )
     if looks_pdf:
         text = pdf_to_text(raw)
+        ocr_used = _LAST_USED_OCR
         if len(text) > MAX_TEXT_CHARS:
             text = text[:MAX_TEXT_CHARS]
             truncated = True
+        fetched_at = datetime.now(timezone.utc).isoformat()
         return {
             "url": url,
             "final_url": final_url,
             "text": text,
             "content_type": content_type or "application/pdf",
             "truncated": truncated,
-            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "fetched_at": fetched_at,
+            "sha256": archive.spool(raw, url, final_url,
+                                    content_type or "application/pdf",
+                                    fetched_at, ocr_used=ocr_used),
+            "byte_size": len(raw),
         }
 
     charset = "utf-8"
@@ -243,13 +260,19 @@ def fetch(url, timeout=TIMEOUT, max_bytes=MAX_BYTES, _retrying=False):
 
     _reject_if_bot_wall(text, final_url)
 
+    fetched_at = datetime.now(timezone.utc).isoformat()
     return {
         "url": url,
         "final_url": final_url,
         "text": text,
         "content_type": content_type,
         "truncated": truncated,
-        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "fetched_at": fetched_at,
+        # Archived AFTER the bot-wall check, not before: a Cloudflare
+        # interstitial is not the document, and filling the archive with
+        # captcha pages would make it useless exactly when it is needed.
+        "sha256": archive.spool(raw, url, final_url, content_type, fetched_at),
+        "byte_size": len(raw),
     }
 
 # ---------------------------------------------------------------------------
@@ -400,6 +423,8 @@ def _new_parser(ocr=False):
 
 def pdf_to_text(data):
     """PDF bytes -> text. Raises FetchError on anything that isn't usable."""
+    global _LAST_USED_OCR
+    _LAST_USED_OCR = False       # reset per call, or the flag is sticky
     try:
         lp = _new_parser()
     except ImportError as e:
@@ -440,6 +465,7 @@ def pdf_to_text(data):
         if ocr_text:
             log.info("no text layer — OCR recovered %d chars from the first "
                      "%d pages", len(ocr_text), OCR_MAX_PAGES)
+            _LAST_USED_OCR = True
             return ocr_text
 
     if not text:

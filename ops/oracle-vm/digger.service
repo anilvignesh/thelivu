@@ -40,6 +40,16 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths=/opt/thelivu
+# /var/lib/thelivu — where fetched documents are spooled until the laptop
+# collects them (shared/archive.py). StateDirectory= rather than a hand-made
+# path plus a ReadWritePaths entry, because systemd creates it with the right
+# OWNER and the right SELINUX LABEL; on this Enforcing box the second one is the
+# difference between a working service and a bare "Permission denied".
+#
+# It must live OUTSIDE /opt/thelivu: deploy-digger.sh rsyncs that tree with
+# --delete, so a spool underneath it would be wiped on every deploy — and the
+# whole point of capturing at read time is that the copy outlives the moment.
+StateDirectory=thelivu
 
 [Install]
 WantedBy=multi-user.target

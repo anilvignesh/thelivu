@@ -102,7 +102,13 @@ def spool_size():
 
 def spool(data, url, final_url=None, content_type=None, fetched_at=None,
           ocr_used=False):
-    """Park one fetched document. Returns its sha256, or None if not spooled.
+    """Park one fetched document. Returns its sha256.
+
+    The hash comes back even when nothing could be written. Failing to keep a
+    copy means we do not HOLD the document; it does not mean the document has no
+    identity, and the hash recorded against a lead still says exactly which
+    bytes we read — enough to verify a copy someone else produces later. Only a
+    hash we could not compute at all comes back None.
 
     NEVER RAISES. Archiving is a second thing we do with a permitted fetch, not
     a precondition for reading it — a full disk or a bad path must not turn a
@@ -111,6 +117,11 @@ def spool(data, url, final_url=None, content_type=None, fetched_at=None,
     """
     try:
         sha = digest(data)
+    except Exception as e:                                  # noqa: BLE001
+        log.warning("could not hash %s: %s", (url or "?")[:80], e)
+        return None
+
+    try:
         if len(data) > MAX_SPOOL_BYTES:
             log.warning("not archiving %s: %.1fMB exceeds the %dMB spool limit",
                         url[:80], len(data) / 1e6, MAX_SPOOL_BYTES // (1024 * 1024))
@@ -146,10 +157,9 @@ def spool(data, url, final_url=None, content_type=None, fetched_at=None,
         blob.with_suffix(blob.suffix + ".json").write_text(
             json.dumps(meta, indent=2))
         tmp.rename(blob)
-        return sha
     except Exception as e:                                  # noqa: BLE001
         log.warning("could not archive %s: %s", (url or "?")[:80], e)
-        return None
+    return sha
 
 
 def spooled():

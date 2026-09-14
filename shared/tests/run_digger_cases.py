@@ -515,6 +515,77 @@ def t_no_unverified_host_rewrites():
           routing.alternates("https://example.gov.in/x"), [])
 
 
+def t_every_document_we_read_is_kept():
+    """We used to keep a URL and a short quote. The document was read and
+    dropped — so a figure challenged six months later was backed by an
+    assertion and a dead link.
+
+    Not hypothetical: sansad.in reshaped every question URL under us in the same
+    week (see routing.PATH_REWRITES) and we recovered because somebody wrote a
+    rewrite rule, not because we held the file.
+    """
+    import tempfile
+    from engine.digger import fetch as fetch_mod
+    from shared import archive
+
+    body = b"<html><body>" + b"A real page with a figure in it. " * 40 + b"</body></html>"
+
+    class FakeResp:
+        headers = {"Content-Type": "text/html; charset=utf-8"}
+        def read(self, _n): return body
+        def geturl(self): return "https://cag.gov.in/report"
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    with tempfile.TemporaryDirectory() as tmp:
+        old = os.environ.get("THELIVU_SPOOL")
+        os.environ["THELIVU_SPOOL"] = tmp
+        real_open, real_allowed, real_check, real_throttle = (
+            fetch_mod.urllib.request.urlopen, fetch_mod.robots.allowed,
+            fetch_mod.robots.check, fetch_mod._throttle)
+        fetch_mod.urllib.request.urlopen = lambda *a, **k: FakeResp()
+        fetch_mod.robots.allowed = lambda _u: True
+        fetch_mod.robots.check = lambda _u: None
+        fetch_mod._throttle = lambda _u: None
+        try:
+            doc = fetch_mod.fetch("https://cag.gov.in/report")
+            check("the fetch reports the hash it stored", len(doc["sha256"]), 64)
+            check("and the size", doc["byte_size"], len(body))
+            held = archive.spooled()
+            check("the document is on the spool", len(held), 1)
+            _blob, meta = held[0]
+            check("with the URL it came from", meta["url"], "https://cag.gov.in/report")
+            check("and bytes that match the name",
+                  archive.digest(_blob.read_bytes()), doc["sha256"])
+        finally:
+            fetch_mod.urllib.request.urlopen = real_open
+            fetch_mod.robots.allowed = real_allowed
+            fetch_mod.robots.check = real_check
+            fetch_mod._throttle = real_throttle
+            if old is None:
+                os.environ.pop("THELIVU_SPOOL", None)
+            else:
+                os.environ["THELIVU_SPOOL"] = old
+
+
+def t_a_full_disk_does_not_fail_the_dig():
+    """Archiving is a second thing we do with a permitted fetch, not a
+    precondition for reading it. A spool that cannot be written must cost us the
+    copy, never the finding."""
+    from shared import archive
+
+    old = os.environ.get("THELIVU_SPOOL")
+    os.environ["THELIVU_SPOOL"] = "/proc/cannot/write/here"
+    try:
+        sha = archive.spool(b"some bytes", "https://x.gov.in/a.pdf")
+        check("it still reports the hash", sha, archive.digest(b"some bytes"))
+    finally:
+        if old is None:
+            os.environ.pop("THELIVU_SPOOL", None)
+        else:
+            os.environ["THELIVU_SPOOL"] = old
+
+
 def t_a_scanned_pdf_falls_back_to_ocr():
     """Until 2026-09-13 a PDF with no text layer was a dead end, and that is
     most of the Indian public record: older audit reports, state records, court
@@ -1312,6 +1383,8 @@ def main():
               t_robots_4xx_means_allowed_per_rfc9309,
               t_robots_5xx_means_back_off,
               t_robots_check_raises_with_a_clear_reason,
+              t_every_document_we_read_is_kept,
+              t_a_full_disk_does_not_fail_the_dig,
               t_a_scanned_pdf_falls_back_to_ocr,
               t_a_pdf_with_a_text_layer_never_pays_for_ocr,
               t_ocr_failing_is_an_honest_miss_not_a_crash,
