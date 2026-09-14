@@ -82,6 +82,19 @@ _CAPTION_TEMPLATE_ECHO = re.compile(
     re.IGNORECASE)
 _CAPTION_BARE_META_WORDS = {"question", "hook", "close", "caption", "beat", "title"}
 
+# A BARE FIELD LABEL echoed back. Fourth shape, found 2026-09-14 by writing the
+# case rather than by an incident — "BEAT 2 CAPTION:" tripped none of the
+# patterns above, because every one of them looks for the model TALKING and this
+# is the model just repeating the form it was handed.
+#
+# Anchored and requiring the colon, so a sentence that merely contains one of
+# these words ("the closing beat of the scheme") is untouched. A line that IS a
+# label, with nothing or a fragment after it, is never narration.
+_CAPTION_LABEL_ECHO = re.compile(
+    r"^\s*(?:HOOK|CLOSE|TITLE|KICKER|PLACE|HASHTAGS|NARRATION|OUTPUT|FORMAT|"
+    r"BEAT[ \t]*\d*)(?:[ \t]+(?:CAPTION|IMAGE|TEXT))?[ \t]*:",
+    re.IGNORECASE)
+
 # Third incident, same class, third shape (2026-09-07 — found by Anil on the
 # live Instagram feed, two reels): a HOOK_CAPTION rendered as
 # `Cabinet advice required - Cabinet(1) advice(2) required(3) = 3 words. Good.`
@@ -316,6 +329,7 @@ def looks_like_self_talk(text):
     if not s:
         return False
     return bool(_CAPTION_SELF_TALK.search(s)
+                or _CAPTION_LABEL_ECHO.search(s)
                 or _CAPTION_TEMPLATE_ECHO.search(s)
                 or _CAPTION_COUNTS_WORDS.search(s)
                 or _CAPTION_SELF_GRADE.search(s)
@@ -323,20 +337,61 @@ def looks_like_self_talk(text):
                 or _counts_out_loud(s))
 
 
+# Words that cannot end a caption: they are grammatically expecting another one.
+_DANGLING = {"the", "a", "an", "of", "in", "on", "at", "to", "for", "from", "by",
+             "with", "and", "or", "but", "into", "onto", "over", "under", "its",
+             "his", "her", "their", "this", "that", "these", "those", "as",
+             "than", "was", "were", "is", "are", "has", "have", "had"}
+
+
+def _shorten_for_slide(text):
+    """A spoken sentence cut down to something a slide can hold.
+
+    The fallback used the spoken line RAW, which made the guard against long
+    captions actively counterproductive: a 19-word caption was rejected for
+    exceeding MAX_NEWS_CAPTION_WORDS and replaced with the 25-word sentence it
+    came from. Longer, not shorter.
+
+    And a long caption is not merely ugly — it is the "slowly slowly" bug. The
+    reveal spends 0.42s a word across at most MAX_CAPTION_REVEALS steps, so 26
+    words becomes 1.8s per step and reads as a stall. Anil has now reported that
+    twice (reel #73, and again 2026-09-14 after it came back through this path).
+
+    Cut at a clause boundary where there is one, because a slide that ends
+    mid-phrase looks broken in a different way.
+    """
+    words = (text or "").strip().split()
+    if len(words) <= MAX_NEWS_CAPTION_WORDS:
+        return " ".join(words)
+    head = " ".join(words[:MAX_NEWS_CAPTION_WORDS])
+    for mark in (", ", " — ", "; ", ": "):
+        cut = head.rfind(mark)
+        if cut >= len(head) // 2:
+            return head[:cut].rstrip(" ,;:—")
+    # Never end on a word that is obviously holding the next one up. "…swept
+    # from Kerala's" reads as a truncation bug on screen, not as a caption.
+    kept = head.split()
+    while len(kept) > 3 and (kept[-1].lower() in _DANGLING
+                             or kept[-1].endswith("'s")):
+        kept.pop()
+    return " ".join(kept).rstrip(" ,;:—")
+
+
 def _sane_caption(caption, spoken):
-    """A beat's caption if it looks like an actual caption, else the spoken line
-    it fell back to before (same fallback already used for an EMPTY caption —
-    this just widens the trigger to a CONTAMINATED one)."""
+    """A beat's caption if it looks like an actual caption, else a SHORTENED
+    spoken line (same fallback already used for an EMPTY caption — this just
+    widens the trigger to a CONTAMINATED one, and stops the fallback being
+    longer than what it replaced)."""
     cap = (caption or "").strip()
     if not cap:
-        return spoken
+        return _shorten_for_slide(spoken)
     bare = cap.strip(" .!?\"'").lower()
     if (looks_like_self_talk(cap)
             or len(cap.split()) > MAX_NEWS_CAPTION_WORDS
             or bare in _CAPTION_BARE_META_WORDS):
         log.warning("caption looked like leaked model reasoning, not on-screen "
                     "text — falling back to the spoken line: %r", cap[:120])
-        return spoken
+        return _shorten_for_slide(spoken)
     return cap
 
 
@@ -833,6 +888,12 @@ def synth_beats(beats, backend, work_dir, voice=None):
 # produce sub-half-second ffmpeg segments that cost render time and are imperceptible.
 MAX_CAPTION_REVEALS = 6
 MIN_REVEAL_SECS = 0.5  # below this a word-step isn't readable; fold it into the next
+# Above this a step reads as a STALL rather than as captioning. 0.42s/word over at
+# most MAX_CAPTION_REVEALS steps means a long caption silently lands at 1.8s a
+# step — which is the "words come very slow, looks broken" report, twice. The
+# per-word pace is not enough on its own; the per-STEP duration has to be capped
+# too, and the leftover time held on the finished caption.
+MAX_REVEAL_SECS = 0.75
 
 
 def _caption_reveal_steps(caption, dur):
@@ -1050,6 +1111,8 @@ def build_reel(fields, dark, out_mp4, kicker=None, backend=None, render_frame=No
                 else:
                     words_total = len((caption or "").split())
                     target_span = min(sub, max(1.2, 0.42 * words_total))
+                    # Cap the SPAN by what the steps can absorb without stalling.
+                    target_span = min(target_span, MAX_REVEAL_SECS * steps)
                     durs = _split_duration(target_span, steps)
                     reveal_ns = [_reveal_word_count(caption, r, steps) for r in range(steps)]
                     if sub - target_span >= MIN_REVEAL_SECS:

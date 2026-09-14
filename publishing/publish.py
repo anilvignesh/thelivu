@@ -256,6 +256,36 @@ def post_reel_run(reel_id, progress=None):
         # Never let the guard's own failure block a legitimate post.
         log.warning("could not check run #%s for an existing posted reel: %s",
                     r.get("run_id"), e)
+    # LEAKED TEMPLATE TEXT, CHECKED AT THE IRREVERSIBLE STEP. The same argument
+    # as the duplicate guard above, and it has now cost a live post.
+    #
+    # make_reel hard-blocks a script whose spoken line is template residue, and
+    # has since 2026-09-02. Reel #71 was RENDERED on 2026-08-26, before that
+    # existed, sat in the queue contaminated for eighteen days, and the posting
+    # sweep published it on 2026-09-13 — eleven days after the fix. It is live
+    # with "<the spoken opening line>" as the first thing in its caption.
+    #
+    # A render-time guard cannot protect anything already rendered. Six reels
+    # still queued today predate it. So the check runs again here, on the text
+    # that is actually about to be published, where nothing that came before can
+    # get past it.
+    #
+    # Refuse and park rather than kill: the reel may be salvageable by a remake,
+    # and a person should decide that.
+    from publishing.reel import looks_like_self_talk
+
+    caption = r.get("caption") or ""
+    leaked = next((seg for seg in [caption] + caption.split(". ")[:6]
+                   if looks_like_self_talk(seg)), None)
+    if leaked:
+        log.error("refusing to post reel #%s: leaked template text in the caption "
+                  "— %r", reel_id, leaked[:120])
+        update_reel(reel_id, status="held",
+                    notes=f"held at post time: leaked template text — {leaked[:160]}")
+        return {"ok": False, "leaked": True, "error": (
+            f"reel #{reel_id} carries leaked template/instruction text, not "
+            f"narration: {leaked[:120]!r}. Held, not posted — remake it.")}
+
     if not SLIDE_SERVER_BASE_URL:
         return {"ok": False, "error": "SLIDE_SERVER_BASE_URL not set — no public host for the reel"}
     if not IG_USER_ID or not IG_ACCESS_TOKEN:
