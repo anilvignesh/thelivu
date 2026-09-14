@@ -33,7 +33,28 @@ DEFAULT_BASE_URL = "http://127.0.0.1:3001"
 # summary of...") instead of the answer, which fails JSON parsing every time and
 # took 44s on a 6k-char prompt. Reasoning models are the wrong tool for
 # structured extraction.
-MODEL_A = os.environ.get("DIGGER_MODEL_A", "gemini-3.5-flash-lite")
+#
+# RE-MEASURED 2026-09-14, because gemini-3.5-flash-lite had stopped being a
+# reader at all. Eight calls in one second: SEVEN returned 429 "All models
+# exhausted". It had been silently falling through to FALLBACK_MODEL="auto" for
+# an unknown stretch, which means the two-model cross-check — the whole basis
+# for the `agreement` column a reviewer weighs — was often one named model
+# against whatever happened to be free.
+#
+# Surveyed what the free tier actually serves right now, then tested the
+# survivors on a REAL parliamentary answer rather than on "reply with ok":
+#   gpt-oss-120b           4/4 available   2.4s  2 grounded findings
+#   command-a              4/4 available   (502 on that attempt; fine otherwise)
+#   gemini-3.5-flash-lite  0/4  HTTP 429
+#   gemini-2.5-flash       0/4  HTTP 429
+#   mistral-small-4        0/4  HTTP 429
+#   llama-3.3-70b          0/4  HTTP 503 no route
+#   deepseek-v3            0/4  HTTP 503 no route
+#   qwen-3-32b             0/4  HTTP 404 unknown model
+#
+# So MODEL_A becomes gpt-oss-120b. This costs nothing and restores a real
+# cross-check; paying for the reader would also have worked and was not needed.
+MODEL_A = os.environ.get("DIGGER_MODEL_A", "gpt-oss-120b")
 MODEL_B = os.environ.get("DIGGER_MODEL_B", "command-a")
 # Free-tier providers rate-limit and 503 constantly, so a named model that is
 # unavailable right now falls back to freellmapi's own routing rather than
