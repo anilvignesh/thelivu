@@ -283,6 +283,135 @@ def _is_a_specific_thing(qid, timeout=TIMEOUT):
     return False
 
 
+WIKIDATA_SPARQL = "https://query.wikidata.org/sparql"
+
+# How long a role stays resolvable without anyone checking. A ministry changes
+# hands; a cached answer from last year is a wrong face, not a stale one.
+OFFICEHOLDER_QUERY = """
+SELECT ?person ?personLabel ?start WHERE {
+  ?office rdfs:label %s@en .
+  ?person p:P39 ?st .
+  ?st ps:P39 ?office .
+  ?st pq:P580 ?start .
+  FILTER NOT EXISTS { ?st pq:P582 ?end }
+  SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+}
+ORDER BY DESC(?start) LIMIT 5
+"""
+
+
+def officeholder(office, timeout=TIMEOUT):
+    """Who currently holds a named office, per Wikidata. (name, since) or None.
+
+    Anil, 2026-09-14: *"let's make the image search more specific, like chief
+    minister kerala 2025."* Right instinct, and this is the rigorous form of it
+    — a structured claim about who holds a post, with a start date, rather than
+    a search engine's opinion about which photo is relevant.
+
+    A START DATE IS REQUIRED, and that is not pedantry. Asking Wikidata for the
+    Chief Minister of Kerala returns Pinarayi Vijayan (since 2016-05-25) AND
+    V. D. Satheesan, who is Leader of the Opposition — his statement carries no
+    start date, and dropping undated statements is what separates them.
+
+    Ambiguity is refused rather than resolved. Two dated holders of one office
+    means either a genuine handover we cannot date-resolve or bad data, and
+    guessing between two politicians is exactly the error this whole module
+    exists to avoid.
+
+    COVERAGE IS THE REAL LIMIT, not the method. Measured 2026-09-14: the Chief
+    Minister of Kerala resolves; the state Finance Minister does not, because
+    Wikidata records no current position for K. N. Balagopal at all. A role that
+    does not resolve returns None and the caller falls back to asking a person.
+    """
+    literal = json.dumps(office)          # quotes and escapes it for SPARQL
+    try:
+        url = WIKIDATA_SPARQL + "?" + urllib.parse.urlencode(
+            {"query": OFFICEHOLDER_QUERY % literal, "format": "json"})
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            rows = json.loads(resp.read().decode("utf-8", "replace"))
+    except Exception as e:                                  # noqa: BLE001
+        log.info("officeholder lookup failed for %r: %s", office, e)
+        return None
+
+    hits = (rows.get("results") or {}).get("bindings") or []
+    if not hits:
+        log.info("wikidata records no current holder of %r", office)
+        return None
+    if len(hits) > 1:
+        names = ", ".join(h["personLabel"]["value"] for h in hits[:3])
+        log.info("%r has %d current holders (%s) — refusing to choose",
+                 office, len(hits), names)
+        return None
+    return (hits[0]["personLabel"]["value"],
+            (hits[0].get("start") or {}).get("value", "")[:10])
+
+
+def propose(subject, timeout=TIMEOUT):
+    """Photo candidates for a subject, each carrying HOW we think it is right.
+
+    Three routes, strongest first, because they fail in different ways and the
+    reviewer needs to know which one produced what is in front of them:
+
+      named person   portrait() on a name. The lead image of that person's
+                     article — editors chose it AS a depiction. Strongest.
+      named office   officeholder() resolves the post to a name, then the
+                     above. As strong, where Wikidata has the coverage.
+      text search    Commons relevance. WEAKEST, and the one that returned a
+                     correctly-licensed photograph of the Auditor General of
+                     PAKISTAN for a search about India's CAG.
+
+    Nothing here decides. Every candidate goes to gate 1 with its basis and its
+    date, and a person says yes — because the question a reviewer has to answer
+    is whether this is the right minister on the right day, and no API knows
+    that. The machine establishes what is permitted; a person establishes what
+    is true.
+    """
+    out = []
+    direct = portrait(subject, timeout=timeout)
+    if direct:
+        out.append(direct)
+
+    holder = officeholder(subject, timeout=timeout)
+    if holder:
+        name, since = holder
+        got = portrait(name, timeout=timeout)
+        if got:
+            when = since or "an unrecorded date"
+            got["subject_basis"] = (
+                f"Wikidata: {name} has held '{subject}' since {when}")
+            out.append(got)
+
+    for cand in search(subject, limit=6):
+        ok, _why = usable(cand.get("licence", ""))
+        if ok and subject_match(cand, subject):
+            cand["subject_basis"] = (
+                "Commons text search — RANKING ONLY, confirm the subject")
+            out.append(cand)
+
+    # One shape for the caller. portrait() and search() build different dicts,
+    # and a gate-1 card that has to branch on which route produced a candidate
+    # will eventually print the wrong field for one of them.
+    seen, uniq = set(), []
+    for c in out:
+        key = c.get("url")
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        uniq.append({
+            "title": c.get("title", ""),
+            "url": key,
+            "filename": c.get("filename") or urllib.parse.unquote(
+                key.split("/")[-1].split("?")[0]),
+            "licence": c.get("licence", ""),
+            "author": c.get("author", ""),
+            "credit": c.get("credit", ""),
+            "date": c.get("date", ""),
+            "subject_basis": c.get("subject_basis", "unstated"),
+        })
+    return uniq
+
+
 def _file_metadata(filename, timeout=TIMEOUT):
     """Licence and author for one Commons file, from its extmetadata."""
     try:

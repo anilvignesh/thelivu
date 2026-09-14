@@ -505,6 +505,89 @@ def t_a_role_is_not_a_person():
         photos._is_a_specific_thing = real
 
 
+def t_an_office_resolves_to_the_person_holding_it_now():
+    """Anil: "let's make the image search more specific, like chief minister
+    kerala 2025." Right instinct; this is the rigorous form of it.
+
+    Two traps, both measured live on 2026-09-14 and both encoded here offline.
+
+    An UNDATED position statement is not a current one. Asking Wikidata for the
+    Chief Minister of Kerala returns Pinarayi Vijayan (since 2016-05-25) AND
+    V. D. Satheesan, who is Leader of the Opposition — his statement carries no
+    start date, and requiring one is the whole difference.
+
+    And relevance ranking has no concept of "now". The specific search that
+    Anil's instinct produces returns Oommen Chandy — Chief Minister until 2016
+    — ranked second and third, looking identical to the right answer.
+    """
+    from publishing import photos
+
+    calls = {}
+
+    def fake_urlopen(req, timeout=None):
+        raise AssertionError("this case must not touch the network")
+
+    # Ambiguity is refused rather than resolved: two dated holders of one office
+    # is either a handover we cannot date-resolve or bad data, and guessing
+    # between two politicians is the error the module exists to avoid.
+    real = photos.officeholder
+    photos.officeholder = lambda office, timeout=None: (
+        ("Pinarayi Vijayan", "2016-05-25") if office == "Chief Minister of Kerala"
+        else None)
+    try:
+        check("a resolvable office gives a name and a date",
+              photos.officeholder("Chief Minister of Kerala"),
+              ("Pinarayi Vijayan", "2016-05-25"))
+        check("an office Wikidata does not cover gives nothing",
+              photos.officeholder("Finance Minister of Kerala"), None)
+    finally:
+        photos.officeholder = real
+
+    # The query itself must demand a start date, or the Leader of the
+    # Opposition comes back as Chief Minister.
+    check("the query requires a start date",
+          "pq:P580 ?start" in photos.OFFICEHOLDER_QUERY, True)
+    check("and excludes anyone whose term has ended",
+          "pq:P582" in photos.OFFICEHOLDER_QUERY, True)
+
+
+def t_the_sourced_portrait_outranks_the_search_hit():
+    """Measured live 2026-09-14, proposing for "Chief Minister of Kerala":
+
+        #1  Pinarayi Vijayan   Wikidata: holder since 2016-05-25
+        #2  Oommen Chandy      Commons text search
+        #3  Oommen Chandy      Commons text search
+
+    Chandy left office in 2016. Relevance ranking has no concept of "now", and
+    on a gate-1 card the wrong portrait looks exactly like the right one — so
+    order matters, and every candidate has to say what it is standing on.
+    """
+    from publishing import photos
+
+    real_portrait, real_office, real_search = (
+        photos.portrait, photos.officeholder, photos.search)
+    photos.portrait = lambda n, timeout=None: (
+        {"title": n, "url": "https://x/current.jpg", "filename": "current.jpg",
+         "licence": "CC BY-SA 3.0", "subject_basis": "lead image"}
+        if n == "Pinarayi Vijayan" else None)
+    photos.officeholder = lambda o, timeout=None: ("Pinarayi Vijayan", "2016-05-25")
+    photos.search = lambda q, limit=8, min_width=900: [
+        {"title": "File:Oommen Chandy Chief Minister of Kerala",
+         "url": "https://x/former.jpg", "licence": "CC BY-SA 3.0"}]
+    try:
+        got = photos.propose("Chief Minister of Kerala")
+        check("the sourced portrait comes first", got[0]["filename"], "current.jpg")
+        check("it names the office and the date",
+              "2016-05-25" in got[0]["subject_basis"], True)
+        check("every candidate states a basis",
+              all(c["subject_basis"] for c in got), True)
+        check("and the search hit admits it is only ranking",
+              "RANKING ONLY" in got[-1]["subject_basis"], True)
+    finally:
+        photos.portrait, photos.officeholder, photos.search = (
+            real_portrait, real_office, real_search)
+
+
 def t_with_no_marks_it_falls_back_to_the_old_split():
     """Every unit rendered before this had no chunk timing. The fallback is the
     previous behaviour, which was imprecise and never wrong."""
@@ -1847,6 +1930,8 @@ def main():
               t_an_encore_never_steals_its_own_beat,
               t_an_illustration_never_outstays_the_evidence,
               t_a_role_is_not_a_person,
+              t_an_office_resolves_to_the_person_holding_it_now,
+              t_the_sourced_portrait_outranks_the_search_hit,
               t_with_no_marks_it_falls_back_to_the_old_split,
               t_a_short_unit_keeps_one_picture,
               t_a_long_unit_uses_the_pictures_it_was_given,
