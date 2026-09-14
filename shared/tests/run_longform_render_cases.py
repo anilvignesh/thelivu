@@ -471,6 +471,40 @@ def t_an_illustration_never_outstays_the_evidence():
           any(a["kind"] == "image" for a in without), True)
 
 
+def t_a_role_is_not_a_person():
+    """Anil: "can't we show a picture of the minister?" We can — but only when
+    the script says WHO.
+
+    Offline: the failures worth protecting are decisions, not network calls.
+    Measured live on 2026-09-14, searching Wikipedia for "Finance Minister"
+    returns the generic article about the OFFICE, whose lead image is a Library
+    of Congress mural — public domain, correctly licensed, a photograph of
+    nobody. Only asking Wikidata what the subject IS separates that from
+    "K. N. Balagopal, Indian politician".
+    """
+    from publishing import photos
+
+    check("a human is depictable", "Q5" in photos._DEPICTABLE, True)
+    # An unknown or missing classification is refused. Not knowing what
+    # something is can never be the basis for putting its picture on screen.
+    check("no wikidata id means no portrait",
+          photos._is_a_specific_thing(None), False)
+
+    calls = []
+
+    def fake_entity(qid, timeout=None):
+        calls.append(qid)
+        return qid == "Q-person"
+
+    real = photos._is_a_specific_thing
+    photos._is_a_specific_thing = fake_entity
+    try:
+        check("a government post is refused", photos._is_a_specific_thing("Q-office"), False)
+        check("a named person is allowed", photos._is_a_specific_thing("Q-person"), True)
+    finally:
+        photos._is_a_specific_thing = real
+
+
 def t_with_no_marks_it_falls_back_to_the_old_split():
     """Every unit rendered before this had no chunk timing. The fallback is the
     previous behaviour, which was imprecise and never wrong."""
@@ -1812,6 +1846,7 @@ def main():
               t_a_gap_is_filled_with_evidence_before_more_subtitles,
               t_an_encore_never_steals_its_own_beat,
               t_an_illustration_never_outstays_the_evidence,
+              t_a_role_is_not_a_person,
               t_with_no_marks_it_falls_back_to_the_old_split,
               t_a_short_unit_keeps_one_picture,
               t_a_long_unit_uses_the_pictures_it_was_given,

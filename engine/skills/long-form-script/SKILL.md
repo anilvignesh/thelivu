@@ -285,6 +285,36 @@ machine-checked, the truth of the caption is not.
 Prefer a photograph to a generated scene wherever a real one exists and we may
 use it. It outranks IMAGE in the shot order for exactly that reason.
 
+### NAME the people. It is what makes a face possible.
+
+Anil, 2026-09-14, watching the third cut: *"can't we show a picture of the
+minister?"* We can — but only if you have said who the minister is.
+
+`publishing/photos.portrait()` resolves a NAME to the lead image of that
+person's Wikipedia article: an image editors chose as a depiction of that
+subject, not a search result that merely mentions them. It is checked against
+Wikidata for what the subject IS, and it refuses anything that is not a real,
+photographable person or place.
+
+Measured on 2026-09-14, which is why the rule is written this way:
+
+| what the script said | what comes back |
+|---|---|
+| `K. N. Balagopal` | his photograph, reading the budget, CC BY-SA 4.0 |
+| `Pinarayi Vijayan` | his official portrait, CC BY-SA 3.0 |
+| `Finance Minister` | **refused** — the generic article's lead image is a Library of Congress mural |
+| `Chief Minister` | **refused**, same reason |
+
+So write **"Finance Minister K. N. Balagopal told the Assembly"**, not "the
+Finance Minister told the Assembly". This is not a rendering convenience. An
+accountability story that will not say whose signature is on the decision is a
+weaker story, and the unnamed version reads as hedging even when it is not.
+
+Name them on FIRST MENTION in the chapter where they matter, with the role
+attached so a viewer who does not recognise the name still follows. Do not name
+a person the record does not actually place there — an unnamed official is
+better than a wrong one.
+
 ### CLIP lines — real footage
 
 ```

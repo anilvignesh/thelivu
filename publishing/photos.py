@@ -34,6 +34,7 @@ some fair-use and restricted files; `usable()` names the licences that
 attribution settles and refuses the rest rather than guessing.
 """
 
+import json
 import logging
 import re
 import urllib.parse
@@ -150,6 +151,158 @@ def search(query, limit=8, min_width=900):
 _WEAK = {"the", "of", "and", "in", "on", "at", "a", "an", "file", "jpg", "jpeg",
          "png", "building", "office", "view", "inside", "outside", "new", "old",
          "photo", "image", "shri", "smt", "ms", "mr"}
+
+
+WIKIPEDIA_API = "https://en.wikipedia.org/w/api.php"
+
+
+def portrait(name, timeout=TIMEOUT):
+    """The image from the ARTICLE ABOUT a subject. Returns a candidate or None.
+
+    This exists because `search()` cannot establish subject and no amount of
+    filtering fixes that. Measured 2026-09-14, searching Commons for the
+    Comptroller and Auditor General of India returns a correctly licensed
+    photograph of the Auditor General of PAKISTAN — and its caption names both
+    officials, so a filename test keeps it. Relevance ranking is not an
+    assertion about who is in the picture.
+
+    An article's lead image is a different kind of claim. Editors chose it AS a
+    depiction of that subject, and a name with no article returns nothing rather
+    than the closest match. That is the difference between "this file mentions
+    the Finance Minister" and "this is the Finance Minister".
+
+    It still does not establish that the picture is CURRENT, or taken at the
+    event the script describes. A correct portrait of the right minister from
+    six years ago is a different claim from a photograph of them at that budget
+    session, and only a person can tell those apart — so this makes a photo
+    PROPOSABLE and gate 1 still decides.
+
+    Needs a NAME. "Finance Minister" has no article; "K. N. Balagopal" does.
+    That is a constraint on the script, not a limitation here — see
+    engine/skills/long-form-script/SKILL.md.
+    """
+    params = {"action": "query", "format": "json",
+              "prop": "pageimages|pageterms|pageprops", "piprop": "original",
+              "redirects": 1, "titles": name}
+    try:
+        req = urllib.request.Request(
+            WIKIPEDIA_API + "?" + urllib.parse.urlencode(params),
+            headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8", "replace"))
+    except Exception as e:                                  # noqa: BLE001
+        log.info("portrait lookup failed for %r: %s", name, e)
+        return None
+
+    pages = (data.get("query") or {}).get("pages") or {}
+    for page in (pages.values() if isinstance(pages, dict) else pages):
+        if "missing" in page:
+            continue
+        src = (page.get("original") or {}).get("source")
+        if not src:
+            continue
+        # Is this article about a THING or about a CONCEPT? "Finance Minister"
+        # has an article — the generic one about the office — and its lead image
+        # is a Library of Congress mural. Public domain, correctly licensed, and
+        # a photograph of nobody. Asking Wikidata what the subject IS separates
+        # "K. N. Balagopal, Indian politician" from "finance minister, a
+        # government position", which no title or licence check can do.
+        qid = (page.get("pageprops") or {}).get("wikibase_item")
+        if not _is_a_specific_thing(qid, timeout=timeout):
+            log.info("%r is a concept, not a subject — refusing its lead image",
+                     name)
+            return None
+        filename = urllib.parse.unquote(src.split("/")[-1].split("?")[0])
+        # An SVG lead image is a logo or a coat of arms, not a photograph. Fine
+        # for an institution, wrong for "show me the minister".
+        if filename.lower().endswith(".svg"):
+            log.info("%r leads with %s — a logo, not a photograph", name, filename)
+            return None
+        meta = _file_metadata(filename, timeout=timeout) or {}
+        licence = meta.get("licence", "")
+        ok, why = usable(licence)
+        if not ok:
+            log.info("portrait of %r is %s — %s", name, licence or "unlicensed", why)
+            return None
+        return {
+            "title": page.get("title") or name,
+            "url": src,
+            "filename": filename,
+            "licence": licence,
+            "author": meta.get("author", ""),
+            "credit": meta.get("credit", ""),
+            "date": meta.get("date", ""),
+            # Says HOW we believe this is the right subject, so a reviewer can
+            # weigh it. A lead image is a stronger claim than a text hit.
+            "subject_basis": f"lead image of the Wikipedia article '{page.get('title')}'",
+        }
+    return None
+
+
+# Wikidata classes a portrait may legitimately depict. Q5 is a human; the rest
+# are things that physically exist and can be photographed. A government POST,
+# a policy or an event type is none of these, and that is the distinction.
+_DEPICTABLE = {
+    "Q5",          # human
+    "Q43229",      # organization
+    "Q41176",      # building
+    "Q3947",       # house
+    "Q515",        # city
+    "Q486972",     # human settlement
+    "Q56061",      # administrative territorial entity
+    "Q327333",     # government agency
+    "Q2085381",    # ... publisher/institution
+}
+
+
+def _is_a_specific_thing(qid, timeout=TIMEOUT):
+    """Does Wikidata say this subject is something that can be photographed?
+
+    Unknown is NOT permission. A lookup that fails, or an entity with no P31 we
+    recognise, returns False — the cost of refusing a good photo is one missing
+    frame, and the cost of accepting a bad one is a false claim on screen.
+    """
+    if not qid:
+        return False
+    try:
+        req = urllib.request.Request(
+            f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json",
+            headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = json.loads(resp.read().decode("utf-8", "replace"))
+    except Exception as e:                                  # noqa: BLE001
+        log.info("wikidata lookup failed for %s: %s", qid, e)
+        return False
+
+    ent = (body.get("entities") or {}).get(qid) or {}
+    for claim in (ent.get("claims") or {}).get("P31") or []:
+        val = (((claim.get("mainsnak") or {}).get("datavalue") or {})
+               .get("value") or {})
+        if val.get("id") in _DEPICTABLE:
+            return True
+    return False
+
+
+def _file_metadata(filename, timeout=TIMEOUT):
+    """Licence and author for one Commons file, from its extmetadata."""
+    try:
+        body = _get({"action": "query", "format": "json", "prop": "imageinfo",
+                     "iiprop": "extmetadata|url", "titles": "File:" + filename})
+    except Exception as e:                                  # noqa: BLE001
+        log.info("metadata lookup failed for %s: %s", filename, e)
+        return None
+    # `pages` is a dict keyed by page id in the classic API and a LIST under
+    # formatversion=2, which _get() asks for. Handle both rather than depending
+    # on which one a shared helper requests today.
+    pages = (body.get("query") or {}).get("pages") or {}
+    for page in (pages.values() if isinstance(pages, dict) else pages):
+        for info in page.get("imageinfo") or []:
+            em = info.get("extmetadata") or {}
+            g = lambda k: _plain((em.get(k) or {}).get("value", "") or "")  # noqa: E731
+            return {"licence": g("LicenseShortName") or g("UsageTerms"),
+                    "author": g("Artist"), "credit": g("Credit"),
+                    "date": g("DateTimeOriginal")}
+    return None
 
 
 def subject_match(candidate, query):
