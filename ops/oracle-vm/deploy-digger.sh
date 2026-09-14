@@ -69,9 +69,24 @@ if ! printf '%s' "$FREE_KEY" | grep -Eq '^freellmapi-[0-9a-f]{48}$'; then
 fi
 printf 'FREELLMAPI_KEY=%s\n' "$FREE_KEY" >> "$TMP_ENV"
 
+# Cycle shortened 3600 -> 1200 on 2026-09-14, when the target list went from 9
+# to 35 (every state AG office, not just Kerala). At one cycle an hour each
+# target was being visited once every 35 HOURS and the 477 reachable CAG reports
+# would have taken 20 days for a single pass — the expansion would have been
+# real on paper and imaginary in practice.
+#
+# THE LIMIT IS THE FREE MODEL TIER, NOT THIS BOX. A cycle costs ~25s of wall
+# clock and 20MB; the box is idle 59 minutes in 60. But measured on 2026-09-14,
+# gemini-3.5-flash-lite (MODEL_A) returned 429 "All models exhausted" on seven
+# of eight calls in a single second, while command-a took eight of eight. The
+# cross-check survives that — a rate-limited MODEL_A falls back to freellmapi's
+# own routing — but every extra document leans harder on that fallback, and a
+# cross-check between one named model and "whatever was free" is a weaker check.
+#
+# So 3x, not the 12x the hardware would allow. MAX_DOCS stays at 1.
 cat >> "$TMP_ENV" <<'EOF'
 FREELLMAPI_BASE_URL=http://127.0.0.1:3001
-DIGGER_CYCLE_SECONDS=3600
+DIGGER_CYCLE_SECONDS=1200
 DIGGER_MAX_DOCS=1
 EOF
 
