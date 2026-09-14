@@ -387,6 +387,90 @@ def t_the_same_sentence_is_only_ever_voiced_once():
                 os.environ["LONGFORM_DIR"] = old_env
 
 
+def t_a_figure_gets_longer_on_screen_than_a_subtitle():
+    """Anil, 2026-09-14, watching the 44-shot cut: "figures disappear fast, the
+    words stay longer."
+
+    A quote frame is a sentence the narrator is reading aloud at that moment —
+    the viewer is hearing it and the frame only has to keep up. A figure is a
+    number, a label and a source, none of it spoken in full, and it has to be
+    READ. One shared floor gave them the same three seconds."""
+    fig = {"kind": "figure", "figure": {"value": "30,308 crore", "label": "x"}}
+    quote = {"kind": "quote", "text": "A sentence being spoken right now."}
+    rec = {"kind": "record", "record": {"quote": "y"}}
+    check("a figure outlasts a subtitle",
+          lfr.min_shot_for(fig) > lfr.min_shot_for(quote), True)
+    check("and a document page outlasts a figure",
+          lfr.min_shot_for(rec) > lfr.min_shot_for(fig), True)
+
+
+def t_evidence_outranks_words_when_both_want_the_moment():
+    """A quote frame matched its own sentence exactly, so it scored that
+    sentence's LENGTH — ten to fifteen — against a figure's two to six shared
+    terms. _best_monotone maximises total score, so the subtitles won every
+    contested beat and took 34% of the screen against the figures' 21%."""
+    fig = {"kind": "figure", "figure": {"value": "1", "label": "x"}}
+    quote = {"kind": "quote", "text": "A very long sentence indeed " * 4}
+    check("a modestly-matched figure still beats a long sentence",
+          lfr._weighted(fig, 3) > lfr._weighted(quote, 40), True)
+    check("the raw score is capped before weighting",
+          lfr._weighted(quote, 40), lfr._weighted(quote, lfr.ANCHOR_SCORE_CAP))
+
+
+def t_a_gap_is_filled_with_evidence_before_more_subtitles():
+    """Anil: "the words take more precedence than the figures in some places."
+
+    Filling every spare slot with narration meant subtitles held 52% of a
+    7-minute cut. A figure returning when the narration returns to it is the
+    argument being made twice; a fifteenth quote frame is the screen giving up.
+    """
+    text = " ".join(f"Sentence number {i} carries the argument onward a step."
+                    for i in range(1, 14))
+    assets = [{"kind": "figure", "figure": {"value": "30,308 crore", "label": "a"}},
+              {"kind": "record", "record": {"quote": "b"}}]
+    out = lfr.with_filler(assets, text, 10, anchored=True)
+    kinds = [a["kind"] for a in out]
+    check("the declared evidence is kept", kinds[:2], ["figure", "record"])
+    check("quotes do not take the whole budget",
+          kinds.count("quote") <= max(1, round(10 * lfr.QUOTE_SHARE)), True)
+    check("evidence comes back instead",
+          any(a.get("encore") for a in out), True)
+
+
+def t_an_encore_never_steals_its_own_beat():
+    """A repeat matches the same chunk as the original BY CONSTRUCTION, so
+    letting it anchor put two assets on one moment and pushed the original off
+    it — on-beat placement fell from 75% to 56%."""
+    marks = [(0.0, "Thirty thousand three hundred and eight crore went uncollected."),
+             (20.0, "Something else entirely is said here.")]
+    fig = {"kind": "figure", "figure": {"value": "30,308 crore", "label": "uncollected"}}
+    again = dict(fig); again["encore"] = True
+    check("the original anchors", lfr.anchor_chunk(fig, marks), 0)
+    check("the encore does not", lfr.anchor_chunk(again, marks), None)
+
+
+def t_an_illustration_never_outstays_the_evidence():
+    """Six generated scenes took 79 seconds of a 7-minute cut — 19% — and when
+    the daily image cap is spent they render as a plain background. Anil: "there
+    is a huge gap where nothing is shown... lots of blank part, just audio."
+    """
+    img = {"kind": "image", "prompt": "a ledger"}
+    fig = {"kind": "figure", "figure": {"value": "1", "label": "x"}}
+    check("an illustration is held far less than evidence",
+          lfr.max_hold_for(img) < lfr.max_hold_for(fig), True)
+    check("and a subtitle cannot absorb a long gap either",
+          lfr.max_hold_for({"kind": "quote"}) < lfr.max_hold_for(fig), True)
+
+    # A unit with evidence to re-show does not spend a slot on atmosphere.
+    text = " ".join(f"Sentence {i} says something worth showing." for i in range(1, 10))
+    with_ev = lfr.with_filler([fig], text, 8, images=["a ledger"], anchored=True)
+    check("a unit with evidence shows no illustration",
+          any(a["kind"] == "image" for a in with_ev), False)
+    without = lfr.with_filler([], text, 8, images=["a ledger"], anchored=True)
+    check("a unit with none still gets one",
+          any(a["kind"] == "image" for a in without), True)
+
+
 def t_with_no_marks_it_falls_back_to_the_old_split():
     """Every unit rendered before this had no chunk timing. The fallback is the
     previous behaviour, which was imprecise and never wrong."""
@@ -977,16 +1061,24 @@ def t_the_chapters_were_actually_cut(state):
     A renderer that silently uses only the first image still produces a valid
     file of the right length, so nothing else in this suite would notice.
 
-    Both chapters here run ~30s, which at a 13-second target cadence buys two
-    shots each. The budget comes from the narration, not from how many assets
-    the writer supplied — a chapter with eight IMAGE lines and twelve seconds of
-    speech still gets one frame.
+    This asserted exactly 8 until 2026-09-14 — cold open, card, 2, card, 2,
+    close — which was the budget when a shot count came from duration alone. It
+    does not any more: fit_unit buys extra frames when a hold would outstay what
+    its kind is worth, so the same script now cuts to 11. The fixed number was
+    a snapshot of the budget, not the thing worth protecting.
+
+    What is worth protecting is the property it was standing in for: every
+    chapter is cut into SEVERAL shots, not held on one.
     """
     res = state["res"]
     if not res.get("ok"):
         return
-    # cold open (1) + card + 2 + card + 2 + close (1) = 8
-    check("shot count", res.get("shots"), 8)
+    n = res.get("shots")
+    # 2 bookends + 2 cards is the floor; anything at or below that means a
+    # chapter was held on a single frame, which is the bug.
+    check("every chapter is cut into more than one shot", n > 6, True)
+    check("and not cut so fast it is a slideshow",
+          n <= 2 + 2 + 2 * lfr.MAX_EXTRA_SHOTS + 8, True)
 
 
 # ------------------------------------------------------- the chain around it
@@ -1715,6 +1807,11 @@ def main():
               t_quote_frames_cover_the_opening_when_the_evidence_is_late,
               t_a_weak_anchor_still_beats_no_anchor,
               t_the_same_sentence_is_only_ever_voiced_once,
+              t_a_figure_gets_longer_on_screen_than_a_subtitle,
+              t_evidence_outranks_words_when_both_want_the_moment,
+              t_a_gap_is_filled_with_evidence_before_more_subtitles,
+              t_an_encore_never_steals_its_own_beat,
+              t_an_illustration_never_outstays_the_evidence,
               t_with_no_marks_it_falls_back_to_the_old_split,
               t_a_short_unit_keeps_one_picture,
               t_a_long_unit_uses_the_pictures_it_was_given,

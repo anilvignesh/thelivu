@@ -629,9 +629,61 @@ MAX_SYNTH_WORDS = 34
 # How far BEFORE the words a frame appears. A frame that cuts in exactly as the
 # number is said reads as late, because the eye needs a beat to travel to it.
 LEAD_IN = 2.0
-# No shot shorter than this once anchoring has had its say, or an anchored
-# figure flashes past unread.
-MIN_ANCHORED_SHOT = 3.0
+# How long a shot must hold, BY WHAT IS ON IT. One number for everything was
+# wrong in a way only watching catches — Anil, 2026-09-14: "figures disappear
+# fast, the words stay longer."
+#
+# A quote frame is a sentence the narrator is reading aloud at that moment; the
+# viewer is hearing it, and the frame only has to keep up. A figure is the
+# opposite: a number, a label and a source, none of it spoken in full, and the
+# viewer has to actually read it. A record is a page of a document. Giving them
+# the same three seconds meant the evidence flashed past while the subtitles sat
+# there.
+MIN_SHOT_BY_KIND = {
+    "record": 7.0,      # a page of a PDF, with a quote pulled out beside it
+    "table":  7.0,      # rows to scan
+    "figure": 6.0,      # number + label + source
+    "photo":  5.0,
+    "clip":   5.0,
+    "quote":  3.5,      # being read aloud simultaneously
+    "image":  2.5,      # atmosphere; the least of these
+}
+MIN_ANCHORED_SHOT = 3.0     # floor for anything not named above
+
+# Longest an ILLUSTRATION may hold. Separate from MAX_HOLD because the problem
+# is different: a long evidence shot is dwelling on the proof, a long
+# illustration is the screen doing nothing. On the 44-shot cut six generated
+# scenes took 79 seconds — 19% of the video — and read as dead air.
+MAX_IMAGE_HOLD = 6.0
+
+# Most of a unit's shots that may be quote frames. Not a style rule: subtitles
+# are what the renderer reaches for when it has nothing to show, so an unbounded
+# share is a silent measure of how little evidence the script actually carried.
+QUOTE_SHARE = 0.40
+MAX_QUOTE_HOLD = 10.0
+
+# What a kind is WORTH when two assets want the same moment. Separate from the
+# anchor score, which measures only how confident the match is — confidence and
+# editorial priority are different questions and mixing them was a bug.
+#
+# A quote frame matches its own sentence exactly, so it scored the length of
+# that sentence: ten to fifteen. A figure scores the number of distinctive terms
+# it shares with a chunk: two to twenty, usually under six. _best_monotone
+# maximises total score, so quote frames systematically won, and on the 44-shot
+# cut the words took 34% of the screen against the figures' 21%. Anil, watching
+# it: "the words take more precedence than the figures in some places."
+#
+# plan_assets already ranks evidence above illustration when handing out SLOTS.
+# This is the same policy applied to TIME, which is the half that was missing.
+KIND_WEIGHT = {
+    "record": 4.0,
+    "figure": 4.0,
+    "table":  3.0,
+    "photo":  3.0,
+    "clip":   3.0,
+    "quote":  1.0,
+    "image":  0.5,
+}
 # Number of assets that must carry a believed anchor before reordering happens
 # at all. Two is the minimum that can disagree about order.
 #
@@ -643,6 +695,9 @@ MIN_ANCHORED_SHOT = 3.0
 # 35 seconds before the sentence that says it. An anchor is either believed or
 # it is not.
 ANCHOR_REORDER_MIN = 2
+# Past this, a stronger match is not a better claim on the moment — it just means
+# a longer sentence. Capping first is what makes KIND_WEIGHT mean anything.
+ANCHOR_SCORE_CAP = 6
 # Longest any one frame may hold. Not a style preference — this is the number
 # that decides whether the thing is a video or an audio-book with a cover. When
 # every anchor in a chapter clumps late, placement alone cannot fix the dead air
@@ -950,7 +1005,8 @@ def _placements(assets, marks, dur, pauses, plan_cuts):
 
     scored = [_anchor_score(a, marks) for a in assets]
     times = [marks[ci][0] if ci is not None else None for ci, _sc in scored]
-    keep = _best_monotone(times, [sc for _ci, sc in scored])
+    keep = _best_monotone(times, [_weighted(assets[i], scored[i][1])
+                                  for i in range(k)])
     if not keep:
         return list(range(k)), plan_cuts(dur, k, pauses)
 
@@ -995,16 +1051,57 @@ def _placements(assets, marks, dur, pauses, plan_cuts):
     starts = [start[i] for i in order]
     starts[0] = 0.0                      # something is on screen from frame one
 
+    floors = [min_shot_for(assets[i]) for i in order]
     for i in range(1, k):
-        if starts[i] - starts[i - 1] < MIN_ANCHORED_SHOT:
-            starts[i] = starts[i - 1] + MIN_ANCHORED_SHOT
-    if starts[-1] > dur - MIN_ANCHORED_SHOT:
-        for i in range(k - 1, 0, -1):
-            starts[i] = min(starts[i], dur - MIN_ANCHORED_SHOT * (k - i))
+        if starts[i] - starts[i - 1] < floors[i - 1]:
+            starts[i] = starts[i - 1] + floors[i - 1]
+    # Pull back from the end if the floors have pushed past it, respecting each
+    # remaining shot's own floor rather than one shared number.
+    tail_need = 0.0
+    for i in range(k - 1, 0, -1):
+        tail_need += floors[i]
+        starts[i] = min(starts[i], dur - tail_need)
+    starts[0] = 0.0
+    for i in range(1, k):
+        starts[i] = max(starts[i], starts[i - 1] + 0.5)
 
     lengths = [round(starts[i + 1] - starts[i], 3) for i in range(k - 1)]
     lengths.append(round(dur - sum(lengths), 3))
     return order, lengths
+
+
+def _weighted(asset, score):
+    """Anchor confidence, scaled by what the asset is worth.
+
+    The raw score is capped first. A quote frame's score is the length of the
+    sentence it matched, which is unbounded and on a different scale from a
+    figure's term count — left uncapped, one long sentence outweighs three
+    figures no matter what the weights say.
+    """
+    return min(score, ANCHOR_SCORE_CAP) * KIND_WEIGHT.get(asset.get("kind"), 1.0)
+
+
+def min_shot_for(asset):
+    """How long this frame must stay up, by what is on it."""
+    return MIN_SHOT_BY_KIND.get(asset.get("kind"), MIN_ANCHORED_SHOT)
+
+
+def max_hold_for(asset):
+    """How long this frame may stay up before the screen is doing nothing.
+
+    An illustration gets a much shorter leash than evidence. Dwelling on a
+    document page is the video doing its job; dwelling on a generated scene is
+    dead air, and a unit that cannot fill the gap any other way should be buying
+    another quote frame instead.
+    """
+    kind = asset.get("kind")
+    if kind == "image":
+        return MAX_IMAGE_HOLD
+    if kind == "quote":
+        # A subtitle tracks a sentence. Letting one absorb a fifteen-second gap
+        # is the same dead air as a long illustration, just with text on it.
+        return MAX_QUOTE_HOLD
+    return MAX_HOLD
 
 
 def _best_monotone(times, scores):
@@ -1047,15 +1144,21 @@ def fit_unit(assets, text, want, images, marks, dur, pauses, plan_cuts):
     of unused sentences on its own, which is the natural stopping point: when
     there is nothing left to put on screen, holding is the honest answer.
     """
+    def overrun(ordered, cuts):
+        """Seconds by which the worst shot outstays what its kind is worth."""
+        return max((c - max_hold_for(a) for a, c in zip(ordered, cuts)),
+                   default=0.0)
+
     best = None
     for extra in range(0, MAX_EXTRA_SHOTS + 1):
         filled = with_filler(assets, text, want + extra, images=images,
                              anchored=bool(marks))
         k = min(want + extra, len(filled)) or 1
         ordered, cuts = align_to_narration(filled[:k], marks, dur, pauses, plan_cuts)
-        if best is None or max(cuts) < max(best[1]):
+        over = overrun(ordered, cuts)
+        if best is None or over < overrun(*best):
             best = (ordered, cuts)
-        if max(cuts) <= MAX_HOLD:
+        if over <= 0:
             return ordered, cuts
         if len(filled) < want + extra:
             break            # filler exhausted — holding is the honest answer
@@ -1093,6 +1196,14 @@ def _anchor_score(asset, marks):
     by construction — and deciding which one keeps the anchor needs to be a
     judgement about match strength, not about which was declared first.
     """
+    # An ENCORE never anchors. It is the same figure returning to the screen, so
+    # it matches the same chunk as the original by construction — and letting it
+    # claim that beat put two assets on one moment and pushed the original off
+    # it. On-beat placement fell from 75% to 56% the first time encores existed.
+    # A repeat is a gap-filler: it goes where the screen would otherwise be
+    # empty, which is what free placement already does well.
+    if asset.get("encore"):
+        return None, 0
     terms = _anchor_terms(asset)
     if not terms or not marks:
         return None, 0
@@ -1224,20 +1335,76 @@ def with_filler(assets, text, want, images=(), anchored=False):
     and atmosphere is what you add once the argument is already on screen; in a
     unit with two or three shots there is nothing to spare, and a quote frame
     beats a picture of the idea of a quote every time.
+
+    QUOTE_SHARE is the newer half. Filling every spare slot with a sentence of
+    the narration meant that on a 7-minute cut the subtitles held the screen for
+    52% of it against the figures' 20% — Anil, watching it: "the words take more
+    precedence than the figures in some places." Past that share the unit
+    re-shows evidence it has already earned instead. A figure coming back when
+    the narration returns to it is the argument being made twice; a fifteenth
+    quote frame is the screen giving up.
     """
     out = list(assets[:want])
     room = want - len(out)
     if room <= 0:
         return out[:want]
+    quotes = quote_fill(text, len(out), want, anchored=anchored)
+    encores = encore(assets, want)
+    # An illustration only earns a slot in a unit with NO evidence to show
+    # again. "Atmosphere is what you add once the argument is already on screen"
+    # was always the rule; before encores existed there was nothing else to
+    # reach for, so every long unit got one whether or not it had better. On the
+    # 58-shot cut that was 64 seconds of generated scene competing with figures
+    # for the same gaps — and when the daily image cap is spent, competing as a
+    # blank background.
     picture = (list(images)[:MAX_IMAGES_PER_UNIT]
-               if want >= MIN_SHOTS_FOR_IMAGE else [])
-    quotes = quote_fill(text, len(out), want - len(picture), anchored=anchored)
-    out += quotes
+               if want >= MIN_SHOTS_FOR_IMAGE and not encores else [])
+    budget = want - len(picture)
+
+    # INTERLEAVED, evidence first. Appending the encores after the quotes left
+    # the quotes holding every wide gap anyway — order decides what survives the
+    # truncation to `want`, and it decides which asset lands in the dead air the
+    # anchors left. Evidence goes first for both reasons.
+    fill, qi, ei = [], 0, 0
+    max_quotes = max(1, int(round(budget * QUOTE_SHARE)))
+    while len(out) + len(fill) < budget and (qi < len(quotes) or ei < len(encores)):
+        if ei < len(encores) and (qi >= max_quotes or qi >= len(quotes)):
+            fill.append(encores[ei]); ei += 1
+        elif qi < len(quotes):
+            fill.append(quotes[qi]); qi += 1
+        else:
+            break
+        # One quote, then one piece of evidence, so neither runs away.
+        if ei < len(encores) and qi < max_quotes and len(out) + len(fill) < budget:
+            fill.append(encores[ei]); ei += 1
+    out += fill
     out += [{"kind": "image", "prompt": p} for p in picture]
     # A unit with nothing to say and nothing declared still needs one frame.
     if not out:
         out = [{"kind": "image", "prompt": (list(images) or [None])[0]}]
     return out[:want]
+
+
+def encore(assets, n):
+    """Evidence shown again, hardest first. Never the same thing twice running.
+
+    A repeat is not padding. The narration comes back to a number — that is what
+    a chapter DOES — and when it does, the number belongs on screen again. The
+    alternative this replaced was another line of subtitles, which is the screen
+    admitting it has nothing to show.
+    """
+    if n <= 0:
+        return []
+    pool = [a for a in assets if a.get("kind") in ("figure", "record", "table",
+                                                   "photo")]
+    if not pool:
+        return []
+    out = []
+    for i in range(n):
+        again = dict(pool[i % len(pool)])
+        again["encore"] = True
+        out.append(again)
+    return out
 
 
 # What makes a clip usable, and which of those needs a human to say yes.

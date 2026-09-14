@@ -141,6 +141,52 @@ def search(query, limit=8, min_width=900):
     return out
 
 
+# Words that carry no identifying weight in a Commons filename, so their
+# presence must not count as the title corroborating anything.
+# NO PLACE NAMES HERE. "india" was on this list for one draft and it is the
+# single word separating the Comptroller and Auditor General of INDIA from the
+# Auditor General of PAKISTAN — dropping it as generic is how the wrong country
+# gets on screen. Only genuinely descriptive words belong.
+_WEAK = {"the", "of", "and", "in", "on", "at", "a", "an", "file", "jpg", "jpeg",
+         "png", "building", "office", "view", "inside", "outside", "new", "old",
+         "photo", "image", "shri", "smt", "ms", "mr"}
+
+
+def subject_match(candidate, query):
+    """Does the FILE'S OWN TITLE corroborate that this is what we searched for?
+
+    Commons relevance ranking is not an assertion about subject, and trusting it
+    produces exactly the failure this module's docstring warns about. Measured
+    on 2026-09-14, against searches for a real Kerala audit story:
+
+        "Kerala Secretariat"          -> Dalava.jpg
+                                         an 18th-century Travancore official
+        "Comptroller and Auditor
+         General of India building"   -> The Auditor General of PAKISTAN
+
+    Both correctly licensed, both a false claim if put on screen. Both are
+    rejected by requiring the distinctive words of the query to appear in the
+    title, which "Pinarayi Vijayan" -> Pinarayi-Vijayan-Eriya.jpg passes and
+    neither of those does.
+
+    This is a test for CORROBORATION, not for truth. A photograph of the right
+    minister on the wrong day is still wrong, and no filename can tell you that
+    — which is why a match here makes a photo proposable, and a person at gate 1
+    still decides whether it goes in.
+    """
+    terms = [t for t in re.findall(r"[A-Za-z]{3,}", (query or "").lower())
+             if t not in _WEAK]
+    if not terms:
+        return False
+    title = re.sub(r"[^a-z0-9]+", " ", (candidate.get("title") or "").lower())
+    words = set(title.split())
+    hit = sum(1 for t in terms if t in words)
+    # Every distinctive word, or both of the two when that is all there is. A
+    # partial match is how "Auditor General of India" became "Auditor General of
+    # Pakistan" — the words that agreed were the ones that identify nothing.
+    return hit == len(terms)
+
+
 def attribution(candidate):
     """The credit line that must appear on screen. Not optional — it is the
     licence condition, which is the only reason we may use the file at all."""
