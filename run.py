@@ -303,6 +303,33 @@ if service == "thelivu-agent":
             log.error("YouTube sync failed: %s", e, exc_info=True)
             _sweep_failed("YouTube sync", e)
 
+        # THE DAILY HEALTH DIGEST. Above the budget governor with the others,
+        # and for a stronger version of the same reason: it makes no model call
+        # at all, and the day the engine parks at its cap is exactly the day a
+        # silent component most needs reporting.
+        #
+        # Added 2026-09-14 (Anil: "Let's get this into a proper commercial grade
+        # system"). The two checks below it were each written after one incident
+        # to watch one thing — model_health is still NVIDIA-only, so it was
+        # watching a provider we had already moved off while the digger's reader
+        # 429'd into a fallback beside it. This asks the general question
+        # instead: is each component still producing what it exists to produce.
+        #
+        # Sent only when something is wrong, or once a day regardless so that
+        # silence never becomes ambiguous — a digest that stops arriving must be
+        # distinguishable from a system with nothing to say.
+        try:
+            from shared.health import digest, BROKEN, UNKNOWN
+            last = kv_get("health_digest_sent_on") or ""
+            today = now_utc.date().isoformat()
+            text, worst = digest(include_models=False)
+            if worst in (BROKEN, UNKNOWN) or last != today:
+                _tg_notify("Thelivu health\n\n" + text)
+                kv_set("health_digest_sent_on", today)
+            log.info("Health: %s", text.splitlines()[0])
+        except Exception as e:
+            log.error("Health digest failed: %s", e, exc_info=True)
+
         # Same placement, same reasoning: free NVIDIA HTTP, not a paid model
         # call, must stay above the budget governor so it keeps watching on
         # exactly the days the paid stages are busiest. Added 2026-08-18 —

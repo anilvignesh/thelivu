@@ -3525,6 +3525,54 @@ def digger_seen_titles(target_key, limit=400):
         conn.close()
 
 
+def candidates_since(days=2):
+    """How many digger candidates were recorded in the last `days`.
+
+    Counts ROWS, which is only meaningful because duplicates were fixed on
+    2026-09-14. Before that the queue grew while the digger found nothing new,
+    and this number would have read as healthy throughout.
+    """
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        since = ("NOW() - INTERVAL '%d days'" % int(days) if _is_postgres()
+                 else "datetime('now', '-%d days')" % int(days))
+        cur.execute(f"SELECT count(*) FROM digger_candidates WHERE created_at > {since}")
+        return int(cur.fetchone()[0] or 0)
+    finally:
+        conn.close()
+
+
+def reel_queue_state():
+    """(ready, held, last_posted_at) — what the reel pipeline looks like now."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT status, count(*) FROM reels GROUP BY status")
+        counts = {r[0]: int(r[1]) for r in cur.fetchall()}
+        cur.execute("SELECT max(posted_at) FROM reels WHERE status = 'posted'")
+        last = cur.fetchone()[0]
+        if last is not None and getattr(last, "tzinfo", None) is None:
+            from datetime import timezone as _tz
+            last = last.replace(tzinfo=_tz.utc)
+        return counts.get("ready", 0), counts.get("held", 0), last
+    finally:
+        conn.close()
+
+
+def archive_state():
+    """(documents held, documents recorded but never collected)."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT count(*) FROM archived_docs")
+        held = int(cur.fetchone()[0] or 0)
+        cur.execute("SELECT count(*) FROM archived_docs WHERE pulled_at IS NULL")
+        return held, int(cur.fetchone()[0] or 0)
+    finally:
+        conn.close()
+
+
 def barren_targets(min_runs=5, days=7):
     """Targets that have run repeatedly and never found anything.
 
