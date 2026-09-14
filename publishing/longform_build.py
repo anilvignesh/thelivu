@@ -226,7 +226,37 @@ def _upload_unlisted(qid, video_path, parsed, existing_id=None):
         chapters=chapters or None,
     )
     set_longform_artifact(qid, youtube_video_id=video_id)
+    # Remember WHICH CUT went up. Re-rendering without re-uploading — which is
+    # what a YouTube daily-quota rejection leaves behind — makes video_path and
+    # youtube_video_id describe different videos, and gate 2 would then publish
+    # the older one while the database claimed the newer. Hit 2026-09-14.
+    _record_uploaded_cut(qid, video_path)
     return video_id, permalink
+
+
+def _uploaded_cut_key(qid):
+    return f"longform_uploaded_cut_{qid}"
+
+
+def _cut_fingerprint(video_path):
+    """Cheap identity for a rendered file: size and mtime.
+
+    Not a hash — this runs on Railway where the file is not present, and the
+    point is only to notice that the bytes CHANGED since upload, which size and
+    mtime together do reliably enough for a file nothing rewrites in place.
+    """
+    try:
+        st = Path(video_path).stat()
+        return f"{st.st_size}:{int(st.st_mtime)}"
+    except OSError:
+        return ""
+
+
+def _record_uploaded_cut(qid, video_path):
+    fp = _cut_fingerprint(video_path)
+    if fp:
+        from shared.db import kv_set
+        kv_set(_uploaded_cut_key(qid), fp)
 
 
 def render_pending(limit=MAX_PER_PASS, voice=None, illustrate=True):
@@ -291,6 +321,32 @@ def render_pending(limit=MAX_PER_PASS, voice=None, illustrate=True):
     return out
 
 
+def unpublished_rerender(qid, video_path):
+    """The rendered file on disk, when it is NOT the one that was uploaded.
+
+    Returns a message, or None when they agree.
+
+    A YouTube daily-quota rejection leaves exactly this: the render succeeded,
+    the upload did not, and the queue row still names the PREVIOUS video. Gate 2
+    would then make that older cut public while video_path pointed at the newer
+    one — the reviewer approves what they watched and something else ships.
+    Hit for real on 2026-09-14 after three iteration uploads burned the day's
+    quota.
+    """
+    from shared.db import kv_get
+
+    recorded = (kv_get(_uploaded_cut_key(qid)) or "").strip()
+    if not recorded:
+        return None                 # uploaded before this was tracked
+    current = _cut_fingerprint(video_path)
+    if not current:
+        return None                 # not on this box; nothing to compare
+    if current == recorded:
+        return None
+    return (f"the rendered file for #{qid} is not the cut that was uploaded "
+            f"(disk {current}, uploaded {recorded}) — re-upload before publishing")
+
+
 def publish_approved():
     """Make public whatever Anil approved at gate 2. Runs on Railway.
 
@@ -316,6 +372,14 @@ def publish_approved():
     if not row:
         kv_set("post_longform_id", "")
         return f"no long-form item #{qid}"
+    stale = unpublished_rerender(qid, row.get("video_path") or "")
+    if stale:
+        # Refuse rather than publish the wrong cut. The key is deliberately NOT
+        # cleared: this needs a person, and silently dropping the approval would
+        # lose it.
+        log.error("refusing to publish #%s — %s", qid, stale)
+        return f"NOT published — {stale}"
+
     video_id = row.get("youtube_video_id")
     if not video_id:
         # Nothing to flip. Clearing the key is right: the item was approved for

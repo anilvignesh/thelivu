@@ -725,6 +725,59 @@ def t_every_evidence_frame_carries_its_source():
           blank.tobytes(), unchanged)
 
 
+def t_a_rerender_that_never_reached_youtube_is_not_published():
+    """The near-miss of 2026-09-14, and the reason this guard exists.
+
+    Three iteration uploads in one day burned the YouTube daily quota. The
+    fourth render SUCCEEDED and its upload was rejected, which left:
+
+        status           rendered
+        video_path       the new 53-shot cut, filled frames
+        youtube_video_id the PREVIOUS cut, old frames
+
+    Gate 2 would have made the older video public while the database named the
+    newer one — the reviewer approves what they watched and something else
+    ships. Nothing in the pipeline noticed, because nothing recorded WHICH cut
+    had gone up.
+    """
+    import tempfile, time
+    from pathlib import Path
+    from publishing import longform_build as lb
+    from shared import db
+
+    # A dict stands in for kv_store: this case is about the COMPARISON, and a
+    # live database would only make it slower and flakier.
+    store = {}
+    real_get, real_set = db.kv_get, db.kv_set
+    db.kv_get = lambda k, default=None: store.get(k, default)
+    db.kv_set = lambda k, v: store.__setitem__(k, v)
+    try:
+      with tempfile.TemporaryDirectory() as tmp:
+        vid = Path(tmp) / "longform_9.mp4"
+        vid.write_bytes(b"first cut" * 100)
+
+        check("with nothing recorded it does not block",
+              lb.unpublished_rerender(9, str(vid)), None)
+
+        lb._record_uploaded_cut(9, str(vid))
+        check("the cut that was uploaded is not flagged",
+              lb.unpublished_rerender(9, str(vid)), None)
+
+        # Re-render: same path, different bytes. This is what a quota rejection
+        # leaves behind.
+        time.sleep(1.1)                      # mtime has one-second resolution
+        vid.write_bytes(b"second cut, filled frames" * 100)
+        stale = lb.unpublished_rerender(9, str(vid))
+        check("a re-render that never uploaded IS flagged", bool(stale), True)
+        check("and the message says what to do",
+              "re-upload before publishing" in (stale or ""), True)
+
+        check("a file that is not on this box does not block",
+              lb.unpublished_rerender(9, str(Path(tmp) / "absent.mp4")), None)
+    finally:
+        db.kv_get, db.kv_set = real_get, real_set
+
+
 def t_with_no_marks_it_falls_back_to_the_old_split():
     """Every unit rendered before this had no chunk timing. The fallback is the
     previous behaviour, which was imprecise and never wrong."""
@@ -2073,6 +2126,7 @@ def main():
               t_a_frame_fills_itself,
               t_a_short_list_is_spread_not_clustered,
               t_every_evidence_frame_carries_its_source,
+              t_a_rerender_that_never_reached_youtube_is_not_published,
               t_with_no_marks_it_falls_back_to_the_old_split,
               t_a_short_unit_keeps_one_picture,
               t_a_long_unit_uses_the_pictures_it_was_given,
