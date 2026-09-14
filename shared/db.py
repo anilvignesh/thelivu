@@ -3531,8 +3531,8 @@ def archived_doc(sha256):
         cur = conn.cursor()
         ph = "%s" if _is_postgres() else "?"
         cur.execute(f"SELECT * FROM archived_docs WHERE sha256 = {ph}", (sha256,))
-        row = cur.fetchone()
-        return dict(row) if row else None
+        rows = _fetchall(cur)
+        return rows[0] if rows else None
     finally:
         conn.close()
 
