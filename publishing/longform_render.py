@@ -215,24 +215,74 @@ def draw_data_card(figure, out_png, chapter_label=""):
     value = (figure.get("value") or "").strip()
     # Fit rather than assume: "2,732 crore" and "71%" want very different sizes,
     # and a fixed size either clips the long one or wastes the frame on the short.
-    size = 220
+    # Fit to the frame in BOTH directions, growing as well as shrinking. A fixed
+    # 220pt ceiling meant the long values were already at the width limit and
+    # looked right, while a short one like "38.86%" used 756px of 1680 and left
+    # the card at ~78% coverage. The number is the hero of this frame; it should
+    # be as large as the frame allows.
+    label_room = 230 if (figure.get("label") or "").strip() else 40
+    max_value_h = H - 250 - 190 - label_room
+    size = 110
+    while size < 400:
+        nxt = size + 10
+        nf = _font(SERIF_BOLD, nxt)
+        if d.textlength(value, font=nf) > W - 240:
+            break
+        if int(nxt * 1.34) > max_value_h:
+            break
+        size = nxt
     f = _font(SERIF_BOLD, size)
-    while size > 90 and d.textlength(value, font=f) > W - 240:
-        size -= 10
-        f = _font(SERIF_BOLD, size)
-    y = H // 2 - size // 2 - 40
+
+    # CENTRE THE WHOLE BLOCK, not just the number. Centring the value on H//2
+    # and hanging the label below it put the optical centre of the card too low
+    # and left a band of nothing between the label and the source line — this
+    # card sat at ~80% coverage while the quote frame reached 100%. Measure what
+    # is actually drawn, then place all of it.
+    label = (figure.get("label") or "").strip()
+    lsize, llines = (0, [])
+    if label:
+        lsize, llines = fit_block(d, label, W - 240, 190, SERIF_BOLD,
+                                  max_size=72, min_size=44, leading=1.22)
+        llines = llines[:2]
+
+    TOP, BOTTOM = 250, 190
+    avail = H - TOP - BOTTOM
+    value_h = int(size * 1.34)
+    label_h = len(llines) * int(lsize * 1.22)
+    block = value_h + 80 + label_h
+
+    # A long value is capped by WIDTH and cannot grow to fill the card. The first
+    # attempt SPREAD the block — value at the top, label pushed down to sit above
+    # the source — which raised measured coverage from 78% to 89% and looked
+    # worse: the label was marooned from the number it describes, with a void
+    # and a stray rule between them. Coverage is a proxy for "the frame is
+    # doing something", not for "the frame is good", and optimising it directly
+    # broke the thing it was standing in for.
+    #
+    # The label belongs under its number. So the slack goes INTO the label
+    # instead — it is re-fitted against whatever room the value left.
+    if llines and block < avail * 0.82:
+        room = avail - value_h - 80
+        lsize, llines = fit_block(d, label, W - 240, room, SERIF_BOLD,
+                                  max_size=96, min_size=lsize, leading=1.22)
+        llines = llines[:3]
+        label_h = len(llines) * int(lsize * 1.22)
+        block = value_h + 80 + label_h
+    y = TOP + max(0, (avail - block) // 2)
+    label_y = None
+
     d.text((120, y), value, font=f, fill=PAPER)
     # A serif at 200pt has a deep descender; 1.15 put the label inside it.
-    y += int(size * 1.34)
+    y += value_h
     d.line([(120, y), (300, y)], fill=ACCENT, width=6)
     y += 40
 
-    label = (figure.get("label") or "").strip()
-    if label:
-        lf = _font(SERIF_BOLD, 54)
-        for line in _wrap(d, label, lf, W - 240)[:2]:
+    if llines:
+        lf = _font(SERIF_BOLD, lsize)
+        y = label_y if label_y is not None else y
+        for line in llines:
             d.text((120, y), line, font=lf, fill=ACCENT)
-            y += 66
+            y += int(lsize * 1.22)
 
     # The source line is what separates a figure from a poster. Small, always
     # present, never the same colour as the number.

@@ -778,6 +778,56 @@ def t_a_rerender_that_never_reached_youtube_is_not_published():
         db.kv_get, db.kv_set = real_get, real_set
 
 
+def t_a_figures_label_stays_with_its_number():
+    """A case where optimising the metric broke the thing it stood for.
+
+    The data card measured ~78% vertical coverage against the quote frame's
+    100%, because a long value like "30,308.52 crore" is capped by WIDTH and
+    cannot grow to fill the frame. The first fix SPREAD the block — value at the
+    top, label pushed down to sit above the source line. Coverage went to 89%
+    and the card looked worse: the label was marooned from the number it
+    describes, with a void and a stray rule between them.
+
+    Coverage is a proxy for "the frame is doing something", not for "the frame
+    is good". The slack goes into the label's SIZE, never into the distance
+    between it and its number.
+    """
+    import tempfile
+    from pathlib import Path
+    from PIL import Image
+
+    long_value = {"value": "₹30,308.52 crore",
+                  "label": "uncollected arrears as of March 2024",
+                  "source": "CAG Report No. 2 of 2026, State Revenues"}
+    with tempfile.TemporaryDirectory() as tmp:
+        out = lfr.draw_data_card(long_value, Path(tmp) / "c.png", chapter_label="X")
+        im = Image.open(out).convert("L")
+        px = im.load()
+
+        def rows_with_ink(y0, y1):
+            return [y for y in range(y0, y1, 4)
+                    if max(px[x, y] for x in range(100, lfr.W - 100, 7)) > 110]
+
+        ink = rows_with_ink(240, lfr.H - 200)
+        check("the card draws a value and a label", len(ink) > 20, True)
+
+        # The defect this guards: a run of empty rows BETWEEN the number and its
+        # label. Anything over ~150px of blank between two inked bands in the
+        # middle of the card means they have come apart.
+        gaps, run = [], 0
+        for y in range(ink[0], ink[-1], 4):
+            if y in ink:
+                if run:
+                    gaps.append(run)
+                run = 0
+            else:
+                run += 4
+        widest = max(gaps) if gaps else 0
+        # The spread version left ~280px of nothing between the rule and the
+        # label. 160 is comfortably above normal leading and well under that.
+        check("the label is not marooned from its number", widest <= 160, True)
+
+
 def t_with_no_marks_it_falls_back_to_the_old_split():
     """Every unit rendered before this had no chunk timing. The fallback is the
     previous behaviour, which was imprecise and never wrong."""
@@ -2127,6 +2177,7 @@ def main():
               t_a_short_list_is_spread_not_clustered,
               t_every_evidence_frame_carries_its_source,
               t_a_rerender_that_never_reached_youtube_is_not_published,
+              t_a_figures_label_stays_with_its_number,
               t_with_no_marks_it_falls_back_to_the_old_split,
               t_a_short_unit_keeps_one_picture,
               t_a_long_unit_uses_the_pictures_it_was_given,
