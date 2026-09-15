@@ -76,16 +76,13 @@ if service == "thelivu-agent":
 
 
     def _tg_notify(text):
-        """Send a plain-text notification to the draft chat from run.py."""
-        try:
-            import requests as _req
-            _req.post(
-                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-                json={"chat_id": str(TELEGRAM_DRAFT_CHAT_ID), "text": text[:4096]},
-                timeout=10,
-            )
-        except Exception as e:
-            log.warning("Notification send failed: %s", e)
+        """Send a plain-text notification to the draft chat from run.py.
+
+        Delegates to shared.notify, which chunks rather than truncating. This
+        used to cut at 4096 characters — and the health digest, which is the
+        longest thing it sends, is precisely the message whose tail matters."""
+        from shared.notify import send
+        send(text)
 
     # A persistent failure must be reported once, not once per retry. The
     # Instagram token expired on 2026-09-10 and the sync retries about every two

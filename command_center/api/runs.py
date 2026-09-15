@@ -19,17 +19,9 @@ _TG_LIMIT = 4096
 
 
 def _tg_notify(text):
-    """Best-effort note to the owner's draft chat (never fails the action)."""
-    import requests
-    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-    chat = os.environ.get("TELEGRAM_DRAFT_CHAT_ID", "")
-    if not token or not chat:
-        return
-    try:
-        requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
-                      json={"chat_id": chat, "text": text[:_TG_LIMIT]}, timeout=15)
-    except Exception:
-        pass
+    """Notify the draft chat. Delegates to shared.notify (one sender)."""
+    from shared.notify import send
+    send(text)
 
 
 # The status literals in pipeline_runs are not clean: the engine has written both `hold`

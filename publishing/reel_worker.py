@@ -200,24 +200,12 @@ def _parked(run_id):
 
 
 def _tg_post_text(text):
-    """Plain text push — same minimal, best-effort pattern as _tg_post_video:
-    a failed notification must never take the worker down."""
-    import requests
-    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-    chat_id = os.environ.get("TELEGRAM_DRAFT_CHAT_ID", "")
-    if not token or not chat_id:
-        return None
-    try:
-        r = requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": str(chat_id), "text": text[:4096], "parse_mode": "HTML"},
-            timeout=30,
-        )
-        r.raise_for_status()
-        return r.json().get("result", {}).get("message_id")
-    except Exception as e:
-        log.warning("Telegram text push failed: %s", e)
-        return None
+    """Post a review card to the draft chat. HTML, because the cards use it.
+
+    Delegates to shared.notify — one sender, after five had drifted apart on
+    truncation, timeout and parse_mode (2026-09-15)."""
+    from shared.notify import send
+    return send(text, html=True)
 
 
 def _worker_mode():

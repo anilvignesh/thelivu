@@ -334,8 +334,14 @@ def tg_post_channel(text):
     return msg_ids
 
 def tg_notify(text):
-    for chunk in _tg_chunks(text):
-        requests.post(f"{TG_API}/sendMessage", json={"chat_id": DRAFT_CHAT_ID, "text": chunk}, timeout=15)
+    """Notify the draft chat. Delegates to shared.notify (one sender).
+
+    tg_post_channel above is deliberately NOT collapsed into it: that posts to
+    the public CHANNEL, returns the message ids the caller stores, and raises on
+    failure because a half-published thread must not look successful. It is a
+    publishing action that happens to use Telegram, not a notification."""
+    from shared.notify import send
+    send(text)
 
 def publish_and_report(run_id):
     """Publish via the ONE shared flow the bot uses (article page + slug + bio link
