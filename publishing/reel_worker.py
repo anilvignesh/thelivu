@@ -44,6 +44,7 @@ Run:  venv/bin/python -m publishing.reel_worker            (loops forever)
 """
 import argparse
 import logging
+import subprocess
 import os
 import sys
 import time
@@ -252,6 +253,9 @@ def _build_one(run_id, slug):
 
     log.info("building reel for run #%s (dark=%s, article_url=%s)",
               run_id, dark, article_url)
+    # The voice is started HERE, at the moment there is something to narrate,
+    # rather than held for the 99% of the day this box renders nothing.
+    ensure_voice()
     try:
         result = make_narrated_reel(run_id, dark=dark, article_url=article_url,
                                     mode=_worker_mode())
@@ -392,6 +396,13 @@ def run_once():
         importlib.reload(_lr)
         importlib.reload(_lb)
         render_pending = _lb.render_pending
+        # Ask whether there IS work before starting the voice. render_pending()
+        # is a no-op on most passes, and calling ensure_voice() ahead of it
+        # would hold 4.7GB every ten minutes to render nothing — which is the
+        # behaviour this change exists to remove.
+        from shared.db import longform_queue
+        if longform_queue(status="script_ok"):
+            ensure_voice()
         for res in render_pending():
             did_something = True
             if res.get("ok"):
@@ -410,6 +421,67 @@ def run_once():
 
     if not did_something:
         log.info("nothing to build")
+        release_voice()
+
+
+# The voice server holds 4.7GB — 39% of this box — and is idle almost all of the
+# time. Measured 2026-09-15: stopping it frees 4.5GB, and a cold start is 24
+# SECONDS. A render takes nine to seventy minutes, so the trade is not close.
+#
+# Anil: "the chatterbox can be turned into on demand na". It can, and the worker
+# is the right owner: it is the only process that renders, so it is the only one
+# that knows whether the voice is wanted. A systemd timer guessing at idleness
+# would have to infer what this process already knows.
+VOICE_UNIT = os.environ.get("CHATTERBOX_UNIT", "chatterbox")
+
+
+def _voice_unit_state():
+    """'active', 'inactive', or None when systemd cannot be asked."""
+    try:
+        out = subprocess.run(["systemctl", "is-active", VOICE_UNIT],
+                             capture_output=True, text=True, timeout=10)
+        return (out.stdout or "").strip() or None
+    except Exception:                                       # noqa: BLE001
+        return None
+
+
+def ensure_voice():
+    """Start the voice server if it is not running, and wait for it.
+
+    Degrades to the old behaviour whenever systemd cannot be reached — a
+    developer box running chatterbox by hand, or a host where this user cannot
+    manage units. Never fatal: a voice server that will not start surfaces
+    through the normal per-run voice_down path, which already exists and already
+    parks the run.
+    """
+    state = _voice_unit_state()
+    if state == "active" or state is None:
+        _wait_for_voice()
+        return
+    log.info("voice server is %s — starting it for this pass", state)
+    try:
+        subprocess.run(["sudo", "-n", "systemctl", "start", VOICE_UNIT],
+                       capture_output=True, timeout=30, check=False)
+    except Exception as e:                                  # noqa: BLE001
+        log.warning("could not start %s (%s) — continuing", VOICE_UNIT, e)
+    _wait_for_voice()
+
+
+def release_voice():
+    """Stop the voice server when this pass had nothing to render.
+
+    Only on an EMPTY pass, never after a render: two renders back to back would
+    otherwise pay the cold start twice, and the whole point is that the cost is
+    paid once per burst of work rather than once per job.
+    """
+    if _voice_unit_state() != "active":
+        return
+    try:
+        subprocess.run(["sudo", "-n", "systemctl", "stop", VOICE_UNIT],
+                       capture_output=True, timeout=30, check=False)
+        log.info("nothing to build — released the voice server (frees ~4.5GB)")
+    except Exception as e:                                  # noqa: BLE001
+        log.info("could not stop %s: %s", VOICE_UNIT, e)
 
 
 def _wait_for_voice(timeout_s=240):
@@ -464,7 +536,14 @@ def main():
         log.warning("TELEGRAM_BOT_TOKEN/TELEGRAM_DRAFT_CHAT_ID not set — reels will "
                     "build fine but won't be pushed to Telegram for review")
 
-    _wait_for_voice()
+    # NOT ensure_voice() here. Startup used to block until the voice answered,
+    # which was right when the server was always meant to be up: the first pass
+    # would otherwise burn a whole backlog against a still-loading model. Now
+    # that it is started on demand, waiting at boot would defeat the point —
+    # the process would hold 4.7GB from the moment it starts, having been asked
+    # to render nothing.
+    if _voice_unit_state() == "active":
+        _wait_for_voice()
 
     if args.once:
         run_once()
