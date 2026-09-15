@@ -1,7 +1,19 @@
 [Unit]
 Description=Thelivu reel_worker — auto-builds reels for published runs
-After=network.target chatterbox.service
-Wants=chatterbox.service
+After=network.target
+# NO Wants=chatterbox.service. The voice server holds 4.7GB — 39% of this box —
+# and is idle through the 99% of the day nothing renders, so the worker now
+# starts it on demand and stops it on an empty pass (see reel_worker.ensure_voice).
+#
+# `Wants=` defeated that completely and silently: systemd pulls a wanted unit up
+# whenever this one starts, so chatterbox came back at 10:02:50 on the very
+# restart that deployed the change, even though the unit had just been
+# `systemctl disable`d. Disabling stops it at BOOT; it does nothing about
+# another unit asking for it.
+#
+# After=network.target only. Ordering against chatterbox is meaningless now —
+# it is not running at start, and readiness was never guaranteed by ordering
+# anyway (see _wait_for_voice, which exists because of exactly that).
 
 [Service]
 Type=simple
