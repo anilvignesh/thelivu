@@ -415,6 +415,41 @@ CREATE TABLE IF NOT EXISTS documents (
 );
 CREATE INDEX IF NOT EXISTS idx_documents_source ON documents (source_key, published);
 
+-- Findings extracted from the corpus, one row per claim.
+--
+-- The corpus (126.7M characters across 29 states and 10 years) had no consumer
+-- until this. A pile of text nobody queries is not an asset.
+--
+-- WHY `cause` IS A COLUMN AND NOT A DETAIL. The first scan of the corpus
+-- returned, in its top eight results, three flood-damage figures — Karnataka
+-- floods, Karnataka drought, Bihar floods — presented exactly like failures.
+-- They are enormous numbers in audit reports next to the word "loss", and no
+-- amount of pattern-matching separates them from the Punjab finding beside
+-- them, where 33,973 crore was advanced and 1,422 crore recovered.
+--
+-- "The state failed" and "it rained" are different stories, and confusing them
+-- once would cost more than every finding here is worth. So the extractor must
+-- commit to one, and a row that cannot say which is held for a person.
+CREATE TABLE IF NOT EXISTS findings (
+    id          SERIAL PRIMARY KEY,
+    doc_sha256  TEXT NOT NULL,          -- the document in `documents`
+    source_key  TEXT,                   -- which office/state
+    published   TEXT,                   -- the document's year
+    claim       TEXT NOT NULL,          -- what was found, in our words
+    excerpt     TEXT,                   -- VERBATIM from the document, or empty
+    amount_cr   NUMERIC,                -- rupees crore, when one is stated
+    category    TEXT,                   -- recovery|idle|non-compliance|delay|...
+    -- 'state' = an act or omission of government; 'external' = flood, drought,
+    -- pandemic; 'unclear' = held for a person rather than guessed.
+    cause       TEXT,
+    status      TEXT DEFAULT 'new',     -- new | promoted | rejected
+    model       TEXT,
+    created_at  TIMESTAMP DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_findings_doc ON findings (doc_sha256);
+CREATE INDEX IF NOT EXISTS idx_findings_triage ON findings (status, cause, amount_cr);
+CREATE INDEX IF NOT EXISTS idx_findings_where ON findings (source_key, published);
+
 CREATE TABLE IF NOT EXISTS digger_runs (
     id               SERIAL PRIMARY KEY,
     target_key       TEXT,
@@ -887,6 +922,41 @@ CREATE TABLE IF NOT EXISTS documents (
     read_at     TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_documents_source ON documents (source_key, published);
+
+-- Findings extracted from the corpus, one row per claim.
+--
+-- The corpus (126.7M characters across 29 states and 10 years) had no consumer
+-- until this. A pile of text nobody queries is not an asset.
+--
+-- WHY `cause` IS A COLUMN AND NOT A DETAIL. The first scan of the corpus
+-- returned, in its top eight results, three flood-damage figures — Karnataka
+-- floods, Karnataka drought, Bihar floods — presented exactly like failures.
+-- They are enormous numbers in audit reports next to the word "loss", and no
+-- amount of pattern-matching separates them from the Punjab finding beside
+-- them, where 33,973 crore was advanced and 1,422 crore recovered.
+--
+-- "The state failed" and "it rained" are different stories, and confusing them
+-- once would cost more than every finding here is worth. So the extractor must
+-- commit to one, and a row that cannot say which is held for a person.
+CREATE TABLE IF NOT EXISTS findings (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    doc_sha256  TEXT NOT NULL,          -- the document in `documents`
+    source_key  TEXT,                   -- which office/state
+    published   TEXT,                   -- the document's year
+    claim       TEXT NOT NULL,          -- what was found, in our words
+    excerpt     TEXT,                   -- VERBATIM from the document, or empty
+    amount_cr   REAL,                -- rupees crore, when one is stated
+    category    TEXT,                   -- recovery|idle|non-compliance|delay|...
+    -- 'state' = an act or omission of government; 'external' = flood, drought,
+    -- pandemic; 'unclear' = held for a person rather than guessed.
+    cause       TEXT,
+    status      TEXT DEFAULT 'new',     -- new | promoted | rejected
+    model       TEXT,
+    created_at  TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_findings_doc ON findings (doc_sha256);
+CREATE INDEX IF NOT EXISTS idx_findings_triage ON findings (status, cause, amount_cr);
+CREATE INDEX IF NOT EXISTS idx_findings_where ON findings (source_key, published);
 
 CREATE TABLE IF NOT EXISTS digger_runs (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -432,6 +432,9 @@ def run_once():
 # that knows whether the voice is wanted. A systemd timer guessing at idleness
 # would have to infer what this process already knows.
 VOICE_UNIT = os.environ.get("CHATTERBOX_UNIT", "chatterbox")
+# How long to wait for a voice server that nobody is starting. Long enough
+# for one already up to answer, short enough not to stall a test.
+SHORT_VOICE_WAIT = 6
 
 
 def _voice_unit_state():
@@ -454,16 +457,47 @@ def ensure_voice():
     parks the run.
     """
     state = _voice_unit_state()
-    if state == "active" or state is None:
+    if state == "active":
         _wait_for_voice()
         return
+    if state is None:
+        # systemd cannot be asked — a dev box running chatterbox by hand, or a
+        # test. NOTHING IS GOING TO START IT, so the long wait is pointless: it
+        # exists for "systemd started it and the model is loading", which is not
+        # this case. Waiting the full timeout here hung the reel-retry suite for
+        # four minutes per build — a regression from this very function,
+        # caught 2026-09-15 by the suite it broke.
+        _wait_for_voice(timeout_s=SHORT_VOICE_WAIT)
+        return
     log.info("voice server is %s — starting it for this pass", state)
+    started = False
     try:
-        subprocess.run(["sudo", "-n", "systemctl", "start", VOICE_UNIT],
-                       capture_output=True, timeout=30, check=False)
+        r = subprocess.run(["sudo", "-n", "systemctl", "start", VOICE_UNIT],
+                           capture_output=True, timeout=30, check=False)
+        started = r.returncode == 0
+        if not started:
+            log.warning("could not start %s: %s", VOICE_UNIT,
+                        (r.stderr or b"").decode("utf-8", "replace")[:120])
     except Exception as e:                                  # noqa: BLE001
         log.warning("could not start %s (%s) — continuing", VOICE_UNIT, e)
-    _wait_for_voice()
+
+    # THE LONG WAIT IS ONLY FOR A SERVER THAT IS ACTUALLY COMING UP. It exists
+    # because the Turbo model takes over a minute to load, so a start we just
+    # issued deserves patience. A start that FAILED does not: nothing is
+    # loading, and waiting four minutes for it stalls the caller for no reason.
+    #
+    # The first version of this waited the full timeout on every path and hung
+    # the reel-retry suite for four minutes per build. A dev box reports the
+    # unit 'inactive' rather than unknown, so it took the start branch, failed,
+    # and waited anyway — which the suite caught and my own reading had not.
+    if started:
+        _wait_for_voice()
+    elif not _voice_answers():
+        # Could not start it and it is not already up by hand. There is nothing
+        # to wait FOR, so do not: the per-run voice_down path reports it and
+        # parks the run, which is both faster and more honest than a timeout.
+        log.info("no voice server and none could be started — the run will "
+                 "report voice_down")
 
 
 def release_voice():
@@ -481,6 +515,16 @@ def release_voice():
         log.info("nothing to build — released the voice server (frees ~4.5GB)")
     except Exception as e:                                  # noqa: BLE001
         log.info("could not stop %s: %s", VOICE_UNIT, e)
+
+
+def _voice_answers(timeout_s=3):
+    """One probe. True if a voice server is up right now."""
+    import requests
+    try:
+        return requests.get("http://127.0.0.1:3901/health",
+                            timeout=timeout_s).status_code == 200
+    except Exception:                                       # noqa: BLE001
+        return False
 
 
 def _wait_for_voice(timeout_s=240):
