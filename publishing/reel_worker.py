@@ -422,6 +422,17 @@ def run_once():
     if not did_something:
         log.info("nothing to build")
         release_voice()
+        # Same idea as the voice: stop holding what is no longer needed. The
+        # MP4 blob is how bytes cross from this VM to Railway's fileserver, and
+        # a posted reel has a permalink — the transport is finished with it.
+        try:
+            from shared.db import release_posted_reel_bytes
+            freed = release_posted_reel_bytes()
+            if freed:
+                log.info("released %d posted/killed reel blob(s) from the database",
+                         freed)
+        except Exception as e:                              # noqa: BLE001
+            log.info("could not release reel blobs: %s", e)
 
 
 # The voice server holds 4.7GB — 39% of this box — and is idle almost all of the

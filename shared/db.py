@@ -3017,6 +3017,51 @@ def get_ready_reels():
     return list(latest_by_run.values())
 
 
+def release_posted_reel_bytes(older_than_days=2):
+    """Drop the MP4 of reels that no longer need serving. Returns rows freed.
+
+    THE BLOB IS A TRANSPORT, NOT AN ARCHIVE, and the distinction is the whole
+    point. The reel renders on the worker VM; the fileserver Instagram fetches
+    from runs on Railway with an ephemeral filesystem. Postgres is how the bytes
+    cross between them — a deliberate design, and moving them to local disk
+    would break posting outright.
+
+    What was never deliberate is keeping the buffer forever. By 2026-09-15 the
+    reels table was 1,043MB — 92% of the database, and twenty times the size of
+    the entire national audit corpus it shares space with. 833MB of that was
+    reels already live on Instagram, plus killed and superseded cuts that would
+    never be served at all.
+
+    A posted reel has a permalink; the bytes have done their job. Nothing that
+    is still awaiting posting is touched, and the grace period exists so a reel
+    posted minutes ago is still servable if the platform re-fetches it.
+    """
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        if _is_postgres():
+            cur.execute(
+                """UPDATE reels SET mp4 = NULL
+                    WHERE mp4 IS NOT NULL
+                      AND (status IN ('killed', 'superseded', 'orphaned_killed_run')
+                           OR (status = 'posted'
+                               AND posted_at < NOW() - (%s || ' days')::interval))""",
+                (int(older_than_days),))
+        else:
+            cur.execute(
+                """UPDATE reels SET mp4 = NULL
+                    WHERE mp4 IS NOT NULL
+                      AND (status IN ('killed', 'superseded', 'orphaned_killed_run')
+                           OR (status = 'posted'
+                               AND posted_at < datetime('now', ?)))""",
+                ("-%d days" % int(older_than_days),))
+        n = cur.rowcount
+        conn.commit()
+        return n
+    finally:
+        conn.close()
+
+
 def get_reel_bytes(reel_id):
     """The raw MP4 bytes for the fileserver to serve. None if absent."""
     conn = _conn()
