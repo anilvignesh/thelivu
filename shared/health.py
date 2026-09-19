@@ -94,9 +94,23 @@ def check_digger_targets():
     barren = db.barren_targets()
     if not barren:
         return [Check("digger targets", OK, "every target has found something")]
+
+    # A target whose documents were all REFERRED to the corpus is not broken —
+    # the opposite. Its documents are too substantial for the digger's window,
+    # which on an audit report reaches the cover and the table of contents.
+    # Reporting those as "check index_url and link_pattern" sent a reviewer to
+    # fix something already correct: on 2026-09-19 thirty-three targets said
+    # exactly that, and every one of them was pointed at the right source.
+    referred = db.referred_targets()
+
     out = []
     for key, runs, docs in barren:
-        if docs:
+        if key in referred:
+            r_runs, r_docs = referred[key]
+            out.append(Check(f"digger/{key}", QUIET,
+                             f"{r_docs} document(s) too long for the digger — "
+                             f"referred to the corpus, not extracted here"))
+        elif docs:
             out.append(Check(f"digger/{key}", BROKEN,
                              f"{docs} document(s) read over {runs} runs, nothing "
                              f"found (7-day window)",

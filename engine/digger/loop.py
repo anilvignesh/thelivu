@@ -114,7 +114,7 @@ def run_cycle(target=None, dry_run=False):
 
     log.info("cycle start: %s (%s)", target["key"], target["index_url"])
     run_id = None if dry_run else db.start_digger_run(target["key"])
-    docs = calls = 0
+    docs = calls = referred = 0
     recorded = []
 
     try:
@@ -154,6 +154,36 @@ def run_cycle(target=None, dry_run=False):
             docs += 1
             log.info("fetched %s (%d chars%s)", doc["final_url"], len(doc["text"]),
                      ", truncated" if doc["truncated"] else "")
+
+            # A TRUNCATED DOCUMENT IS REFERRED, NOT GUESSED AT.
+            #
+            # fetch() caps at MAX_TEXT_CHARS, and on a real audit report that is
+            # the cover, the preface and the table of contents. Measured
+            # 2026-09-19 on Kerala's State Finances report: 485 money figures in
+            # the document, 38 of them inside the 40,000 characters the digger
+            # sees. The window opens on "SUPREME AUDIT INSTITUTION OF INDIA /
+            # Dedicated to Truth in Public Interest".
+            #
+            # So every CAG target reported BROKEN with the same message — "it is
+            # reading the wrong pages" — when the pages were exactly right and
+            # the READER was wrong. Before the 29-state expansion the digger
+            # found nothing because it was reading About pages; after it, it
+            # found nothing because it was reading covers. Same symptom, and a
+            # warning that pointed at the wrong cause both times.
+            #
+            # The digger is a DETECTOR (docs/plans/09-investigation-framework.md).
+            # Spending two model calls on the front matter of a document it
+            # cannot see the body of is not a bounded first pass, it is a
+            # guaranteed miss. engine/corpus.py reads the whole thing and
+            # engine/analyst.py extracts from it — 1,362 grounded findings for
+            # $4, against 2 candidates in seven days here.
+            if doc.get("truncated"):
+                referred += 1
+                log.info("referred to the corpus: %s is longer than the digger "
+                         "reads (%d chars shown) — not extracting from its "
+                         "front matter", doc["final_url"][:70], len(doc["text"]))
+                continue
+
             found, c = extract.cross_check(doc, target["brief"])
             calls += c
             # Carry the document's hash onto every lead it produced, so a lead
@@ -163,8 +193,9 @@ def run_cycle(target=None, dry_run=False):
                 f["doc_sha256"] = doc.get("sha256")
             candidates.extend(found)
 
-        log.info("%d grounded finding(s) from %d doc(s), %d model call(s)",
-                 len(candidates), docs, calls)
+        log.info("%d grounded finding(s) from %d doc(s), %d model call(s)%s",
+                 len(candidates), docs, calls,
+                 ", %d referred to the corpus" % referred if referred else "")
 
         # Pre-filter before writing, not after. A candidate that a reviewer
         # would never promote costs nothing to drop here and costs a line in

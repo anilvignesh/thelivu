@@ -41,11 +41,17 @@ def t_a_component_succeeding_at_nothing_is_broken_not_quiet():
     from shared import db
 
     real = db.barren_targets
+    real_ref = db.referred_targets
     db.barren_targets = lambda **k: [("cag-reports", 13, 13), ("dead-index", 9, 0)]
+    # Stubbed too, or this case reaches a real database — which is how adding
+    # the referred/broken distinction broke a test that had nothing to do with
+    # it. A check that grows a dependency grows it for every caller.
+    db.referred_targets = lambda **k: {}
     try:
         got = {c.name: c for c in health.check_digger_targets()}
     finally:
         db.barren_targets = real
+        db.referred_targets = real_ref
 
     check("a target reading the wrong pages is BROKEN",
           got["digger/cag-reports"].status, health.BROKEN)
@@ -56,6 +62,43 @@ def t_a_component_succeeding_at_nothing_is_broken_not_quiet():
           "fetched nothing at all" in got["digger/dead-index"].detail, True)
     check("every broken check carries a remedy",
           all(c.fix for c in got.values()), True)
+
+
+def t_a_document_too_long_to_read_is_not_a_broken_source():
+    """The false alarm of 2026-09-19, and the most expensive kind a health
+    digest can raise.
+
+    Thirty-three targets reported BROKEN with "it is reading the wrong pages,
+    check its index_url and link_pattern". Every one was pointed at exactly the
+    right source. The digger reads MAX_TEXT_CHARS and a real audit report is
+    561,000 characters, so its window covers the cover, the preface and the
+    table of contents — measured on Kerala's State Finances report, 485 money
+    figures in the document and 38 inside what the digger sees.
+
+    A digest that sends its reader to fix something already correct is worse
+    than one that says nothing: it spends the only thing it has, which is
+    attention, and teaches the reader to discount the next alarm.
+    """
+    from shared import db
+
+    real_barren, real_referred = db.barren_targets, db.referred_targets
+    db.barren_targets = lambda **k: [("cag-kerala", 9, 9), ("dead-source", 9, 9)]
+    db.referred_targets = lambda **k: {"cag-kerala": (9, 9)}
+    try:
+        got = {c.name: c for c in health.check_digger_targets()}
+    finally:
+        db.barren_targets, db.referred_targets = real_barren, real_referred
+
+    check("a source whose documents were referred is QUIET",
+          got["digger/cag-kerala"].status, health.QUIET)
+    check("and it says where they went",
+          "corpus" in got["digger/cag-kerala"].detail, True)
+    check("it carries no remedy, because nothing is wrong",
+          got["digger/cag-kerala"].fix, "")
+    # The genuinely broken one must still be reported, or this fix has
+    # traded a false alarm for a silence.
+    check("a genuinely dead source is still BROKEN",
+          got["digger/dead-source"].status, health.BROKEN)
 
 
 def t_quiet_is_a_legitimate_answer():
@@ -130,6 +173,7 @@ def t_the_digest_answers_the_question_on_its_first_line():
 def main():
     print("health layer\n")
     for t in (t_a_component_succeeding_at_nothing_is_broken_not_quiet,
+              t_a_document_too_long_to_read_is_not_a_broken_source,
               t_quiet_is_a_legitimate_answer,
               t_cannot_check_is_never_ok_and_never_broken,
               t_a_check_that_throws_does_not_silence_the_digest,

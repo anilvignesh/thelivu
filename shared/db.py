@@ -3708,6 +3708,71 @@ def digger_seen_titles(target_key, limit=400):
         conn.close()
 
 
+def store_findings(rows):
+    """Persist extracted findings. Returns how many were written.
+
+    No dedup key: the same claim found in two documents is two findings, because
+    the SECOND ONE IS THE STORY — an objection the auditor repeats year after
+    year is exactly what a single-document reader cannot see, and collapsing
+    them here would destroy the signal the corpus exists to expose.
+    """
+    if not rows:
+        return 0
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cols = ("doc_sha256, source_key, published, claim, excerpt, "
+                "amount_cr, category, cause, model")
+        vals = ", ".join([ph] * 9)
+        for r in rows:
+            cur.execute(
+                f"INSERT INTO findings ({cols}) VALUES ({vals})",
+                (r.get("doc_sha256"), r.get("source_key"), r.get("published"),
+                 r.get("claim"), r.get("excerpt") or None, r.get("amount_cr"),
+                 r.get("category"), r.get("cause"), r.get("model")))
+        conn.commit()
+        return len(rows)
+    finally:
+        conn.close()
+
+
+def documents_without_findings(limit=None):
+    """Corpus documents nothing has read yet. [(sha256, source_key, published, chars)].
+
+    The corpus pass is resumable on this, not on a cursor: it will be
+    interrupted — 261 documents of paid extraction is not a run that completes
+    first time — and a document already read must cost nothing to skip.
+    """
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        sql = ("SELECT d.sha256, d.source_key, d.published, d.chars FROM documents d "
+               "WHERE NOT EXISTS (SELECT 1 FROM findings f WHERE f.doc_sha256 = d.sha256) "
+               "ORDER BY d.chars")
+        if limit:
+            sql += f" LIMIT {int(limit)}"
+        cur.execute(sql)
+        return [tuple(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def findings_stats():
+    """(total, by cause, total crore in 'state' findings)."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT count(*) FROM findings")
+        total = int(cur.fetchone()[0] or 0)
+        cur.execute("SELECT cause, count(*) FROM findings GROUP BY cause")
+        by_cause = {r[0]: int(r[1]) for r in cur.fetchall()}
+        cur.execute("SELECT coalesce(sum(amount_cr),0) FROM findings WHERE cause='state'")
+        return total, by_cause, float(cur.fetchone()[0] or 0)
+    finally:
+        conn.close()
+
+
 def store_document(sha256, url, text, title=None, source_key=None,
                    published=None, pages=None):
     """Keep a document's full text. Idempotent on the hash.
@@ -3830,6 +3895,32 @@ def archive_state():
         held = int(cur.fetchone()[0] or 0)
         cur.execute("SELECT count(*) FROM archived_docs WHERE pulled_at IS NULL")
         return held, int(cur.fetchone()[0] or 0)
+    finally:
+        conn.close()
+
+
+def referred_targets(days=7):
+    """Targets whose documents are all too long for the digger to read.
+
+    {key: (runs, docs)}. These are NOT broken sources — they are the opposite:
+    the documents are so substantial the digger's window only reaches the cover.
+    Telling a reviewer to "check index_url and link_pattern" for these sends
+    them to fix something that is already correct, which is worse than silence
+    because it wastes the one thing a health digest is spending: attention.
+    """
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        since = ("NOW() - INTERVAL '%d days'" % int(days) if _is_postgres()
+                 else "datetime('now', '-%d days')" % int(days))
+        cur.execute(
+            f"""SELECT target_key, count(*), coalesce(sum(docs_fetched),0)
+                  FROM digger_runs
+                 WHERE started_at > {since} AND target_key IS NOT NULL
+                   AND coalesce(model_calls, 0) = 0
+                   AND coalesce(docs_fetched, 0) > 0
+              GROUP BY target_key""")
+        return {r[0]: (int(r[1]), int(r[2])) for r in cur.fetchall()}
     finally:
         conn.close()
 
