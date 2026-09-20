@@ -22,58 +22,34 @@ that fails is logged and slept off, and government sources change format often
 enough that today's working URL is not a permanent fact.
 """
 
+from shared import jurisdiction
+
 # Dataset targets: a data.gov.in resource watched by arithmetic rather than
 # read by a model. No model call, so no hallucination surface — see
 # engine/digger/dataset_watch.py. `kind` distinguishes them from index targets.
-# ── CAG state audit reports, all of India ────────────────────────────────────
+# ── CAG state audit reports, all of India ────────────────────────
 #
 # Was ONE target pointed at Kerala. Anil, 2026-09-14: "We need more sources.
 # Let's try to cover the entirety of India first."
 #
-# Every state Accountant General publishes its audit reports on the same shape,
-# /ag<N>/<slug>/en/audit-report — but the <N> varies with no pattern (kerala is
-# ag1, punjab is ag, telangana is ag) and four states answer to a CITY rather
-# than their own name: Maharashtra is nagpur, Mizoram is aizawl, Delhi is
-# new-delhi, J&K is jammu-kashmir. So the map is DISCOVERED AND PINNED, not
-# generated from a state list — each of these was probed and returned real
-# audit-report PDFs on 2026-09-14.
+# The office list MOVED OUT of this file on 2026-09-20, into
+# `jurisdictions/india.yaml`. It is a list of state names and a national audit
+# body's URLs, which is the plan's definition of config rather than code
+# (docs/plans/09-investigation-framework.md §1): *if a rule mentions a rupee, a
+# state name, or the CAG, it is config*. Leaving it here would have made the
+# jurisdiction file decoration — a second country would still have needed a
+# code change.
 #
-#   29 offices, 477 audit reports reachable, against 16 before.
-#
-# Not found, and deliberately left out rather than guessed at: Arunachal
-# Pradesh, Ladakh, Puducherry, Chandigarh, Andaman & Nicobar. A slug that 404s
-# costs a cycle every rotation and produces the silent nothing that
-# barren_targets() now exists to catch.
+# The offices themselves are still DISCOVERED AND PINNED rather than generated;
+# the YAML carries that reasoning and the four city-named offices with it.
+# Behaviour is unchanged: same 29 keys, same URLs, same link pattern.
+# (slug, label, url). The LABEL names the office, which is not always the
+# entity it audits: AG Nagpur audits Maharashtra. The target keeps the office
+# label it has always had; the peer-set entity is read from the jurisdiction by
+# anything comparing states (engine/synthesis.py).
 AG_OFFICES = [
-    ("aizawl", "Mizoram", "https://cag.gov.in/ag/aizawl/en/audit-report"),
-    ("andhra-pradesh", "Andhra Pradesh", "https://cag.gov.in/ag/andhra-pradesh/en/audit-report"),
-    ("assam", "Assam", "https://cag.gov.in/ag/assam/en/audit-report"),
-    ("bihar", "Bihar", "https://cag.gov.in/ag/bihar/en/audit-report"),
-    ("chhattisgarh", "Chhattisgarh", "https://cag.gov.in/ag/chhattisgarh/en/audit-report"),
-    ("goa", "Goa", "https://cag.gov.in/ag/goa/en/audit-report"),
-    ("gujarat", "Gujarat", "https://cag.gov.in/ag1/gujarat/en/audit-report"),
-    ("haryana", "Haryana", "https://cag.gov.in/ag/haryana/en/audit-report"),
-    ("himachal-pradesh", "Himachal Pradesh", "https://cag.gov.in/ag/himachal-pradesh/en/audit-report"),
-    ("jammu-kashmir", "Jammu & Kashmir", "https://cag.gov.in/ag/jammu-kashmir/en/audit-report"),
-    ("jharkhand", "Jharkhand", "https://cag.gov.in/ag/jharkhand/en/audit-report"),
-    ("karnataka", "Karnataka", "https://cag.gov.in/ag1/karnataka/en/audit-report"),
-    ("kerala", "Kerala", "https://cag.gov.in/ag1/kerala/en/audit-report"),
-    ("madhya-pradesh", "Madhya Pradesh", "https://cag.gov.in/ag1/madhya-pradesh/en/audit-report"),
-    ("manipur", "Manipur", "https://cag.gov.in/ag/manipur/en/audit-report"),
-    ("meghalaya", "Meghalaya", "https://cag.gov.in/ag/meghalaya/en/audit-report"),
-    ("nagaland", "Nagaland", "https://cag.gov.in/ag/nagaland/en/audit-report"),
-    ("nagpur", "Maharashtra (AG Nagpur)", "https://cag.gov.in/ag/nagpur/en/audit-report"),
-    ("new-delhi", "Delhi", "https://cag.gov.in/ag/new-delhi/en/audit-report"),
-    ("odisha", "Odisha", "https://cag.gov.in/ag1/odisha/en/audit-report"),
-    ("punjab", "Punjab", "https://cag.gov.in/ag/punjab/en/audit-report"),
-    ("rajasthan", "Rajasthan", "https://cag.gov.in/ag1/rajasthan/en/audit-report"),
-    ("sikkim", "Sikkim", "https://cag.gov.in/ag/sikkim/en/audit-report"),
-    ("tamil-nadu", "Tamil Nadu", "https://cag.gov.in/ag1/tamil-nadu/en/audit-report"),
-    ("telangana", "Telangana", "https://cag.gov.in/ag/telangana/en/audit-report"),
-    ("tripura", "Tripura", "https://cag.gov.in/ag/tripura/en/audit-report"),
-    ("uttar-pradesh", "Uttar Pradesh", "https://cag.gov.in/ag1/uttar-pradesh/en/audit-report"),
-    ("uttarakhand", "Uttarakhand", "https://cag.gov.in/ag/uttarakhand/en/audit-report"),
-    ("west-bengal", "West Bengal", "https://cag.gov.in/ag1/west-bengal/en/audit-report"),
+    (o["slug"], o.get("office_label") or o["entity"], o["index_url"])
+    for o in jurisdiction.load().audit_offices
 ]
 
 CAG_STATE_TARGETS = [

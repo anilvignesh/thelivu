@@ -1,0 +1,232 @@
+# India — the inputs the investigation framework runs on.
+#
+# The METHOD is country-agnostic; only these are not. The test for whether a
+# rule belongs here rather than in code (docs/plans/09-investigation-framework.md
+# §1): if it mentions a rupee, a state name, or the CAG, it is config.
+#
+# A second country is a second file in this directory and a scout run. Not a
+# fork of the code.
+
+key: india
+name: India
+language: [en]
+
+# ── The peer set ────────────────────────────────────────────────────────────
+# What "the same failure in N states" is counted against. A finding is
+# structural when it holds across this set, and local when it does not, so the
+# set has to be the real one — dropping a state quietly weakens every
+# cross-entity claim made afterwards.
+entity_kind: state
+# How a document may write an entity's name, when it differs from the canonical
+# form above. Matching is otherwise deliberately narrow (punctuation and case
+# only) — a fuzzy match that merged two states would manufacture a structural
+# finding out of a clerical error.
+entity_aliases:
+  "J&K": "Jammu & Kashmir"
+  "Jammu and Kashmir": "Jammu & Kashmir"
+  "NCT of Delhi": "Delhi"
+  "Orissa": "Odisha"
+  "Pondicherry": "Puducherry"
+  "Uttaranchal": "Uttarakhand"
+entities:
+  - Andhra Pradesh
+  - Arunachal Pradesh
+  - Assam
+  - Bihar
+  - Chhattisgarh
+  - Delhi
+  - Goa
+  - Gujarat
+  - Haryana
+  - Himachal Pradesh
+  - Jammu & Kashmir
+  - Jharkhand
+  - Karnataka
+  - Kerala
+  - Madhya Pradesh
+  - Maharashtra
+  - Manipur
+  - Meghalaya
+  - Mizoram
+  - Nagaland
+  - Odisha
+  - Punjab
+  - Rajasthan
+  - Sikkim
+  - Tamil Nadu
+  - Telangana
+  - Tripura
+  - Uttar Pradesh
+  - Uttarakhand
+  - West Bengal
+
+# ── Money ───────────────────────────────────────────────────────────────────
+# `base_unit` is what every stored amount is normalised to (findings.amount_cr).
+# Scales are multipliers against the currency's own unit: 1 crore = 10,000,000
+# rupees. Grouping is 2-2-3 (12,34,567), not 3-3-3, and that is a presentation
+# fact the surface needs.
+money:
+  currency: INR
+  symbol: "₹"
+  base_unit: crore
+  grouping: indian
+  scales:
+    lakh: 100000
+    crore: 10000000
+
+# ── Fiscal year ─────────────────────────────────────────────────────────────
+# Audit reports are labelled by the year they cover, not the year of
+# publication, and the label spans two calendar years: 2023-24 starts 1 April
+# 2023. A comparison across years that used the publication date would compare
+# the wrong documents.
+fiscal_year:
+  starts: "04-01"
+  label: "YYYY-YY"
+
+# ── The audit body ──────────────────────────────────────────────────────────
+# `objection_vocabulary` is the language a recurring objection is written in.
+# The synthesis tier matches categories, not these words — they are here so a
+# second country can state its own and so a reader knows what the categories
+# were derived from.
+audit_body:
+  name: CAG
+  full_name: Comptroller and Auditor General of India
+  objection_vocabulary:
+    - outstanding utilisation certificate
+    - unadjusted advance
+    - idle funds
+    - non-recovery
+    - diversion of funds
+    - blocking of funds
+    - savings not surrendered
+    - excess expenditure over grant
+    - persistent irregularity
+
+# ── Seed domains for the scout ──────────────────────────────────────────────
+# Where source discovery starts. The scout proposes; a person activates. A
+# domain here is NOT a trusted source — it is a place to look.
+portals:
+  - host: cag.gov.in
+    what: audit reports, state and union
+  - host: sansad.in
+    what: Lok Sabha questions and answers (JSON API)
+  - host: rsdoc.nic.in
+    what: Rajya Sabha questions (different host, same institution)
+  - host: data.gov.in
+    what: typed datasets through the sanctioned API
+  - host: pib.gov.in
+    what: government press releases
+  - host: mospi.gov.in
+    what: statistics and press notes
+  - host: sebi.gov.in
+    what: enforcement orders
+
+# ── Audit offices ───────────────────────────────────────────────────────────
+# DISCOVERED AND PINNED, not generated. Every state Accountant General
+# publishes at /ag<N>/<slug>/en/audit-report, but <N> varies with no pattern
+# (kerala is ag1, punjab is ag, telangana is ag) and four offices answer to a
+# CITY rather than their state: Maharashtra is nagpur, Mizoram is aizawl,
+# Delhi is new-delhi, J&K is jammu-kashmir. Each was probed and returned real
+# audit-report PDFs on 2026-09-14.
+#
+# 29 offices, 477 audit reports reachable, against 16 before.
+#
+# Absent and deliberately not guessed at: Arunachal Pradesh, Ladakh,
+# Puducherry, Chandigarh, Andaman & Nicobar. A slug that 404s costs a cycle
+# every rotation and produces exactly the silent nothing barren_targets()
+# exists to catch. They are in `entities` above because they are part of the
+# peer set whether or not we have found their audit office.
+audit_offices:
+  - slug: aizawl
+    entity: "Mizoram"
+    index_url: https://cag.gov.in/ag/aizawl/en/audit-report
+  - slug: andhra-pradesh
+    entity: "Andhra Pradesh"
+    index_url: https://cag.gov.in/ag/andhra-pradesh/en/audit-report
+  - slug: assam
+    entity: "Assam"
+    index_url: https://cag.gov.in/ag/assam/en/audit-report
+  - slug: bihar
+    entity: "Bihar"
+    index_url: https://cag.gov.in/ag/bihar/en/audit-report
+  - slug: chhattisgarh
+    entity: "Chhattisgarh"
+    index_url: https://cag.gov.in/ag/chhattisgarh/en/audit-report
+  - slug: goa
+    entity: "Goa"
+    index_url: https://cag.gov.in/ag/goa/en/audit-report
+  - slug: gujarat
+    entity: "Gujarat"
+    index_url: https://cag.gov.in/ag1/gujarat/en/audit-report
+  - slug: haryana
+    entity: "Haryana"
+    index_url: https://cag.gov.in/ag/haryana/en/audit-report
+  - slug: himachal-pradesh
+    entity: "Himachal Pradesh"
+    index_url: https://cag.gov.in/ag/himachal-pradesh/en/audit-report
+  - slug: jammu-kashmir
+    entity: "Jammu & Kashmir"
+    index_url: https://cag.gov.in/ag/jammu-kashmir/en/audit-report
+  - slug: jharkhand
+    entity: "Jharkhand"
+    index_url: https://cag.gov.in/ag/jharkhand/en/audit-report
+  - slug: karnataka
+    entity: "Karnataka"
+    index_url: https://cag.gov.in/ag1/karnataka/en/audit-report
+  - slug: kerala
+    entity: "Kerala"
+    index_url: https://cag.gov.in/ag1/kerala/en/audit-report
+  - slug: madhya-pradesh
+    entity: "Madhya Pradesh"
+    index_url: https://cag.gov.in/ag1/madhya-pradesh/en/audit-report
+  - slug: manipur
+    entity: "Manipur"
+    index_url: https://cag.gov.in/ag/manipur/en/audit-report
+  - slug: meghalaya
+    entity: "Meghalaya"
+    index_url: https://cag.gov.in/ag/meghalaya/en/audit-report
+  - slug: nagaland
+    entity: "Nagaland"
+    index_url: https://cag.gov.in/ag/nagaland/en/audit-report
+  - slug: nagpur
+    # The office is AG Nagpur; the ENTITY it audits is Maharashtra. Both are
+    # here because they are used for different things: `entity` is what a
+    # cross-state comparison counts, `office_label` is what a target is named.
+    # Collapsing them would have quietly dropped Maharashtra out of every peer
+    # count, since "Maharashtra (AG Nagpur)" matches no entity in the list.
+    entity: "Maharashtra"
+    office_label: "Maharashtra (AG Nagpur)"
+    index_url: https://cag.gov.in/ag/nagpur/en/audit-report
+  - slug: new-delhi
+    entity: "Delhi"
+    index_url: https://cag.gov.in/ag/new-delhi/en/audit-report
+  - slug: odisha
+    entity: "Odisha"
+    index_url: https://cag.gov.in/ag1/odisha/en/audit-report
+  - slug: punjab
+    entity: "Punjab"
+    index_url: https://cag.gov.in/ag/punjab/en/audit-report
+  - slug: rajasthan
+    entity: "Rajasthan"
+    index_url: https://cag.gov.in/ag1/rajasthan/en/audit-report
+  - slug: sikkim
+    entity: "Sikkim"
+    index_url: https://cag.gov.in/ag/sikkim/en/audit-report
+  - slug: tamil-nadu
+    entity: "Tamil Nadu"
+    index_url: https://cag.gov.in/ag1/tamil-nadu/en/audit-report
+  - slug: telangana
+    entity: "Telangana"
+    index_url: https://cag.gov.in/ag/telangana/en/audit-report
+  - slug: tripura
+    entity: "Tripura"
+    index_url: https://cag.gov.in/ag/tripura/en/audit-report
+  - slug: uttar-pradesh
+    entity: "Uttar Pradesh"
+    index_url: https://cag.gov.in/ag1/uttar-pradesh/en/audit-report
+  - slug: uttarakhand
+    entity: "Uttarakhand"
+    index_url: https://cag.gov.in/ag/uttarakhand/en/audit-report
+  - slug: west-bengal
+    entity: "West Bengal"
+    index_url: https://cag.gov.in/ag1/west-bengal/en/audit-report
