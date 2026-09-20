@@ -555,6 +555,69 @@ CREATE TABLE IF NOT EXISTS longform_queue (
     decided_at  TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_longform_queue_status ON longform_queue (status, queued_at);
+
+-- Every check the scout has made of an active source.
+--
+-- A source does not fail with an error. It produces plausible nothing: the
+-- index fetches, the extractor reads, the cycle logs "0 candidate(s)" and
+-- sleeps, which is also what a healthy source on a quiet day looks like. On
+-- 2026-09-14 four of nine targets turned out to have produced ZERO candidates
+-- in every run they had ever made, and the only reason anyone found out was
+-- someone asking the question by hand.
+--
+-- barren_targets() could already answer it. What was missing is that nobody
+-- was asking on a schedule and nothing was written down, so "this has been
+-- dead for six days" was an inference from a week of logs instead of a query.
+-- That is what this table is: the scout's verify job, kept.
+CREATE TABLE IF NOT EXISTS source_checks (
+    id          SERIAL PRIMARY KEY,
+    target_key  TEXT NOT NULL,
+    checked_at  TIMESTAMP DEFAULT NOW(),
+    robots_ok   BOOLEAN,
+    fetch_ok    BOOLEAN,
+    doc_links   INTEGER,
+    -- ok | barren | unreachable | refused — `refused` is robots.txt or a bot
+    -- wall and is NOT a fault to fix, it is an answer to respect.
+    verdict     TEXT,
+    detail      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_source_checks_key ON source_checks (target_key, checked_at);
+
+-- What the synthesise tier found ACROSS documents.
+--
+-- `findings` answers "what does this document say". Nothing asked the questions
+-- that no single document answers: the same objection in six consecutive years,
+-- the same failure in fourteen states, a figure moving the wrong way after an
+-- assurance. Those are where we stop being a commentator on a published audit
+-- and become the primary source.
+--
+-- `evidence` is a JSON array of finding ids and is NOT NULL, because a
+-- synthesis that cannot name its rows is an opinion. Every id in it points at a
+-- finding that quotes a retained document, so provenance survives the whole
+-- chain: document -> excerpt -> finding -> synthesis.
+--
+-- `peer_count` is stored rather than computed at read time. "14 of 30 states"
+-- and "14 of 16 states" are different findings, and the peer set grows when a
+-- new audit office is discovered — a claim must keep the denominator it was
+-- true against.
+--
+-- `fingerprint` is UNIQUE so a nightly re-run updates rather than duplicates.
+CREATE TABLE IF NOT EXISTS syntheses (
+    id           SERIAL PRIMARY KEY,
+    kind         TEXT NOT NULL,      -- recurring|structural|no-follow-through|wrong-direction
+    jurisdiction TEXT,
+    entities     TEXT,               -- JSON array of entity names
+    years        TEXT,               -- JSON array of fiscal labels
+    category     TEXT,
+    claim        TEXT NOT NULL,
+    evidence     TEXT NOT NULL,      -- JSON array of findings.id
+    amount_cr    NUMERIC,
+    peer_count   INTEGER,
+    status       TEXT DEFAULT 'new', -- new | promoted | rejected
+    fingerprint  TEXT UNIQUE,
+    created_at   TIMESTAMP DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_syntheses_triage ON syntheses (status, kind);
 """
 
 # SQLite fallback schema (same structure, SQLite syntax)
@@ -1025,6 +1088,35 @@ CREATE TABLE IF NOT EXISTS longform_queue (
     decided_at  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_longform_queue_status ON longform_queue (status, queued_at);
+
+CREATE TABLE IF NOT EXISTS source_checks (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    target_key  TEXT NOT NULL,
+    checked_at  TEXT DEFAULT (datetime('now')),
+    robots_ok   INTEGER,
+    fetch_ok    INTEGER,
+    doc_links   INTEGER,
+    verdict     TEXT,
+    detail      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_source_checks_key ON source_checks (target_key, checked_at);
+
+CREATE TABLE IF NOT EXISTS syntheses (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind         TEXT NOT NULL,
+    jurisdiction TEXT,
+    entities     TEXT,
+    years        TEXT,
+    category     TEXT,
+    claim        TEXT NOT NULL,
+    evidence     TEXT NOT NULL,
+    amount_cr    REAL,
+    peer_count   INTEGER,
+    status       TEXT DEFAULT 'new',
+    fingerprint  TEXT UNIQUE,
+    created_at   TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_syntheses_triage ON syntheses (status, kind);
 """
 
 
@@ -4331,5 +4423,203 @@ def set_longform_artifact(queue_id, script_path=None, video_path=None,
                     (*vals, queue_id))
         conn.commit()
         return cur.rowcount
+    finally:
+        conn.close()
+
+
+# ── The scout's verify job ──────────────────────────────────────────────────
+#
+# barren_targets() answers "which sources have found nothing lately". These
+# record and read the scout's own checks, so a dead source is a row with a date
+# on it rather than an inference from a week of logs.
+
+def record_source_check(target_key, verdict, robots_ok=None, fetch_ok=None,
+                        doc_links=None, detail=None):
+    """One check of one source. `verdict`: ok | barren | unreachable | refused."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        if not _is_postgres():
+            robots_ok = None if robots_ok is None else int(bool(robots_ok))
+            fetch_ok = None if fetch_ok is None else int(bool(fetch_ok))
+        cur.execute(
+            f"""INSERT INTO source_checks
+                (target_key, verdict, robots_ok, fetch_ok, doc_links, detail)
+                VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph})""",
+            (target_key, verdict, robots_ok, fetch_ok, doc_links,
+             (detail or "")[:1000] or None))
+        conn.commit()
+        return cur.lastrowid if not _is_postgres() else None
+    finally:
+        conn.close()
+
+
+def source_checks(target_key=None, limit=200):
+    """Recent checks, newest first."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        where, params = "", []
+        if target_key:
+            where = f"WHERE target_key = {ph}"
+            params.append(target_key)
+        cur.execute(
+            f"""SELECT id, target_key, checked_at, robots_ok, fetch_ok,
+                       doc_links, verdict, detail
+                  FROM source_checks {where}
+              ORDER BY checked_at DESC, id DESC LIMIT {int(limit)}""",
+            tuple(params))
+        return _fetchall(cur)
+    finally:
+        conn.close()
+
+
+def source_health():
+    """Latest verdict per source, worst first.
+
+    'Worst' is ordered by consequence, not alphabetically: unreachable before
+    barren before refused before ok. A refused source is LAST among the
+    non-ok ones on purpose — robots.txt saying no is an answer to respect, not
+    a fault to fix, and sorting it beside a broken fetch invites someone to
+    'fix' it."""
+    order = {"unreachable": 0, "barren": 1, "refused": 2, "ok": 3}
+    rows, seen = [], set()
+    for r in source_checks(limit=2000):
+        if r["target_key"] in seen:
+            continue
+        seen.add(r["target_key"])
+        rows.append(r)
+    rows.sort(key=lambda r: (order.get(r["verdict"], 9), r["target_key"]))
+    return rows
+
+
+# ── The synthesise tier ─────────────────────────────────────────────────────
+
+def store_synthesis(kind, claim, evidence_ids, jurisdiction=None, entities=None,
+                    years=None, category=None, amount_cr=None, peer_count=None,
+                    fingerprint=None):
+    """Record one cross-document finding. Refuses one with no evidence.
+
+    A synthesis that cannot name the findings it rests on is an opinion, and an
+    opinion in this table would be indistinguishable at read time from a claim
+    backed by twelve quoted documents."""
+    if not evidence_ids:
+        raise ValueError("a synthesis must cite the findings it rests on")
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cols = ("kind, jurisdiction, entities, years, category, claim, "
+                "evidence, amount_cr, peer_count, fingerprint")
+        vals = ", ".join([ph] * 10)
+        params = (kind, jurisdiction, json.dumps(list(entities or [])),
+                  json.dumps(list(years or [])), category, claim,
+                  json.dumps([int(i) for i in evidence_ids]), amount_cr,
+                  peer_count, fingerprint)
+        if _is_postgres():
+            cur.execute(
+                f"""INSERT INTO syntheses ({cols}) VALUES ({vals})
+                    ON CONFLICT (fingerprint) DO UPDATE SET
+                        claim = EXCLUDED.claim, evidence = EXCLUDED.evidence,
+                        amount_cr = EXCLUDED.amount_cr,
+                        peer_count = EXCLUDED.peer_count,
+                        entities = EXCLUDED.entities, years = EXCLUDED.years
+                    RETURNING id""", params)
+            row = cur.fetchone()
+            conn.commit()
+            return row[0] if row else None
+        cur.execute(f"INSERT OR REPLACE INTO syntheses ({cols}) VALUES ({vals})",
+                    params)
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def syntheses(status=None, kind=None, limit=200):
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        where, params = [], []
+        if status:
+            where.append(f"status = {ph}")
+            params.append(status)
+        if kind:
+            where.append(f"kind = {ph}")
+            params.append(kind)
+        sql = "SELECT * FROM syntheses"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += f" ORDER BY coalesce(amount_cr, 0) DESC, id DESC LIMIT {int(limit)}"
+        cur.execute(sql, tuple(params))
+        rows = _fetchall(cur)
+        for r in rows:
+            for col in ("entities", "years", "evidence"):
+                try:
+                    r[col] = json.loads(r.get(col) or "[]")
+                except (TypeError, ValueError):
+                    r[col] = []
+        return rows
+    finally:
+        conn.close()
+
+
+def set_synthesis_status(synthesis_id, status):
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(f"UPDATE syntheses SET status = {ph} WHERE id = {ph}",
+                    (status, synthesis_id))
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
+def state_findings(limit=20000):
+    """Findings the synthesise tier is allowed to read.
+
+    `cause = 'state'` ONLY, and that filter lives here rather than in the
+    caller so no future detector can forget it. Karnataka's 97,814 crore of
+    flood damage sits in this corpus looking exactly like a governance failure:
+    an enormous number, in an audit report, next to the word 'loss'. A
+    cross-year pattern built out of monsoons would be confidently, repeatedly
+    wrong, and it would be wrong in public."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            f"""SELECT id, doc_sha256, source_key, published, claim, excerpt,
+                       amount_cr, category, cause, status
+                  FROM findings
+                 WHERE cause = 'state'
+              ORDER BY source_key, published LIMIT {int(limit)}""")
+        return _fetchall(cur)
+    finally:
+        conn.close()
+
+
+def corpus_coverage():
+    """[(source_key, published, docs, chars)] — what the corpus actually holds.
+
+    Two consumers, and the second is the non-obvious one. The surface needs it
+    for freshness. `no_follow_through` needs it to tell 'the objection was never
+    raised again' from 'we never read a later report', which are opposite
+    conclusions from the same absence."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """SELECT source_key, published, count(*) AS docs,
+                      coalesce(sum(chars), 0) AS chars, max(read_at) AS last_read
+                 FROM documents
+                WHERE source_key IS NOT NULL
+             GROUP BY source_key, published
+             ORDER BY source_key, published""")
+        return _fetchall(cur)
     finally:
         conn.close()
