@@ -4637,3 +4637,21 @@ def corpus_coverage():
         return _fetchall(cur)
     finally:
         conn.close()
+
+
+def document_text(sha256):
+    """One corpus document's full text, or None.
+
+    The corpus pass reads documents_without_findings() (which deliberately does
+    NOT select `text` — a 561,598-character report per row makes a listing
+    query unusable) and then fetches the text of the one it is reading.
+    """
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute(f"SELECT sha256, url, title, source_key, published, chars, text "
+                    f"FROM documents WHERE sha256 = {ph}", (sha256,))
+        return _fetchone(cur)
+    finally:
+        conn.close()
