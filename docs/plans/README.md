@@ -31,6 +31,7 @@ baked in so you don't have to re-derive it.
 | 4 | [04-streamlit-retirement.md](04-streamlit-retirement.md) | Only after the command center has proven itself for ~a week. |
 | 6 | [06-reel-autonomy.md](06-reel-autonomy.md) | Added 2026-08-12. Auto-triggers reel builds on publish and moves the render off Anil's laptop onto an always-on Oracle VM. Independent of 01-05; written after the command center + illustrated reels already existed. |
 | 7 | [07-tier0-digger.md](07-tier0-digger.md) | Shipped 2026-09-10. Free-tier-model pre-filter layer underneath the existing model tiers. |
+| 9 | [09-investigation-framework.md](09-investigation-framework.md) | Added 2026-09-15, **built 2026-09-20** (scout, reader-synthesis, surface; video left for later per Anil). The build context and a shipped-vs-planned comparison are in [09-build-context.md](09-build-context.md) — read that before touching any of it. |
 | 8 | [08-technical-refine-loop.md](08-technical-refine-loop.md) | Added 2026-09-14. Generalizes plan 05's tech-steward pattern (evidence → proposed diff → human-approved) to research/investigation/production; explicitly excludes editorial judgment, which stays manual. Depends on nothing structurally but reuses 05's surfacing mechanism directly — read 05 first. |
 
 Suggested execution order: **01 → 05 → 02 → 03 → 04**. Plan 05 is the "technical

@@ -6,6 +6,61 @@ state of the work — update it as you go. For how the engine runs, see
 
 ---
 
+## The investigation framework is built (2026-09-20)
+
+Anil: *"complete the plan… focus on the discovery part, facts, authenticated,
+investigated"*, video generation deferred. Plan 09 shipped, minus its video half.
+Full build context and a shipped-vs-planned comparison: `docs/plans/09-build-context.md`.
+
+**The country-agnostic split is real, not aspirational.** The 29 CAG audit
+offices, the peer set, rupee scales, the fiscal year and the scout's seed
+portals moved to `jurisdictions/india.yaml`, and `engine/digger/targets.py` now
+BUILDS from it — asserted byte-identical to the hardcoded list it replaced. A
+second country is a second YAML. The test that decides where a rule lives: if it
+mentions a rupee, a state name, or the CAG, it is config.
+
+**The scout exists** (`engine/digger/scout.py`). It re-checks every active source
+daily and writes a row per check to `source_checks`, so "this has been dead for
+six days" is a query instead of an inference from a week of journal. Four
+verdicts, and `refused` is deliberately not an alarm — robots.txt saying no is an
+answer, not a fault. It PROPOSES and never activates; it also never deactivates,
+because on 2026-09-19 thirty-three barren-looking targets were all pointed at
+exactly the right source. Run it by hand with `--scout`.
+
+**A JS shell's endpoint can be hunted without a browser**
+(`engine/digger/apiscan.py`): mine the page and its own bundles for
+endpoint-shaped strings, probe each, keep the ones serving typed rows. The
+Playwright tier is optional and RAISES where it is not installed — "we could not
+look" never arrives as "we found nothing". `--apiscan URL`.
+
+**The synthesise tier exists** (`engine/synthesis.py`) — the four questions no
+single document answers: the same objection in N consecutive years, the same
+failure in N states, a finding never named again, a figure growing every year.
+No model is in the detection loop; it is arithmetic over grounded rows, and
+every synthesis cites the finding ids it rests on. The flood rule is structural:
+detectors read `db.state_findings()`, which is `cause='state'` and nothing else.
+`python -m engine.synthesis`.
+
+**The surface** is a new Investigation view in the command center: source health,
+proposals awaiting activation, findings, syntheses with their evidence, and
+freshness in three bands (`this month` / `this year` / `the record`) — never one
+"live" claim.
+
+**New tables** (both dialects): `source_checks`, `syntheses`.
+**New suites**: `run_jurisdiction_cases`, `run_scout_cases`, `run_synthesis_cases`.
+
+**What this is waiting on:** the corpus. The detectors are correct and have
+almost nothing to read until `engine/corpus.py backfill()` has run over the 29
+offices. That is the next job, and it is the one that decides whether any of
+this produces a story.
+
+**Known open after this build:** the Playwright tier does not run in production,
+so a page computing its endpoint at runtime is still invisible; `needs_attention`
+still has no sweep; and everything below this line predates 2026-09-09 and is
+stale by roughly 90 commits.
+
+---
+
 ## Single desk, paid images, and five gates (2026-09-08 → 09)
 
 **Thelivu is the news desk only.** The Everyone Knows / Turns Out belief desks are
