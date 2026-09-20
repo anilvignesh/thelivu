@@ -334,6 +334,10 @@ const VIEWS = [
   ['digs',      '🗺', 'Digs',          vDigs],
   ['beliefs',   '🧠', 'Beliefs',       vBeliefs],
   ['cos',       '🧭', 'Chief of staff', vCos],
+  /* Sits above Sources because it is the question Sources only half answers:
+     Sources is who we read, this is whether reading them is producing
+     anything and what the corpus says once it has. */
+  ['investigation', '🔍', 'Investigation', vInvestigation],
   ['sources',   '📡', 'Sources',       vSources],
   ['ingest',    '📥', 'Ingest',        vIngest],
   /* Everything else in this list is about what the engine PRODUCES. This is the
@@ -1297,6 +1301,141 @@ async function vCos(main) {
 }
 
 /* ══ SOURCES ════════════════════════════════════════════════════════════ */
+/* ── Investigation ─────────────────────────────────────────────────────────
+   The scout, the corpus and the synthesise tier, on one screen.
+
+   Freshness is shown as three BANDS rather than one "live" number, because the
+   ages here differ by orders of magnitude and a surface that hides that would
+   make us wrong about the one thing we are uniquely placed to be right about:
+   the NH-projects dataset was sixteen months stale when it was measured, and
+   saying so is a stronger story than the figure it carries. */
+async function vInvestigation(main) {
+  const d = await api('/investigation');
+  main.innerHTML = '';
+  main.appendChild(el(`<div><h1>Investigation</h1>
+    <div class="sub">Sources, the corpus, and what it says across documents.</div></div>`));
+
+  const c = d.corpus;
+  main.appendChild(el(`<div class="row" style="gap:10px;flex-wrap:wrap;margin:12px 0">
+    <div class="card"><div class="eyebrow">corpus</div><b>${c.documents}</b> documents ·
+      ${(c.chars / 1e6).toFixed(1)}M chars · ${c.entities} sources</div>
+    <div class="card"><div class="eyebrow">findings</div><b>${d.findings.total}</b> grounded,
+      cause = state</div>
+    <div class="card"><div class="eyebrow">syntheses</div><b>${d.syntheses.new.length}</b> awaiting you ·
+      ${d.syntheses.promoted.length} promoted</div>
+  </div>`));
+
+  /* Sources needing a person. Nothing here was deactivated automatically —
+     that is said on screen because the absence of an action is otherwise
+     invisible, and someone would assume it had been handled. */
+  const nr = d.sources.needs_review;
+  const sv = el(`<div class="card" style="margin-bottom:14px"><div class="eyebrow">
+    source health — ${nr.length} need${nr.length === 1 ? 's' : ''} review</div><div data-x="b"></div>
+    <div class="muted small" style="margin-top:6px">Nothing is ever deactivated for you.
+      A barren source may be one whose documents went to the corpus instead.</div></div>`);
+  const sb = sv.querySelector('[data-x=b]');
+  if (!nr.length) sb.appendChild(el(`<div class="muted small">Every source is reading.</div>`));
+  for (const h of nr) {
+    sb.appendChild(el(`<div class="small"><span class="pill ${h.verdict === 'unreachable' ? 'killed' : 'held'}">
+      ${esc(h.verdict)}</span> <b>${esc(h.target_key)}</b>
+      <span class="muted">— ${esc(h.detail || '')}</span> <span class="muted">${fdate(h.checked_at)}</span></div>`));
+  }
+  const sact = el(`<div class="actions" style="margin-top:8px"></div>`);
+  addBtn(sact, 'Re-check every source', 'small', async () => {
+    const r = await api('/investigation/scout/run', { method: 'POST', body: {} });
+    toast(`${r.checked} checked · ${r.ok} reading · ${r.needs_review.length} need review`, 'ok', 8000);
+    route();
+  });
+  sv.appendChild(sact);
+  main.appendChild(sv);
+
+  /* Proposals. The scout nominates and stops — activation is this button. */
+  const props = d.sources.proposals || [];
+  if (props.length) {
+    const pv = el(`<div class="card" style="margin-bottom:14px">
+      <div class="eyebrow">proposed sources (${props.length}) — the scout gathered the evidence, you decide</div>
+      <div data-x="b"></div></div>`);
+    for (const p of props) {
+      const row = el(`<div class="item"><b>${esc(p.name)}</b>
+        <div class="meta">${esc(p.index_url)}<br>
+          ${p.robots_ok ? '✓ robots' : '✗ robots'} ·
+          ${p.doc_links || 0} document links ·
+          sample parses as ${esc(p.doc_format || '—')}
+          ${p.validation_error ? ' · <span style="color:var(--brick)">' + esc(p.validation_error) + '</span>' : ''}</div>
+        <div class="actions"><button class="btn small primary">✓ Activate</button>
+          <button class="btn small">✗ Reject</button></div></div>`);
+      const bs = row.querySelectorAll('button');
+      bs[0].onclick = async () => {
+        await api('/investigation/sources/decide', { method: 'POST', body: { key: p.key, action: 'activate' } });
+        toast(`${p.key} is in the rotation.`, 'ok'); route();
+      };
+      bs[1].onclick = async () => {
+        await api('/investigation/sources/decide', { method: 'POST', body: { key: p.key, action: 'reject' } });
+        toast(`${p.key} rejected.`); route();
+      };
+      pv.querySelector('[data-x=b]').appendChild(row);
+    }
+    main.appendChild(pv);
+  }
+
+  /* Freshness. Three bands, each with its age, never one "live" claim. */
+  const bands = c.bands || {};
+  const bv = el(`<div class="card" style="margin-bottom:14px"><div class="eyebrow">freshness</div>
+    <div class="grid2" data-x="b"></div></div>`);
+  for (const name of ['this month', 'this year', 'the record', 'unknown']) {
+    const list = bands[name] || [];
+    if (!list.length) continue;
+    const oldest = Math.max(...list.map(x => x.age_days == null ? 0 : x.age_days));
+    bv.querySelector('[data-x=b]').appendChild(el(`<div class="small">
+      <b>${esc(name)}</b> — ${list.length} source${list.length === 1 ? '' : 's'}
+      ${name === 'the record' ? '' : `<span class="muted">(oldest ${oldest}d)</span>`}
+      <div class="muted">${list.slice(0, 8).map(x => esc(x.source_key)).join(', ')}</div></div>`));
+  }
+  main.appendChild(bv);
+
+  /* What the corpus says across documents. */
+  const yv = el(`<div class="card"><div class="eyebrow">syntheses awaiting judgement</div>
+    <div data-x="b"></div></div>`);
+  const yb = yv.querySelector('[data-x=b]');
+  if (!d.syntheses.new.length)
+    yb.appendChild(el(`<div class="muted small">Nothing new. Run the detectors after the next corpus pass.</div>`));
+  for (const s of d.syntheses.new) {
+    const row = el(`<div class="item"><span class="pill">${esc(s.kind)}</span>
+      <b>${esc(s.claim)}</b>
+      <div class="meta">${(s.evidence || []).length} finding(s) ·
+        ${esc((s.years || []).join(', '))}
+        ${s.peer_count ? ' · peer set ' + s.peer_count : ''}</div>
+      <pre class="muted small" data-x="dossier" hidden style="white-space:pre-wrap"></pre>
+      <div class="actions"><button class="btn small">Evidence</button>
+        <button class="btn small primary">✓ Promote</button>
+        <button class="btn small">✗ Reject</button></div></div>`);
+    const bs = row.querySelectorAll('button');
+    const pre = row.querySelector('[data-x=dossier]');
+    bs[0].onclick = async () => {
+      if (!pre.hidden) { pre.hidden = true; return; }
+      const r = await api(`/investigation/syntheses/${s.id}`);
+      pre.textContent = r.dossier; pre.hidden = false;
+    };
+    bs[1].onclick = async () => {
+      await api(`/investigation/syntheses/${s.id}/action`, { method: 'POST', body: { action: 'promote' } });
+      toast('Promoted — it is yours to write.', 'ok'); route();
+    };
+    bs[2].onclick = async () => {
+      await api(`/investigation/syntheses/${s.id}/action`, { method: 'POST', body: { action: 'reject' } });
+      toast('Rejected.'); route();
+    };
+    yb.appendChild(row);
+  }
+  const yact = el(`<div class="actions" style="margin-top:8px"></div>`);
+  addBtn(yact, 'Run the detectors', 'small', async () => {
+    const r = await api('/investigation/syntheses/run', { method: 'POST', body: {} });
+    toast(`${r.found} synthesis/es — ${r.kinds.join(', ') || 'none'}`, 'ok', 8000);
+    route();
+  });
+  yv.appendChild(yact);
+  main.appendChild(yv);
+}
+
 async function vSources(main) {
   const d = await api('/sources');
   main.innerHTML = '';

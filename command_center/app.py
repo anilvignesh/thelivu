@@ -23,7 +23,8 @@ from starlette.routing import Mount, Route
 # Import order matters: command_center.db patches shared.db._conn with the
 # connection pool, so it must load before anything touches the DB.
 from command_center import auth, db  # noqa: F401
-from command_center.api import beliefs, media, ops, reach, runs, system
+from command_center.api import (beliefs, investigation, media, ops, reach,
+                                runs, system)
 
 STATIC = Path(__file__).parent / "static"
 PORT = int(os.environ.get("CC_PORT", "8600"))
@@ -73,7 +74,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
 
 api_routes = (system.routes + runs.routes + media.routes + ops.routes
-              + beliefs.routes + reach.routes)
+              + beliefs.routes + reach.routes + investigation.routes)
 
 app = Starlette(routes=[
     Route("/api/login", login, methods=["POST"]),
