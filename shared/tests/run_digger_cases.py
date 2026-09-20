@@ -1537,6 +1537,30 @@ def t_records_and_dedups():
     check("candidate defaults to new", rows[0]["status"], "new")
 
 
+
+def t_html_entities_in_hrefs_are_decoded():
+    """An `&amp;` in a document link must not reach the network.
+
+    A CAG report filename usually contains "C&AG", which the page writes as
+    `C&amp;AG` like any correct HTML document. Fetching the literal entity gets
+    a 404; the unescaped URL returns the PDF. Measured on the Mizoram index
+    2026-09-20: 2 of 17 links carried the entity, and those two were the audit
+    reports — every other link was a holiday list, an RTI training schedule or
+    a PAC note.
+
+    So this was not "a few links fail". The digger could reach every document
+    on a CAG index EXCEPT the audit reports, and from the outside that is
+    indistinguishable from a source with nothing worth reading.
+    """
+    html = ('<a href="https://cag.gov.in/x/Report-of-the-C&amp;AG-of-India.pdf">R</a>'
+            '<a href="/y/plain-report.pdf">P</a>')
+    urls = [i["url"] for i in fetch.extract_links(html, "https://cag.gov.in/")]
+    check("entity decoded in href", any("C&AG" in u for u in urls), True)
+    check("no raw entity survives", any("&amp;" in u for u in urls), False)
+    check("ordinary links untouched",
+          "https://cag.gov.in/y/plain-report.pdf" in urls, True)
+
+
 def main():
     print("digger cases")
     for t in (t_parses_plain_json,
@@ -1624,7 +1648,8 @@ def main():
               t_promotion_opens_a_dig_never_a_topic,
               t_batch_is_capped_for_judgement_not_cost,
               t_candidate_status_round_trips,
-              t_records_and_dedups):
+              t_records_and_dedups,
+              t_html_entities_in_hrefs_are_decoded):
         t()
 
     print("\n" + "=" * 72)

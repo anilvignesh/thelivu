@@ -314,12 +314,27 @@ _HREF_RE = re.compile(r"<a[^>]+href=[\"']([^\"'#]+)[\"'][^>]*>(.*?)</a>", re.S |
 
 
 def extract_links(html, base_url, pattern=None):
-    """Absolute document links from an HTML index, optionally filtered."""
+    """Absolute document links from an HTML index, optionally filtered.
+
+    Hrefs are HTML-UNESCAPED before resolving, and that one call is worth more
+    than it looks. A CAG report filename usually contains "C&AG", which the
+    page writes as `C&amp;AG` like any correct HTML document. Fetching the
+    literal `&amp;` gets a 404 from cag.gov.in; the unescaped URL returns the
+    PDF. Measured on the Mizoram index 2026-09-20: 2 of 17 links carried the
+    entity, and those two were the audit reports — every other link was a
+    holiday list, an RTI training schedule or a PAC discussion note.
+
+    So the effect was not "a few links fail". It was that the digger could
+    reach every document on a CAG index EXCEPT the audit reports, in a way that
+    looked from the outside exactly like a source with nothing worth reading.
+    This is the mechanism behind an unknown share of the barren targets.
+    """
+    import html as _html
     from urllib.parse import urljoin
     rx = re.compile(pattern, re.I) if pattern else None
     seen, out = set(), []
     for href, label in _HREF_RE.findall(html):
-        url = urljoin(base_url, href.strip())
+        url = urljoin(base_url, _html.unescape(href.strip()))
         if not url.startswith("http") or url in seen:
             continue
         if rx and not rx.search(url):

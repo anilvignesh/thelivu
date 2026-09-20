@@ -919,6 +919,13 @@ CREATE TABLE IF NOT EXISTS digger_candidates (
     answer_b    TEXT,
     agreement   TEXT DEFAULT 'single',
     status      TEXT DEFAULT 'new',
+    -- Drifted: Postgres got this column and an ALTER in 2026-09-14, SQLite got
+    -- neither, so record_digger_candidate() raised OperationalError on every
+    -- scratch database and run_digger_cases has been aborting mid-suite ever
+    -- since — after 229 PASS lines, with the summary never printed. A suite
+    -- that dies quietly on its second-to-last case reads exactly like a suite
+    -- that passed.
+    doc_sha256  TEXT,
     fetched_at  TEXT,
     created_at  TEXT DEFAULT (datetime('now'))
 );
@@ -1418,6 +1425,13 @@ def init_db():
                               ("youtube_video_id", "TEXT"), ("script_text", "TEXT")]:
                 try:
                     cur.execute(f"ALTER TABLE longform_queue ADD COLUMN {col} {defn}")
+                except Exception:
+                    pass
+            # The Postgres branch has carried this since 2026-09-14; the SQLite
+            # branch never did.
+            for col, defn in [("doc_sha256", "TEXT")]:
+                try:
+                    cur.execute(f"ALTER TABLE digger_candidates ADD COLUMN {col} {defn}")
                 except Exception:
                     pass
         conn.commit()
