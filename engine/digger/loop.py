@@ -363,6 +363,11 @@ def main(argv=None):
     ap.add_argument("--approve", metavar="KEY",
                     help="activate a proposed target (a human decision)")
     ap.add_argument("--reject", metavar="KEY")
+    ap.add_argument("--scout", action="store_true",
+                    help="verify every active source is still reading (the "
+                         "scout's verify job; deactivates nothing)")
+    ap.add_argument("--apiscan", metavar="URL",
+                    help="hunt the endpoint a JS-rendered listing calls")
     ap.add_argument("--review", action="store_true",
                     help="run the batched review over new candidates (step 7)")
     ap.add_argument("--review-limit", type=int, default=25)
@@ -372,6 +377,30 @@ def main(argv=None):
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+
+    if args.scout:
+        from engine.digger import scout
+        res = scout.verify_all()
+        for c in res["checks"]:
+            print(scout.describe(c))
+        print(f"\n{res['ok']} reading, {len(res['needs_review'])} need review, "
+              f"{res['refused']} refused us")
+        return 0
+
+    if args.apiscan:
+        from engine.digger import apiscan
+        res = apiscan.discover(args.apiscan)
+        print(apiscan.describe(res))
+        for ev in res["endpoints"]:
+            print(f"  {ev['rows']:5d} {ev['format']:5s} {ev['url']}")
+        if not res["endpoints"] and not res.get("error"):
+            try:
+                found = apiscan.browser_watch(args.apiscan)
+                for u in found:
+                    print(f"  browser: {u}")
+            except apiscan.ApiscanUnavailable as e:
+                print(f"  (browser tier unavailable: {e})")
+        return 0
 
     if args.list_targets:
         for t in targets.active_targets():

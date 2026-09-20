@@ -788,6 +788,25 @@ if service == "thelivu-agent":
             except Exception as e:
                 log.error("Auto dig advance failed: %s", e)
 
+            # The scout's verify job — daily. Checks every active source is
+            # still reading and reports the ones that are not.
+            #
+            # DAILY, not hourly, and not per cycle: this re-fetches every index,
+            # which is a request to each government server we depend on. The
+            # failure it catches took weeks to appear and will keep until
+            # tomorrow. It never deactivates anything — see engine/digger/scout.py.
+            try:
+                last_scout_check = kv_get("last_digger_scout_at")
+                scout_due = ((not last_scout_check) or
+                             (now_utc - datetime.fromisoformat(last_scout_check))
+                             .total_seconds() >= 24 * 3600)
+                if scout_due:
+                    from engine.digger.scout import run_scout_cycle
+                    log.info("Scout: verifying every active source")
+                    run_scout_cycle()
+            except Exception as e:
+                log.error("Scout verify failed: %s", e)
+
             # Chief of staff — manual signal (dashboard/bot "Run now").
             try:
                 if kv_get("run_chief_of_staff"):
