@@ -126,10 +126,18 @@ def read_index(index_url, link_pattern, source_key, limit=None,
                skip_held=True, progress=None):
     """Fetch every document at an index, read it in full, store the text.
 
-    Returns {read, skipped, failed}. RESUMABLE: a document already in the corpus
-    is skipped by hash, so an interrupted backfill costs only the document it
-    was on. It will be interrupted — 477 documents over government links is not
-    a run that completes first time.
+    Returns {read, skipped, failed}, plus `error` when the INDEX itself could
+    not be read. RESUMABLE: a document already in the corpus is skipped by hash,
+    so an interrupted backfill costs only the document it was on. It will be
+    interrupted — 477 documents over government links is not a run that
+    completes first time.
+
+    `error` exists because "failed: 1" is not an answer. cag-rajasthan sat at
+    zero documents for days behind exactly that number: the index was refused
+    three times, the reason went only to a logger the one-office-per-process
+    backfill driver never captured, and what survived was a count that reads
+    identically whether the source is empty, broken, or refusing us. Invariant
+    4 — silence is reported — is about this.
     """
     from engine.digger import fetch
     from shared import archive, db
@@ -137,8 +145,10 @@ def read_index(index_url, link_pattern, source_key, limit=None,
     try:
         items = fetch.fetch_index(index_url, link_pattern)
     except Exception as e:                                  # noqa: BLE001
-        log.warning("%s: index unreadable (%s)", source_key, e)
-        return {"read": 0, "skipped": 0, "failed": 1}
+        log.warning("%s: index unreadable — %s: %s",
+                    source_key, type(e).__name__, e)
+        return {"read": 0, "skipped": 0, "failed": 1,
+                "error": f"{type(e).__name__}: {e}"}
 
     if limit:
         items = items[:limit]
@@ -227,6 +237,14 @@ def backfill(targets=None, limit_per_target=None, progress=None):
                          limit=limit_per_target, progress=progress)
         for k in totals:
             totals[k] += got[k]
-        log.info("%s: %d read, %d already held, %d failed",
-                 t["key"], got["read"], got["skipped"], got["failed"])
+        # An office that read nothing has to say why, in the same line that
+        # reports the count. A bare "0 read, 1 failed" is the shape of an
+        # answer without being one.
+        if got.get("error"):
+            log.warning("%s: %d read, %d already held, %d failed — %s",
+                        t["key"], got["read"], got["skipped"], got["failed"],
+                        got["error"])
+        else:
+            log.info("%s: %d read, %d already held, %d failed",
+                     t["key"], got["read"], got["skipped"], got["failed"])
     return totals
