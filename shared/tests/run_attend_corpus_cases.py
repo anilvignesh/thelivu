@@ -64,6 +64,15 @@ DOC_TEXT = (
 )
 
 
+DOC2_SHA = "b" * 64
+DOC2_TEXT = (
+    "Report of the Comptroller and Auditor General of India for the year "
+    "ended 31 March 2024, Government of Otherland.\n\n"
+    "The Public Works Department left Rs 12.40 crore parked in a civil deposit "
+    "account for four years without executing any work.\n"
+)
+
+
 def check(name, cond, detail=""):
     if cond:
         print(f"  ok    {name}")
@@ -176,6 +185,49 @@ def main():
         r4 = attend_corpus.ingest()
         check("an unparseable answer is counted, not stored",
               r4["unparseable"] == 1 and r4["findings"] == 0, str(r4))
+
+    # ── 7. --keep ADDS to the batch, and ingest sees all of it ──────────────
+    # Breadth is the whole point of the attended pass: the detectors need the
+    # same category across many states in one year, and one prepare call only
+    # ever covers one document. --keep kept the request FILES and overwrote the
+    # manifest, which is the only thing ingest reads — so every earlier request
+    # sat answered on disk and was never ingested, and the counts reported a
+    # clean small batch rather than a lost large one.
+    store_document(DOC2_SHA, "https://example.gov/other.pdf", DOC2_TEXT,
+                   title="Otherland audit 2024", source_key="cag-otherland",
+                   published="2024")
+    a = attend_corpus.prepare(chunks_per_doc=1, only_sha=DOC_SHA)
+    b = attend_corpus.prepare(chunks_per_doc=1, only_sha=DOC2_SHA, fresh=False)
+    check("--keep adds to the batch rather than replacing it",
+          len(b["entries"]) == len(a["entries"]) + 1, str(b["entries"]))
+    check("and it reports what THIS call added",
+          b.get("written_now") == 1, str(b.get("written_now")))
+    again = attend_corpus.prepare(chunks_per_doc=1, only_sha=DOC2_SHA,
+                                  fresh=False)
+    check("a chunk already in the batch is not queued twice",
+          again.get("written_now") == 0 and
+          len(again["entries"]) == len(b["entries"]), str(again["entries"]))
+
+    for e in b["entries"]:
+        if e["sha256"] == DOC_SHA:
+            write_response(e["rid"], [
+                {"claim": "kept from the earlier prepare",
+                 "excerpt": "The Horticulture Department could not recover the "
+                            "interest-free outstanding loan of Rs 85.00 lakh "
+                            "from two Societies.",
+                 "amount_cr": 0.85, "category": "recovery", "cause": "state"}])
+        else:
+            write_response(e["rid"], [
+                {"claim": "from the document added by --keep",
+                 "excerpt": "The Public Works Department left Rs 12.40 crore "
+                            "parked in a civil deposit account for four years "
+                            "without executing any work.",
+                 "amount_cr": 12.40, "category": "idle", "cause": "state"}])
+    r7 = attend_corpus.ingest()
+    check("every request in the batch is ingested, not just the last prepare's",
+          r7["answered"] == 2 and r7["findings"] == 2, str(r7))
+    check("nothing was dropped from the kept batch",
+          r7["dropped_ungrounded"] == 0, str(r7))
 
     print()
     if FAILURES:

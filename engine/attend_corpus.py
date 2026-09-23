@@ -140,10 +140,25 @@ def prepare(docs=DEFAULT_DOCS, chunks_per_doc=DEFAULT_CHUNKS, fresh=True,
     """
 
     d = _dir()
+    prior = []
     if fresh:
         for f in d.glob("*.md"):
             f.unlink()
         (d / MANIFEST).unlink(missing_ok=True)
+    elif (d / MANIFEST).exists():
+        # `--keep` means ADD to the batch. The manifest is the ONLY thing
+        # ingest() reads, so keeping the request files while overwriting the
+        # manifest left every earlier request orphaned: answered on disk,
+        # invisible to ingest, and silently absent from the counts. That is the
+        # failure mode this repo keeps meeting — an absence that reads exactly
+        # like a zero. Breadth needs a batch spanning many documents, and one
+        # prepare call only ever covers one.
+        try:
+            prior = json.loads(
+                (d / MANIFEST).read_text(encoding="utf-8")).get("entries") or []
+        except ValueError:
+            log.warning("manifest at %s is unreadable; starting a new batch", d)
+            prior = []
 
     from shared import db, jurisdiction as juris
     try:
@@ -160,7 +175,11 @@ def prepare(docs=DEFAULT_DOCS, chunks_per_doc=DEFAULT_CHUNKS, fresh=True,
     else:
         todo = pending_documents(limit=docs)
 
-    entries, rid = [], 0
+    entries, rid = [], len(prior)
+    # A chunk already in the batch is not written twice: re-preparing the same
+    # document would otherwise queue a second request for the same text and
+    # double-count whatever it yields.
+    seen = {(e.get("sha256"), e.get("chunk")) for e in prior}
     for doc in todo:
         where = None
         if j is not None:
@@ -176,6 +195,8 @@ def prepare(docs=DEFAULT_DOCS, chunks_per_doc=DEFAULT_CHUNKS, fresh=True,
         pieces = all_pieces[skip_offset:skip_offset + chunks_per_doc]
         for offset, piece in enumerate(pieces, 1):
             n = skip_offset + offset
+            if (doc["sha256"], n) in seen:
+                continue
             rid += 1
             sha12 = doc["sha256"][:12]
             stem = f"{rid:03d}-{sha12}-c{n}"
@@ -193,9 +214,13 @@ def prepare(docs=DEFAULT_DOCS, chunks_per_doc=DEFAULT_CHUNKS, fresh=True,
             })
 
     manifest = {"written_at": datetime.now(timezone.utc).isoformat(),
-                "entries": entries}
+                "entries": prior + entries}
     (d / MANIFEST).write_text(json.dumps(manifest, indent=1), encoding="utf-8")
-    return manifest
+    # `written_now` is returned but deliberately NOT stored: the manifest on
+    # disk describes the batch, and "how many did this call add" is a fact
+    # about the call. The caller needs it to report honestly when --keep has
+    # added five requests to a batch that already held forty.
+    return dict(manifest, written_now=len(entries))
 
 
 def _chunk_text(entry):
@@ -300,7 +325,14 @@ def main(argv=None):
     p.add_argument("--from-chunk", type=int, default=1,
                    help="start at this chunk (1-based) — for going back for "
                         "more of a report already partly read")
-    sub.add_parser("ingest", help="verify and store the answered requests")
+    ig = sub.add_parser("ingest", help="verify and store the answered requests")
+    # `store_findings` has no dedup key ON PURPOSE — the same objection in two
+    # years is two findings and collapsing them destroys the signal. The cost
+    # of that choice is that ingest is NOT idempotent: run it twice over one
+    # batch and every finding is stored twice. So there has to be a way to see
+    # what a batch would yield, and what it would drop, without committing it.
+    ig.add_argument("--dry-run", action="store_true",
+                    help="verify grounding and report, storing nothing")
     sub.add_parser("status", help="what is waiting")
     args = ap.parse_args(argv)
 
@@ -311,17 +343,22 @@ def main(argv=None):
         m = prepare(docs=args.docs, chunks_per_doc=args.chunks,
                     fresh=not args.keep, only_sha=args.sha,
                     skip_offset=max(0, args.from_chunk - 1))
-        print(f"{len(m['entries'])} request(s) in {DIR_NAME}/")
-        for e in m["entries"][:10]:
+        new = m.get("written_now", len(m["entries"]))
+        fresh_written = m["entries"][len(m["entries"]) - new:] if new else []
+        print(f"{new} new request(s); {len(m['entries'])} in the batch "
+              f"in {DIR_NAME}/")
+        for e in fresh_written[:10]:
             print(f"  {e['rid']}  {e['where']} {e['published']}  "
                   f"{e['chars']:,} chars")
-        if len(m["entries"]) > 10:
-            print(f"  … and {len(m['entries']) - 10} more")
+        if new > 10:
+            print(f"  … and {new - 10} more")
         return 0
 
     if args.cmd == "ingest":
-        r = ingest()
+        r = ingest(store=not args.dry_run)
         print(json.dumps(r, indent=1))
+        if args.dry_run:
+            print("\ndry run — nothing was stored.")
         if r["dropped_ungrounded"]:
             print(f"\n{r['dropped_ungrounded']} finding(s) dropped — the quote "
                   f"was not in the text. That check is working.")
