@@ -31,3 +31,19 @@ uvicorn>=0.30
 # just kinetic reels (found live, 2026-08-19: 3 straight failed deploys). Installed
 # by hand into the Oracle VM's venv instead: apt install libcairo2-dev
 # libpango1.0-dev pkg-config python3-dev, then pip install manim.
+
+# The scout's browser tier (engine/digger/apiscan.py browser_watch) — OPTIONAL.
+#
+# A government portal that computes its endpoint at runtime is invisible to
+# static mining; the only method that works is loading the page and watching
+# what it calls. Verified 2026-09-25 against sansad.in/ls, which served seven
+# typed endpoints to a watched browser and names none of them in its markup.
+#
+# Deliberately NOT a hard requirement: it pulls a ~115MB Chromium and the
+# digger runs on a 945MB box under a 256MB cap, where apiscan raises
+# ApiscanUnavailable instead — "we could not look" must never arrive as "we
+# found nothing". Install where a scout sweep actually runs:
+#
+#   pip install playwright && playwright install chromium
+#
+# playwright>=1.55
