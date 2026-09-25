@@ -140,3 +140,86 @@ python -m shared.tests.run_digger_cases
 python -m engine.digger.loop --scout        # verify every source, deactivates nothing
 python -m engine.synthesis --dry-run        # detectors, no model, writes nothing
 ```
+
+---
+
+# Day two — 2026-09-25
+
+Anil was busy and asked me to work the pending list unattended. What changed.
+
+## Shipped and deployed (main is at the tip; `git push` deployed each)
+
+| commit | what |
+|---|---|
+| `73dcd7d` | concentration flag, no-follow-through tightened, robots transient cache |
+| `af6adca` | CAG targets ask for `/download_audit_report/`, not every `.pdf` |
+| `7849d8f` | ingest archives what it stored, so a second ingest cannot double-store |
+| `b04780d` | Playwright installed; browser tier proven against a live JS shell |
+
+## The four blocking items are done
+
+1. **Merged and deployed.** The scout ran its first production pass at 02:14 and
+   flagged 25 sources. That is the job working — it had never run anywhere
+   before, because it is scheduled in `run.py`, which only executes on Railway.
+2. **robots.txt transient cache.** 60s TTL for a network flake, one retry
+   first, 5xx still keeps the long cache. `cag-rajasthan`'s zero documents are
+   explained and cannot recur silently.
+3. **Structural claims name their dominant entity.** All eight were 41–96% one
+   state. The claim now says so.
+4. **`no_follow_through`** requires the later report to have been READ, and
+   groups by entity-year-category so siblings are not overwritten.
+
+## Things found by doing, not by planning
+
+- **The digger was reading holiday lists.** The scout's first pass said 18 CAG
+  offices were "reading the wrong documents" and it was right about every one:
+  `\.pdf$` matches 32 PDFs on Punjab's index of which 10 are audit reports.
+  Fixed; the corpus backfill had used the right path since 09-20.
+- **Ingest was not idempotent** and the natural rhythm walks into it. Answer
+  four chunks, ingest, answer four more, ingest — the first four are now in the
+  corpus twice under different ids, with real quotes and real document hashes.
+  Nothing downstream would have noticed.
+- **26 no-follow-through detections were collapsing into 13 stored rows**
+  through the fingerprint. I had reported that thinness to Anil as a weakness
+  of the corpus; it was a bug in the writer.
+- **The browser tier had never run.** It works: seven typed endpoints on
+  `sansad.in/ls` that the markup names nowhere. The URL in the plan
+  (`/ls/questions`) is stale and 404s — the tool was fine, the case had moved.
+
+## Corpus, end of day
+
+340 findings (338 `state`, 2 `unclear`), 27 syntheses, 75 documents. I read 14
+chunks attended today; **zero dropped for ungrounded quotes** across all of
+them.
+
+The two `unclear` rows are the first ever recorded, and worth keeping an eye
+on: Kerala revenue held under court stay orders is not obviously a state
+failure, so it got `unclear` rather than a guess, and `state_findings()`
+correctly showed 338 of 340 to the detectors.
+
+## Judgement calls I made, for you to overturn if you disagree
+
+- **Fiscal aggregates are not findings.** Several chunks were GSDP growth,
+  deficit movements and revenue trends. I answered `[]` to those. It is the
+  same class as Maharashtra's 20% budget under-spend, which is currently
+  carrying 62% of a structural claim and is a fiscal fact rather than a
+  scandal.
+- **Court stay orders got `unclear`,** not `state`.
+- **I did not backfill Rajasthan separately** — the deeper backfill now running
+  covers it with the corrected pattern.
+
+## Still open
+
+1. **Triage the 27 syntheses.** Unchanged in priority: the detectors are as
+   honest as I can make them mechanically, and which of these is a story is
+   judgement. `python -m engine.synthesis --dossier <id>`.
+2. **10 of the 12 chunks in the current batch are unanswered** — they are in
+   `.attend/corpus/` with the manifest, and `ingest` reports them as missing
+   rather than pretending they were empty.
+3. **The deeper backfill is running** (29 offices × 10 reports, full per-office
+   logs in `.backfill-logs/`, which is where a failure reason survives this
+   time).
+4. **2022 and 2023 still cannot reach `structural_failure`** — too few
+   documents. The running backfill should help.
+5. `needs_attention` sweep; changedetection.io; video generation — all still
+   deliberately untouched.
