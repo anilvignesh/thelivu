@@ -1561,6 +1561,52 @@ def t_html_entities_in_hrefs_are_decoded():
           "https://cag.gov.in/y/plain-report.pdf" in urls, True)
 
 
+
+def t_a_transient_robots_failure_is_not_an_hour_long_refusal():
+    """One dropped packet must not blank a whole host until the cache expires.
+
+    2026-09-23: cag-rajasthan finished a full backfill with zero documents and
+    three failures, and it was not refusing us — cag.gov.in serves no robots.txt
+    at all, which per RFC 9309 means allowed. But a NETWORK-level failure
+    fetching it was recorded as denied and cached under the host key for 3600s,
+    so every target on cag.gov.in went dark together. The backfill ran one
+    office per process and each rolled the dice; Rajasthan lost three times.
+
+    The policy is not the bug and is unchanged: unreachable robots.txt still
+    means we stay off the site. Believing one flake for an hour was the bug.
+    """
+    import time as _t
+    real = robots._load
+    calls = {"n": 0}
+
+    def flaky(_url):
+        calls["n"] += 1
+        return (None, True, True) if calls["n"] == 1 else (None, False, False)
+
+    robots._load = flaky
+    robots.reset_cache()
+    try:
+        check("a flake denies, as the policy says",
+              robots.allowed("https://cag.gov.in/ag1/rajasthan/en/audit-report"), False)
+        key = list(robots._CACHE)[0]
+        check("and is marked transient", robots._CACHE[key][3], True)
+        # Age it past the SHORT ttl only.
+        robots._CACHE[key] = (_t.time() - robots._TRANSIENT_TTL - 1,) + robots._CACHE[key][1:]
+        check("a minute later the host is re-asked, not assumed",
+              robots.allowed("https://cag.gov.in/ag1/rajasthan/en/audit-report"), True)
+        # A real 5xx is the SERVER talking, so it is not transient and keeps the
+        # long cache — that distinction is the whole point.
+        robots._load = lambda _u: (None, True, False)
+        robots.reset_cache()
+        robots.allowed("https://struggling.example/x")
+        key2 = list(robots._CACHE)[0]
+        check("a 5xx refusal is not treated as a flake",
+              robots._CACHE[key2][3], False)
+    finally:
+        robots._load = real
+        robots.reset_cache()
+
+
 def main():
     print("digger cases")
     for t in (t_parses_plain_json,
@@ -1649,7 +1695,8 @@ def main():
               t_batch_is_capped_for_judgement_not_cost,
               t_candidate_status_round_trips,
               t_records_and_dedups,
-              t_html_entities_in_hrefs_are_decoded):
+              t_html_entities_in_hrefs_are_decoded,
+              t_a_transient_robots_failure_is_not_an_hour_long_refusal):
         t()
 
     print("\n" + "=" * 72)

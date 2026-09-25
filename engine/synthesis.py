@@ -68,6 +68,10 @@ AMOUNT_TOLERANCE = 0.01
 # A finding has had a chance at follow-through only if we actually hold a later
 # report for that entity.
 FOLLOW_UP_GAP_YEARS = 2
+# Above this share of a cross-entity total held by ONE entity, the claim says
+# so. Not a rejection — the finding is still real and the count still holds; it
+# is the sum that stops meaning what a reader assumes it means.
+CONCENTRATION_FLOOR = 0.4
 # How much a figure must ACTUALLY grow across the run before the direction is
 # worth reporting. Monotonic-and-nothing-else is too weak a test: a figure
 # drifting 100 → 105 over six years rises every single year and is a story
@@ -185,8 +189,26 @@ def structural_failure(rows, j, min_entities=MIN_ENTITIES,
         claim = (f"{_phrase(category)} in {len(entities)} of {peers} "
                  f"{j.entity_kind}s in {year} — {', '.join(entities[:6])}"
                  f"{' and others' if len(entities) > 6 else ''}")
+        top_entity, top_amount, share = _concentration(group)
         if total:
             claim += f", {j.format_money(round(total))} across them"
+            # SAY SO WHEN THE SUM IS ONE STATE.
+            #
+            # Measured over the first real corpus, 2026-09-25: all eight
+            # structural claims were dominated by a single entity, between 41%
+            # and 96%, six of them above 60%. "₹2,71,214 crore across 8 states"
+            # was ₹1,68,283 crore of Maharashtra with seven small numbers
+            # attached — every digit true, and the impression it leaves false.
+            #
+            # That is the same failure `unsupported_number_claims()` blocks in
+            # a reel: a real figure attached to the wrong claim. Summing a
+            # state's total budget savings with another's short-transfer to a
+            # road-safety fund produces a number that is arithmetic rather than
+            # a finding, so the concentration travels WITH the total instead of
+            # being left for whoever reads it to discover.
+            if share and share >= CONCENTRATION_FLOOR:
+                claim += (f" — of which {j.format_money(round(top_amount))} "
+                          f"is {top_entity} alone ({round(share * 100)}%)")
         out.append(_synthesis(
             kind="structural", claim=claim, members=group, j=j,
             entities=entities, years=[str(year)], category=category,
@@ -211,18 +233,46 @@ def no_follow_through(rows, coverage, j, gap=FOLLOW_UP_GAP_YEARS):
     — and not as "it was never followed up", which is a stronger statement than
     the evidence supports.
     """
+    # Only years we have actually READ count as a chance at follow-through.
+    #
+    # The first version counted a later report as a chance the moment the
+    # corpus HELD it. Measured 2026-09-25, that was far too generous: 38 of 73
+    # documents had any findings at all, and each of those had been read at
+    # roughly one chunk in thirty. "Not named again in any later report" was
+    # therefore true of almost everything, and the 13 claims it produced rested
+    # on a single finding each.
+    #
+    # Holding a document and reading it are different states, and the gap
+    # between them is exactly where an absence stops being evidence. So a year
+    # counts only when some finding was extracted from it — imperfect, since a
+    # read chunk is not a read report, but it is the difference between "we
+    # looked" and "it is on the disk".
+    read_years = defaultdict(set)
+    for f in rows:
+        read_years[f["entity"]].add(f["year"])
+
     have = defaultdict(set)
     for c in coverage or []:
         ent = entity_of(c.get("source_key"), j)
         y = j.fiscal_start_year(c.get("published"))
-        if ent and y is not None:
+        if ent and y is not None and y in read_years.get(ent, ()):
             have[ent].add(y)
 
     by_entity = defaultdict(list)
     for r in rows:
         by_entity[r["entity"]].append(r)
 
-    out = []
+    # ONE synthesis per (entity, year, category), carrying every figure that
+    # qualified — not one per finding.
+    #
+    # Emitting per finding looked right and silently destroyed evidence: the
+    # fingerprint is kind|jurisdiction|entities|years|category, `store_synthesis`
+    # upserts on it, so five Maharashtra 2024 idle-funds findings overwrote each
+    # other and the stored row named ONE of them. Measured 2026-09-25: 26
+    # detections collapsed into 13 rows, and the survivors looked like thin
+    # single-finding claims because their siblings had been overwritten, not
+    # because nothing else qualified.
+    stranded = defaultdict(list)
     for entity, group in sorted(by_entity.items()):
         years_held = have.get(entity) or set()
         for r in group:
@@ -238,14 +288,28 @@ def no_follow_through(rows, coverage, j, gap=FOLLOW_UP_GAP_YEARS):
                 for o in group)
             if mentioned_again:
                 continue
-            claim = (f"{entity}: {j.format_money(round(amount))} "
-                     f"{_phrase(r.get('category') or 'audit finding')} in "
-                     f"{r['year']} is not named again in any later audit report "
-                     f"we hold (through {max(later_held)})")
-            out.append(_synthesis(
-                kind="no-follow-through", claim=claim, members=[r], j=j,
-                entities=[entity], years=[str(r["year"])],
-                category=r.get("category"), amount_cr=amount))
+            stranded[(entity, r["year"], r.get("category"))].append(
+                (r, max(later_held)))
+
+    out = []
+    for (entity, year, category), members in sorted(
+            stranded.items(), key=lambda kv: str(kv[0])):
+        rows_only = [m for m, _ in members]
+        through = max(t for _, t in members)
+        total = _sum_amounts(rows_only) or 0
+        if len(rows_only) == 1:
+            what = j.format_money(round(total))
+        else:
+            what = (f"{len(rows_only)} findings totalling "
+                    f"{j.format_money(round(total))}")
+        claim = (f"{entity}: {what} of "
+                 f"{_phrase(category or 'audit finding')} in {year} "
+                 f"{'is' if len(rows_only) == 1 else 'are'} not named again in "
+                 f"any later audit report we have READ (through {through})")
+        out.append(_synthesis(
+            kind="no-follow-through", claim=claim, members=rows_only, j=j,
+            entities=[entity], years=[str(year)], category=category,
+            amount_cr=total))
     return out
 
 
@@ -405,6 +469,19 @@ def _consecutive_runs(years):
     if current:
         runs.append(current)
     return runs
+
+
+def _concentration(rows):
+    """(entity, largest single amount, its share of the total) for a group.
+
+    Answers "is this a spread failure or one state's number" — the question a
+    cross-entity total cannot answer about itself."""
+    amounts = [(_as_float(r.get("amount_cr")) or 0, r.get("entity")) for r in rows]
+    total = sum(a for a, _ in amounts)
+    if not total:
+        return None, None, None
+    top_amount, top_entity = max(amounts)
+    return top_entity, top_amount, top_amount / total
 
 
 def _sum_amounts(rows):

@@ -87,11 +87,16 @@ def main():
         rows.append(finding("cag-karnataka", y, "recovery", 97814,
                             cause="external",
                             claim="flood damage to crops and infrastructure"))
-    # Telangana: one large finding, never named again, and we DO hold later
-    # reports for it.
+    # Telangana: one large finding, never named again — and we have READ a
+    # later report for it, which is what makes the silence evidence. The 2019
+    # row is that later reading: a different category and a different figure,
+    # so it does not count as the 2016 finding being followed up.
     rows.append(finding("cag-telangana", 2016, "diversion", 7777))
-    # Rajasthan: one large finding, and we hold NO later report — absence here
-    # is our ignorance, not the auditor's silence.
+    rows.append(finding("cag-telangana", 2019, "delay", 12))
+    # Rajasthan: one large finding, and we have read NO later report — absence
+    # here is our ignorance, not the auditor's silence. This is the pair that
+    # keeps the detector honest: same shape as Telangana, opposite conclusion,
+    # and the only difference is whether anyone looked.
     rows.append(finding("cag-rajasthan", 2016, "diversion", 8888))
 
     store_findings(rows)
@@ -152,6 +157,29 @@ def main():
         check("the claim states both numbers",
               f"of {j.peer_count}" in st[0]["claim"], st[0]["claim"])
 
+    # ── 4b. a sum that is one entity must say so ────────────────────────────
+    # Measured over the first real corpus 2026-09-25: all eight structural
+    # claims were dominated by one state, 41% to 96%. "₹2,71,214 crore across 8
+    # states" was ₹1,68,283 crore of Maharashtra with seven small numbers
+    # attached — every digit true, the impression false. Same failure
+    # unsupported_number_claims() blocks in a reel.
+    if st:
+        conc = [s for s in st if "alone" in s["claim"]]
+        check("an evenly spread total is NOT flagged", not conc,
+              "the ten-state fixture is 50 crore each; flagging it would make "
+              "the warning meaningless")
+    lopsided = synthesis.structural_failure(
+        [dict(r, entity=e, year=2019, category="delay",
+              amount_cr=(9000 if e == "Bihar" else 10), id=9000 + i)
+         for i, e in enumerate(["Bihar", "Assam", "Goa", "Kerala", "Punjab",
+                                "Odisha", "Sikkim", "Tripura"])
+         for r in [{}]], j)
+    check("a lopsided total is flagged",
+          bool(lopsided) and "Bihar alone" in lopsided[0]["claim"],
+          lopsided[0]["claim"] if lopsided else "no synthesis")
+    check("and it states the share",
+          bool(lopsided) and "%" in lopsided[0]["claim"])
+
     # ── 5. no follow-through, and the ignorance it must not claim ───────────
     nf = [s for s in found if s["kind"] == "no-follow-through"]
     ents = {e for s in nf for e in s["entities"]}
@@ -159,6 +187,16 @@ def main():
     check("Rajasthan is NOT claimed — we hold no later report",
           "Rajasthan" not in ents,
           "absence of evidence reported as evidence of absence")
+
+    # Every qualifying finding must reach the claim, not just the last one.
+    # The fingerprint is kind|jurisdiction|entities|years|category and
+    # store_synthesis upserts on it, so emitting one synthesis per FINDING made
+    # siblings overwrite each other: 26 detections became 13 stored rows on
+    # 2026-09-25, and the survivors looked like thin single-finding claims
+    # because the others were gone, not because nothing else qualified.
+    fps = [s["fingerprint"] for s in nf]
+    check("no two no-follow-through claims share a fingerprint",
+          len(fps) == len(set(fps)), f"{len(fps)} claims, {len(set(fps))} unique")
 
     # ── 6. wrong direction ──────────────────────────────────────────────────
     wd = [s for s in found if s["kind"] == "wrong-direction"]

@@ -25,6 +25,7 @@ fetch._reject_if_bot_wall — a CAPTCHA in the response body is an unambiguous
 "no", and it is checked on every fetch.
 """
 
+import logging
 import time
 import urllib.error
 import urllib.request
@@ -37,7 +38,29 @@ from urllib.parse import urlparse, urlunparse
 USER_AGENT = "ThelivuDigger"
 
 _CACHE = {}
+log = logging.getLogger("digger.robots")
+
 _CACHE_TTL = 3600
+# A TRANSIENT denial is cached for a minute, not an hour.
+#
+# Found 2026-09-23: cag-rajasthan came back from a whole backfill with zero
+# documents and three failures. It was not refusing us — cag.gov.in serves no
+# robots.txt at all (404 on ten consecutive fetches), which per RFC 9309 §2.3.1
+# means allowed. But when that request fails at the NETWORK level instead of
+# returning 404, `_load` fell to its generic except, reported denied, and
+# `_parser_for` cached that under the HOST's robots.txt key for an hour. One
+# flake therefore blanked every target on cag.gov.in — reproduced offline
+# against rajasthan, kerala and gujarat at once, and live across two processes
+# minutes apart.
+#
+# The policy is unchanged and is not the bug: if we cannot reach robots.txt we
+# are in no position to crawl. Treating one dropped packet as an hour-long
+# refusal is the bug, and it is indistinguishable at the call site from a site
+# that really did say no.
+_TRANSIENT_TTL = 60
+# One retry before concluding the network is the answer.
+_RETRIES = 1
+_RETRY_PAUSE = 1.5
 _FETCH_TIMEOUT = 15
 
 
@@ -51,35 +74,50 @@ def _robots_url(url):
 
 
 def _load(robots_url):
-    """Fetch and parse one robots.txt. Returns (parser, denied_outright)."""
+    """Fetch and parse one robots.txt.
+
+    Returns (parser, denied_outright, transient) — `transient` says whether a
+    denial is the site's answer or merely today's weather, so the caller can
+    decide how long to believe it.
+    """
     rp = urllib.robotparser.RobotFileParser()
     rp.set_url(robots_url)
     req = urllib.request.Request(
         robots_url, headers={"User-Agent": f"{USER_AGENT} (+https://thelivu.com)"}
     )
-    try:
-        with urllib.request.urlopen(req, timeout=_FETCH_TIMEOUT) as resp:
-            body = resp.read(500_000).decode("utf-8", errors="replace")
-        rp.parse(body.splitlines())
-        return rp, False
-    except urllib.error.HTTPError as e:
-        # RFC 9309: 4xx is "unavailable" -> no rules -> allowed. 5xx is
-        # "unreachable" -> the server is struggling -> stay off it.
-        return None, 500 <= e.code < 600
-    except Exception:
-        # Network failure. Same reasoning as 5xx: if we cannot even reach
-        # robots.txt, we are in no position to start crawling the site.
-        return None, True
+    last = None
+    for attempt in range(_RETRIES + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=_FETCH_TIMEOUT) as resp:
+                body = resp.read(500_000).decode("utf-8", errors="replace")
+            rp.parse(body.splitlines())
+            return rp, False, False
+        except urllib.error.HTTPError as e:
+            # RFC 9309: 4xx is "unavailable" -> no rules -> allowed. 5xx is
+            # "unreachable" -> the server is struggling -> stay off it, and that
+            # IS the server talking, so it is not transient.
+            return None, 500 <= e.code < 600, False
+        except Exception as e:                              # noqa: BLE001
+            last = e
+            if attempt < _RETRIES:
+                time.sleep(_RETRY_PAUSE)
+    # Network failure, twice. Same reasoning as 5xx — if we cannot even reach
+    # robots.txt we are in no position to start crawling — but flagged
+    # transient, so one bad minute does not cost an hour of the whole host.
+    log.debug("robots.txt unreachable at %s: %s", robots_url, last)
+    return None, True, True
 
 
 def _parser_for(url):
     robots_url = _robots_url(url)
     hit = _CACHE.get(robots_url)
     now = time.time()
-    if hit and now - hit[0] < _CACHE_TTL:
-        return hit[1], hit[2]
-    rp, denied = _load(robots_url)
-    _CACHE[robots_url] = (now, rp, denied)
+    if hit:
+        ttl = _TRANSIENT_TTL if (len(hit) > 3 and hit[3]) else _CACHE_TTL
+        if now - hit[0] < ttl:
+            return hit[1], hit[2]
+    rp, denied, transient = _load(robots_url)
+    _CACHE[robots_url] = (now, rp, denied, transient)
     return rp, denied
 
 
