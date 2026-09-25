@@ -289,6 +289,27 @@ def ingest(store=True):
     report["findings"] = len(rows)
     if store and rows:
         db.store_findings(rows)
+    if store:
+        # ARCHIVE WHAT WAS STORED, so a second ingest cannot store it again.
+        #
+        # store_findings() has no dedup key, deliberately — the same claim in
+        # two documents is two findings, and collapsing them would destroy the
+        # recurring-objection signal the corpus exists to expose. The cost of
+        # that choice is that ingest is NOT idempotent, and the natural working
+        # rhythm walks straight into it: answer four chunks, ingest, answer four
+        # more, ingest again, and the first four are now in the corpus twice
+        # with different ids. Nothing downstream would notice; a doubled figure
+        # would simply make a finding look twice as large as it is.
+        #
+        # Same move attend.py makes with its own request files.
+        done = d / "done"
+        done.mkdir(exist_ok=True)
+        for entry in manifest["entries"]:
+            rpath = d / f"{entry['rid']}.response.md"
+            if rpath.exists():
+                rpath.replace(done / f"{entry['rid']}.response.md")
+                report.setdefault("archived", 0)
+                report["archived"] += 1
     return report
 
 

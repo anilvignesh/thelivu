@@ -176,6 +176,19 @@ def main():
         check("and it stays out of the synthesise tier",
               not any((f["amount_cr"] or 0) == 9781 for f in state_findings()))
 
+    # ── 5b. ingesting twice must not store twice ────────────────────────────
+    # store_findings has no dedup key on purpose — the same claim in two
+    # documents is two findings, and collapsing them would destroy the
+    # recurring-objection signal. The cost is that ingest is not idempotent,
+    # and the natural rhythm (answer some, ingest, answer more, ingest) walks
+    # right into it. Answered responses are archived after a successful store.
+    before = len(state_findings())
+    again = attend_corpus.ingest()
+    check("a second ingest finds nothing left to store",
+          again["findings"] == 0 and again["answered"] == 0, str(again))
+    check("and the corpus did not grow", len(state_findings()) == before,
+          f"{before} -> {len(state_findings())}")
+
     # ── 6. prose instead of JSON costs that chunk and nothing else ──────────
     m4 = attend_corpus.prepare(docs=1, chunks_per_doc=1, only_sha=DOC_SHA)
     check("the unparseable phase has a request", bool(m4["entries"]))
