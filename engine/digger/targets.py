@@ -57,9 +57,25 @@ CAG_STATE_TARGETS = [
         "key": f"cag-{slug}",
         "name": f"CAG audit reports — {name}",
         "index_url": url,
-        # \.pdf$ ALONE. A looser pattern matches the page's own navigation, which
-        # is how cag-reports spent weeks reading About pages.
-        "link_pattern": r"\.pdf$",
+        # The AUDIT REPORT PATH, not merely ".pdf".
+        #
+        # `\.pdf$` was chosen to stop the digger reading navigation, and it did
+        # — but it let in everything else the office publishes. Punjab's index
+        # is 32 PDFs of which 10 are audit reports; the rest are a holiday
+        # list, transfer-posting orders, a citizen charter, a code of ethics, a
+        # library list and an MSO manual. Kerala 10 of 16, Rajasthan 10 of 22,
+        # Mizoram 2 of 17.
+        #
+        # So the digger fetched real documents, extracted nothing from them,
+        # and logged "0 candidate(s)" — which is also what a healthy target
+        # looks like on a quiet day. On 2026-09-25 the scout's first production
+        # pass flagged 18 CAG offices as "reading the wrong documents" in one
+        # go. It was right about every one.
+        #
+        # Every AG office puts its reports under /download_audit_report/. The
+        # corpus backfill has used this pattern since 09-20 and pulled 73
+        # reports from these same indexes while the digger read holiday lists.
+        "link_pattern": r"download_audit_report.*\.pdf$",
         "verified": True,
         "brief": (
             "Audit findings: the department or scheme audited, the period "
@@ -167,10 +183,9 @@ TARGETS = [
         # report for the year ended March 2024, AMRUT. The two this desk's first
         # long-form cites are both on this page.
         "index_url": "https://cag.gov.in/ag2/kerala/en/audit-report",
-        # \.pdf$ ALONE. The old pattern also matched /audit-report/ and /ag[0-9]/,
-        # which are navigation, and a looser pattern on an index page is how a
-        # digger spends its cycles reading about-pages.
-        "link_pattern": r"\.pdf$",
+        # Same narrowing as CAG_STATE_TARGETS above, and for the same measured
+        # reason: ".pdf" on an AG index is mostly not an audit report.
+        "link_pattern": r"download_audit_report.*\.pdf$",
         "verified": True,   # yields real audit-report PDFs, checked 2026-09-14
         "brief": (
             "Audit findings: the department or scheme audited, the period "

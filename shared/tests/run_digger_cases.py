@@ -1607,6 +1607,40 @@ def t_a_transient_robots_failure_is_not_an_hour_long_refusal():
         robots.reset_cache()
 
 
+
+def t_cag_targets_ask_for_audit_reports_not_every_pdf():
+    """An AG index is mostly not audit reports, and ".pdf" cannot tell.
+
+    Measured live 2026-09-25: Punjab's index yields 32 PDFs of which 10 are
+    audit reports; Kerala 16/10; Rajasthan 22/10. The remainder are holiday
+    lists, transfer-posting orders, citizen charters, codes of ethics, library
+    lists and MSO manuals. The digger fetched them, extracted nothing, and
+    logged "0 candidate(s)" — indistinguishable from a quiet day.
+
+    The scout's first production pass flagged 18 CAG offices as "reading the
+    wrong documents" in one go and was right about every one. This pins the
+    fix so a later tidy-up cannot widen the pattern back to `\.pdf$`.
+    """
+    pats = {t["key"]: t.get("link_pattern") for t in targets.CAG_STATE_TARGETS}
+    check("every CAG office asks for the audit-report path",
+          all(p == r"download_audit_report.*\.pdf$" for p in pats.values()), True)
+    check("no CAG office is left on bare .pdf",
+          any(p == r"\.pdf$" for p in pats.values()), False)
+
+    # And the pattern does what it claims against a realistic index.
+    html = """
+      <a href="/webroot/uploads/download_audit_report/2024/Report-of-the-CAG.pdf">report</a>
+      <a href="/uploads/media/Holiday-list-2020.pdf">holidays</a>
+      <a href="/uploads/media/RTI-TRAINING-SCHEDULE.pdf">rti training</a>
+      <a href="/webroot/uploads/download_audit_report/2023/SFAR-2021-22.pdf">sfar</a>
+      <a href="/uploads/media/Citizen-Charter.pdf">charter</a>"""
+    got = [i["url"] for i in fetch.extract_links(
+        html, "https://cag.gov.in/", r"download_audit_report.*\.pdf$")]
+    check("only the audit reports match", len(got), 2)
+    check("the holiday list is not one of them",
+          any("Holiday" in u for u in got), False)
+
+
 def main():
     print("digger cases")
     for t in (t_parses_plain_json,
@@ -1696,7 +1730,8 @@ def main():
               t_candidate_status_round_trips,
               t_records_and_dedups,
               t_html_entities_in_hrefs_are_decoded,
-              t_a_transient_robots_failure_is_not_an_hour_long_refusal):
+              t_a_transient_robots_failure_is_not_an_hour_long_refusal,
+              t_cag_targets_ask_for_audit_reports_not_every_pdf):
         t()
 
     print("\n" + "=" * 72)
