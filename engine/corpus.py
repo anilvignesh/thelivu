@@ -42,6 +42,7 @@ MAX_PAGES = 600
 # PDFs in a row by one client, which is a thing to do politely whether or not
 # robots.txt sets a delay.
 POLITE_SECONDS = 1.5
+MAX_DOWNLOAD_BYTES = 150_000_000   # the largest CAG report seen is 102MB (Rajasthan)
 
 
 def parse_full(pdf_bytes, max_pages=MAX_PAGES):
@@ -216,7 +217,14 @@ def _fetch_bytes(url, timeout=180):
     req = urllib.request.Request(
         url, headers={"User-Agent": "ThelivuDigger/1.0 (+https://thelivu.com)"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read(40_000_000)
+        raw = resp.read(MAX_DOWNLOAD_BYTES + 1)
+    if len(raw) > MAX_DOWNLOAD_BYTES:
+        # A silent short read hands the parser half a PDF, which fails as a bare
+        # "could not parse" — cag-rajasthan sat at zero documents for exactly
+        # this reason, its audit reports being 53-102MB against a 40MB cap.
+        raise ValueError(f"larger than {MAX_DOWNLOAD_BYTES} bytes — not read, "
+                         "not truncated")
+    return raw
 
 
 def backfill(targets=None, limit_per_target=None, progress=None):

@@ -420,6 +420,27 @@ capped. Commit `bf856e7`.
 
 ---
 
+## 2026-10-02 — cag-rajasthan held zero documents for days, reported only as "failed: 3"
+
+**What happened:** the corpus backfill read nothing from Rajasthan. The only
+trace was a failure count, which looks the same as an empty or refusing source.
+Found by fetching the index by hand: every download came back exactly
+40,000,000 bytes.
+
+**Root cause:** `corpus._fetch_bytes` did `resp.read(40_000_000)`, a silent
+short read. Rajasthan's audit reports are 53-102MB, so the parser got half a PDF
+and failed with a bare "could not parse". The backfill takes the first three
+documents per office and those were the three largest.
+
+**Fix:** `MAX_DOWNLOAD_BYTES = 150_000_000`; read one byte past the cap and
+RAISE if it is exceeded, so "we could not look" never arrives as "we found
+nothing". Re-run: 3 read, 0 failed.
+
+**Caveat / not fixed:** 15 documents failed across all offices on the first
+backfill and are still uninvestigated; some may share this cause.
+
+---
+
 ## Template
 
 ```
