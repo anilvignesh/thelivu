@@ -42,7 +42,7 @@ SLIDE_SERVER_PORT = int(os.environ.get("PORT", "8080"))
 # --- Reels ---
 # How the reel's video-script (a POST-GATE model step — the article is already
 # verified + human-approved, so this never touches the trust gate) is produced:
-#   "api"      — call the Claude API (Haiku 4.5; video-script is in _HAIKU_SKILLS).
+#   "api"      — call the Claude API (Haiku 5.5; video-script is in _HAIKU_SKILLS).
 #                ACTIVE default since 2026-09-08. The quota breaker guards it, so a
 #                dry Claude budget now blocks reel builds — accepted deliberately.
 #   "nvidia"   — free hosted model via NVIDIA (NVIDIA_API_KEY). No Anthropic/Gemini
@@ -110,7 +110,7 @@ CHECK_INTERVAL_HOURS = int(os.environ.get("CHECK_INTERVAL_HOURS", "6"))
 CLAUDE_MODEL    = os.environ.get("THELIVU_CLAUDE_MODEL", "claude-sonnet-5")
 # Triage/selection/gating runs here — same Claude family, ~1/3 the price.
 # Journalism (writing, editorial, verification) never routes to it.
-HAIKU_MODEL     = os.environ.get("THELIVU_HAIKU_MODEL", "claude-haiku-4-5")
+HAIKU_MODEL     = os.environ.get("THELIVU_HAIKU_MODEL", "claude-haiku-5-5")
 GEMINI_MODEL    = os.environ.get("THELIVU_GEMINI_MODEL", "gemini-2.5-flash")
 # Stronger Gemini for the highest-stakes search-grounded stage (the trust gate).
 GEMINI_PRO_MODEL = os.environ.get("GEMINI_PRO_MODEL", "gemini-2.5-pro")

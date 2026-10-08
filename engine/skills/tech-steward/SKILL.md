@@ -87,7 +87,7 @@ Then emit exactly this block, closed:
 RECOMMENDATIONS
 [
   {"area": "pricing", "action": "Revisit THELIVU_CLAUDE_MODEL before 2026-09-01", "why": "Sonnet 5 intro pricing at $2/$10 ends 2026-08-31; after that it is ~30% dearer than the current Sonnet 4.6 at $3/$15 once its heavier tokenizer is counted.", "from": "claude-sonnet-4-6", "to": "claude-sonnet-4-6 (no change yet)", "risk": "low", "saves_usd_mo": null},
-  {"area": "routing", "action": "set THELIVU_HAIKU_MODEL=claude-haiku-5", "why": "Haiku 5 is priced at parity with 4.5 and scores materially better on structured extraction, which is exactly what the four triage skills do.", "from": "claude-haiku-4-5", "to": "claude-haiku-5", "risk": "low", "saves_usd_mo": 0, "where": "env", "verify": "run the gate cases; costs table shows the new model id"}
+  {"area": "routing", "action": "set THELIVU_HAIKU_MODEL=claude-haiku-5-5", "why": "Haiku 5.5 is priced well below 4.5 and scores materially better on structured extraction, which is exactly what the four triage skills do.", "from": "claude-haiku-4-5", "to": "claude-haiku-5", "risk": "low", "saves_usd_mo": 0, "where": "env", "verify": "run the gate cases; costs table shows the new model id"}
 ]
 END_RECOMMENDATIONS
 ```

@@ -96,5 +96,5 @@ var — note the previous value in every recommendation ("from X → to Y").
    RECOMMENDATIONS block (feed it a cut string).
 2. Signal path: CC Run-now → kv → next tick picks it up (watch logs).
 3. First real sweep should independently rediscover known facts as a sanity
-   check: Sonnet 5 intro pricing ending 2026-08-31, Haiku 4.5 at $1/$5 —
+   check: Sonnet 5 intro pricing ending 2026-08-31, Haiku 5.5 at $0.10/$0.50 —
    if it can't find those, the search prompt needs work.

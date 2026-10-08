@@ -130,7 +130,7 @@ voice, and posted to Instagram + YouTube Shorts in two daily slots (10:00 and
 18:00 IST, one reel per slot, oldest eligible first).
 
 ```
-article ─► video-script (Claude Haiku 4.5) ─► Chatterbox (cloned voice)
+article ─► video-script (Claude Haiku 5.5) ─► Chatterbox (cloned voice)
                                            ─► FLUX illustrations (1 per beat)
                                            ─► ffmpeg ─► reels table ─► autopost
 ```
@@ -229,7 +229,7 @@ Set on **both** Railway services.
 
 | Variable | Required | Notes |
 |----------|----------|-------|
-| `ANTHROPIC_API_KEY` | Yes | Claude Sonnet 5 — judgment / writing; Haiku 4.5 — triage + reel scripts |
+| `ANTHROPIC_API_KEY` | Yes | Claude Sonnet 5 — judgment / writing; Haiku 5.5 — triage + reel scripts |
 | `GEMINI_API_KEY` | Yes | Gemini 2.5 Flash + Pro — research / verify, billing enabled |
 | `DATABASE_URL` | Yes | Railway PostgreSQL URL |
 | `TELEGRAM_BOT_TOKEN` | Yes | From BotFather |

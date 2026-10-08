@@ -703,7 +703,7 @@ The engine now runs to a budget instead of running until the balance dies.
   so free presentation calls were billed at Claude rates. All three import from
   here now. `cost_usd()` resolves a raw model string to a tier; `RATES` is the
   introspectable table.
-- **Triage runs on Haiku 4.5.** `_HAIKU_SKILLS` in `engine/agents/skill_runner.py`
+- **Triage runs on Haiku 5.5.** `_HAIKU_SKILLS` in `engine/agents/skill_runner.py`
   = `news-monitor`, `topic-intake`, `chief-of-staff`, `newsworthiness-gate` —
   measured 2026-07-26 as ~$20 of the ~$34/mo burn, against ~$5.4 for the writing
   core. They sift against a strict output contract; they don't write prose and

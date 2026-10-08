@@ -297,7 +297,7 @@ _BELIEF_CLAUDE_SKILLS = {"ek:record-verifier", "ek:explainer-writer",
 # picks the CALLER, this set picks the PROVIDER, and NVIDIA wins ties.
 _NVIDIA_SKILLS = {"carousel-composer", "ek:carousel-composer"}
 
-# TRIAGE — still Claude, but Haiku 4.5 ($1/$5 vs $3/$15). These skills sift and
+# TRIAGE — still Claude, but Haiku 5.5 ($1/$5 vs $3/$15). These skills sift and
 # select against a strict output contract: they don't write prose, don't reason
 # about trust, and nothing they emit reaches a reader unrouted. Measured
 # 2026-07-26: they were ~$20 of the ~$34/mo burn while the writing core was

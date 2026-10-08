@@ -51,7 +51,7 @@ def _ping_claude():
         import anthropic
         t0 = time.time()
         client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
-        client.messages.create(model="claude-haiku-4-5", max_tokens=PING_MAX_TOKENS,
+        client.messages.create(model="claude-haiku-5-5", max_tokens=PING_MAX_TOKENS,
                                 messages=[{"role": "user", "content": "Say OK."}])
         return True, time.time() - t0, None
     except Exception as e:

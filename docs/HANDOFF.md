@@ -329,7 +329,7 @@ grant) — everything else is autonomous.
   `THELIVU_HAIKU_MODEL`, `THELIVU_GEMINI_MODEL` (see `shared/config.py`) — apply
   a routing change with `railway variable set … --service thelivu-agent`, no
   code push. Triage (`_HAIKU_SKILLS`: news-monitor, topic-intake,
-  chief-of-staff, newsworthiness-gate) runs on Haiku 4.5; journalism does not.
+  chief-of-staff, newsworthiness-gate) runs on Haiku 5.5; journalism does not.
 - New code files: `publishing/publish.py` (shared publish/post), `ingestion/fetch.py`
   (link fetch), `engine/skills/chief-of-staff/`, `engine/skills/video-script/`
   (scaffold), `docs/command-center.md` (build spec), `docs/video-reels-research.md`.

@@ -74,7 +74,7 @@ TEXT:
 # returns "All models exhausted" regardless of request rate (2026-09-15: 1,958
 # chars OK, 5,871 refused). An audit finding needs the paragraph around it, so
 # free models can read a parliamentary answer and cannot read an audit report.
-MODEL = "claude-haiku-4-5"
+MODEL = "claude-haiku-5-5"
 
 
 def _ask(prompt, model=MODEL, max_tokens=1600):

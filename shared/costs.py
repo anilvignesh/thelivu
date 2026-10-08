@@ -28,7 +28,13 @@ RATES = {
     # tokenizer runs ~30% heavier, so the real saving is smaller than the
     # headline $/MTok drop suggests — still net positive, just not 1:1.
     "claude":        (2.00, 10.00),   # sonnet-class, the default (sonnet-5, 2026-08-29)
-    "claude-haiku":  (1.00,  5.00),
+    # Haiku 5.5 (claude-haiku-5-5): $0.10/$0.50 for prompts up to 100k tokens,
+    # $0.50/$2.50 above that. Verified against platform.claude.com pricing
+    # 2026-10-08. Every Haiku call here (18k-char chunks, triage, reel scripts)
+    # is far below 100k, so the low tier is used. Haiku 4.5 was $1/$5 — rows
+    # logged under claude-haiku-4-5 are repriced by this change if cost is
+    # recomputed from tokens.
+    "claude-haiku":  (0.10,  0.50),
     "gemini-pro":    (1.25, 10.00),
     # Flash OUTPUT was raised to $2.50 (it is $1.00 in plenty of older
     # write-ups, which is where the stale value came from). Verified against
