@@ -55,7 +55,13 @@ DEFAULT_BASE_URL = "http://127.0.0.1:3001"
 # So MODEL_A becomes gpt-oss-120b. This costs nothing and restores a real
 # cross-check; paying for the reader would also have worked and was not needed.
 MODEL_A = os.environ.get("DIGGER_MODEL_A", "gpt-oss-120b")
-MODEL_B = os.environ.get("DIGGER_MODEL_B", "command-a")
+# command-a was the second reader until 2026-10-13: Cohere's trial pool sat at
+# "0 requests remaining" and the cross-check kept collapsing to 'single'. Of
+# gemma-4-31b-it, gemma-4-26b-it, gpt-oss-20b, nemotron-3-super-120b and
+# gemini-3.5-flash-lite, only the last answered every time (~55s per document,
+# one finding each — slow and terse, but a different family and provider from
+# MODEL_A, which is what a cross-check needs). The VM's digger.env sets the same.
+MODEL_B = os.environ.get("DIGGER_MODEL_B", "gemini-3.5-flash-lite")
 # Free-tier providers rate-limit and 503 constantly, so a named model that is
 # unavailable right now falls back to freellmapi's own routing rather than
 # losing the cycle.
