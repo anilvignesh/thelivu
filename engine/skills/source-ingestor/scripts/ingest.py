@@ -38,7 +38,7 @@ RSS_URL = f"https://www.youtube.com/feeds/videos.xml?channel_id={FYI_CHANNEL_ID}
 SOURCE_NAME = "FYI by Creator House"
 
 # Confirm current model ids before running — names change.
-GEMINI_MODEL = "gemini-2.5-flash"        # video understanding
+GEMINI_MODEL = "gemini-3.8-flash"        # video understanding (2.5 Flash retires 2026-10-16)
 CLAUDE_MODEL = "claude-sonnet-4-6"       # claim extraction from transcript
 
 # Replace with a real persisted store (DB table keyed by video_id).

@@ -62,9 +62,10 @@ def _ping_gemini():
     import os
     try:
         from google import genai
+        from shared.config import GEMINI_MODEL
         t0 = time.time()
         client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", ""))
-        client.models.generate_content(model="gemini-2.5-flash", contents="Say OK.")
+        client.models.generate_content(model=GEMINI_MODEL, contents="Say OK.")
         return True, time.time() - t0, None
     except Exception as e:
         return False, 0.0, f"{type(e).__name__}: {str(e)[:200]}"

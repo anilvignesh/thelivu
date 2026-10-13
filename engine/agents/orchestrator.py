@@ -215,6 +215,7 @@ def _extract_claims_via_skill(url, transcript=None):
 
 def _ingest_via_gemini(video_url):
     from google import genai
+    from shared.config import GEMINI_MODEL
     from google.genai import types
     client = genai.Client(api_key=GEMINI_API_KEY)
     prompt = (
@@ -227,7 +228,7 @@ def _ingest_via_gemini(video_url):
         'Return ONLY valid JSON: {"throughline":"...","claims":[...],"notable_visuals":[...]}'
     )
     resp = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model=GEMINI_MODEL,
         contents=types.Content(parts=[
             types.Part(file_data=types.FileData(file_uri=video_url)),
             types.Part(text=prompt),

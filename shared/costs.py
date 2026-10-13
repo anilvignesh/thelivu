@@ -36,12 +36,17 @@ RATES = {
     # recomputed from tokens.
     "claude-haiku":  (0.10,  0.50),
     "gemini-pro":    (1.25, 10.00),
+    # Gemini 3.8 Flash replaced 2.5 Flash (retiring 2026-10-16) as the default.
+    # $0.75/$3.75 through 2026-12-31, then $1.50/$7.50 from 2027-01-01 — CHANGE
+    # THE ROW BELOW THEN. Thinking tokens bill as output. Verified against
+    # ai.google.dev/gemini-api/docs/pricing 2026-10-13.
     # Flash OUTPUT was raised to $2.50 (it is $1.00 in plenty of older
     # write-ups, which is where the stale value came from). Verified against
     # ai.google.dev/gemini-api/docs/pricing on 2026-08-04, page updated
     # 2026-07-30. Understating this by 2.5x understated every research call the
     # engine makes — the budget governor's whole job is to be right about this.
-    "gemini":        (0.30,  2.50),   # flash
+    "gemini":        (0.75,  3.75),   # flash — Gemini 3.8 Flash intro rate, see below
+    "gemini-lite":   (0.30,  2.50),   # flash-lite (3.5 Flash-Lite: stable price)
     "free":          (0.00,  0.00),   # NVIDIA-hosted Gemma/FLUX, attended work
 }
 
@@ -58,7 +63,9 @@ def tier_for(model):
     if any(f in m for f in _FREE_MARKERS):
         return "free"
     if "gemini" in m:
-        return "gemini-pro" if "pro" in m else "gemini"
+        if "pro" in m:
+            return "gemini-pro"
+        return "gemini-lite" if "lite" in m else "gemini"
     if "haiku" in m:
         return "claude-haiku"
     if "opus" in m:

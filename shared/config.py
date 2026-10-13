@@ -111,7 +111,7 @@ CLAUDE_MODEL    = os.environ.get("THELIVU_CLAUDE_MODEL", "claude-sonnet-5")
 # Triage/selection/gating runs here — same Claude family, ~1/3 the price.
 # Journalism (writing, editorial, verification) never routes to it.
 HAIKU_MODEL     = os.environ.get("THELIVU_HAIKU_MODEL", "claude-haiku-5-5")
-GEMINI_MODEL    = os.environ.get("THELIVU_GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_MODEL    = os.environ.get("THELIVU_GEMINI_MODEL", "gemini-3.8-flash")
 # Stronger Gemini for the highest-stakes search-grounded stage (the trust gate).
 GEMINI_PRO_MODEL = os.environ.get("GEMINI_PRO_MODEL", "gemini-2.5-pro")
 
