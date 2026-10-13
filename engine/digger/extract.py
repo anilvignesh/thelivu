@@ -20,6 +20,13 @@ import re
 from engine.digger import freellm
 
 MAX_FINDINGS = 5
+# Five findings with excerpts run ~3,400 characters, and the reasoning models
+# spend part of the budget before the JSON starts. At the old 800-token default
+# gpt-oss-120b was cut off mid-array, the parse failed, and the document counted
+# as "nothing found" — measured 2026-10-13 on Lok Sabha question 360: 800
+# tokens -> 0 parsed, 2,500 -> 5 parsed and 5 grounded. This is why
+# lok-sabha-questions-and-answers produced nothing on 14 runs in a row.
+_MAX_TOKENS = 2500
 
 _PROMPT = """You are reading ONE document. Extract only what this document says.
 
@@ -122,12 +129,13 @@ def extract(doc, brief, model=None, allow_fallback=True):
     prompt = _PROMPT.format(brief=brief, url=doc["final_url"], text=doc["text"])
     model = model or freellm.MODEL_A
     try:
-        raw = freellm.complete(prompt, model=model)
+        raw = freellm.complete(prompt, model=model, max_tokens=_MAX_TOKENS)
         used = model
     except freellm.FreeLLMError:
         if not allow_fallback or model == freellm.FALLBACK_MODEL:
             raise
-        raw = freellm.complete(prompt, model=freellm.FALLBACK_MODEL)
+        raw = freellm.complete(prompt, model=freellm.FALLBACK_MODEL,
+                               max_tokens=_MAX_TOKENS)
         used = freellm.FALLBACK_MODEL
     findings = [f for f in parse_findings(raw) if _grounded(f, doc["text"])]
     return findings, used

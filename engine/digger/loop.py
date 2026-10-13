@@ -31,6 +31,27 @@ MAX_DOCS_PER_CYCLE = int(os.environ.get("DIGGER_MAX_DOCS", "1"))
 JITTER_FRAC = 0.15
 
 _LAST_KEY = "digger_last_target"
+_READ_KEEP = 600
+
+
+def _read_urls(target_key):
+    """URLs already READ for a target, whether or not they yielded a finding.
+
+    `digger_seen_urls` only knows documents that produced a candidate, so a
+    document with nothing in it was fetched and paid for again every cycle.
+    Found 2026-10-13: lok-sabha-questions-and-answers re-read question 360 on
+    all 14 runs and never reached the other 39 on the page.
+    """
+    try:
+        return json.loads(_kv_get("digger_read:" + target_key, "[]"))
+    except (ValueError, TypeError):
+        return []
+
+
+def _mark_read(target_key, urls, url):
+    urls = [u for u in urls if u != url] + [url]
+    _kv_set("digger_read:" + target_key, json.dumps(urls[-_READ_KEEP:]))
+    return urls
 
 
 def _kv_get(key, default=""):
@@ -133,7 +154,8 @@ def run_cycle(target=None, dry_run=False):
             items = fetch.fetch_index(target["index_url"], target.get("link_pattern"))
         log.info("index: %d candidate document(s)", len(items))
 
-        fresh = [i for i in items if i["url"] not in seen]
+        read = [] if dry_run else _read_urls(target["key"])
+        fresh = [i for i in items if i["url"] not in seen and i["url"] not in read]
         if not fresh:
             log.info("nothing new at %s", target["key"])
             if not dry_run:
@@ -179,6 +201,8 @@ def run_cycle(target=None, dry_run=False):
             # $4, against 2 candidates in seven days here.
             if doc.get("truncated"):
                 referred += 1
+                if not dry_run:
+                    read = _mark_read(target["key"], read, item["url"])
                 log.info("referred to the corpus: %s is longer than the digger "
                          "reads (%d chars shown) — not extracting from its "
                          "front matter", doc["final_url"][:70], len(doc["text"]))
@@ -186,6 +210,8 @@ def run_cycle(target=None, dry_run=False):
 
             found, c = extract.cross_check(doc, target["brief"])
             calls += c
+            if not dry_run:
+                read = _mark_read(target["key"], read, item["url"])
             # Carry the document's hash onto every lead it produced, so a lead
             # can be traced to the exact bytes it was read from rather than to a
             # URL that may since have moved.
