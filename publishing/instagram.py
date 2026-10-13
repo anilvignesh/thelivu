@@ -18,6 +18,7 @@ the Meta app + IG account are wired up; until then, IGNotConfigured is raised
 so callers can degrade gracefully instead of crashing the approval flow.
 """
 import logging
+import os
 import time
 
 import requests
@@ -36,7 +37,11 @@ def _token():
     except Exception:
         return IG_ACCESS_TOKEN
 
-_API = "https://graph.instagram.com/v21.0"
+# v21.0 expires 2027-01-21 (developers.facebook.com/docs/graph-api/changelog/
+# versions). Read calls were verified on v25.0 and v26.0 on 2026-10-13; the
+# WRITE path (container create + media_publish) was not, because that means a
+# real post. Switch with IG_API_VERSION=v25.0 on Railway, then watch one post.
+_API = "https://graph.instagram.com/" + os.environ.get("IG_API_VERSION", "v21.0")
 log = logging.getLogger("instagram")
 
 # Meta error codes that are transient (their servers, not our request) — retry these.
