@@ -4031,6 +4031,27 @@ def referred_targets(days=7):
         conn.close()
 
 
+def corpus_held_by_source():
+    """{source_key: documents held in the corpus}.
+
+    The digger is a detector: once a report is archived and handed to the
+    corpus reader it reports "fetched nothing new" run after run. That is a
+    source that has been fully collected, not a broken one. On 2026-10-13 26 of
+    27 targets flagged BROKEN had 2-13 reports already held; only
+    lok-sabha-questions-and-answers (0 held) was genuinely barren.
+    """
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT source_key, count(*) FROM documents "
+                    "WHERE source_key IS NOT NULL GROUP BY source_key")
+        return {r[0]: int(r[1]) for r in cur.fetchall()}
+    except Exception:                                       # noqa: BLE001
+        return {}
+    finally:
+        conn.close()
+
+
 def barren_targets(min_runs=5, days=7):
     """Targets that have run repeatedly and never found anything.
 

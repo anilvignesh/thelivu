@@ -102,6 +102,7 @@ def check_digger_targets():
     # fix something already correct: on 2026-09-19 thirty-three targets said
     # exactly that, and every one of them was pointed at the right source.
     referred = db.referred_targets()
+    held = db.corpus_held_by_source()
 
     out = []
     for key, runs, docs in barren:
@@ -110,6 +111,10 @@ def check_digger_targets():
             out.append(Check(f"digger/{key}", QUIET,
                              f"{r_docs} document(s) too long for the digger — "
                              f"referred to the corpus, not extracted here"))
+        elif held.get(key):
+            out.append(Check(f"digger/{key}", QUIET,
+                             f"{held[key]} report(s) already held in the corpus — "
+                             f"nothing new to collect"))
         elif docs:
             out.append(Check(f"digger/{key}", BROKEN,
                              f"{docs} document(s) read over {runs} runs, nothing "
