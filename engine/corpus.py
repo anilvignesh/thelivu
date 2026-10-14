@@ -104,6 +104,24 @@ _MONEY = re.compile(r"(?:₹|Rs\.?)\s*[\d,]+(?:\.\d+)?|\b\d[\d,]*\.?\d*\s*(?:cro
                     re.IGNORECASE)
 
 
+# Office documents that pass the vocabulary test below because a manual about
+# auditing is full of the word "audit". Measured 2026-10-14: ~20 of 261 held
+# "documents" were these - CAG's Manual of Standing Orders filed three times under
+# three offices, an English-Hindi dictionary, style guides, an HR advertisement.
+# Matched on the FILENAME and kept narrow on purpose: a report that merely
+# mentions a manual in its title (a performance audit of manual scavenging) is
+# not named "Manual-...pdf". Content is checked by worth_keeping(); this only
+# refuses what the publisher's own filename says is not a report.
+_NOT_A_REPORT = re.compile(
+    r"(?:^|[-_ ])(?:manual|style-?guide|dictionary|mso|mop|advertisement|"
+    r"guidelines|auditing-standards|disaster-plan|msoaudit)(?:[-_ .]|$)", re.IGNORECASE)
+
+
+def looks_like_office_document(url):
+    """True when the filename marks a manual, guide or notice, not an audit report."""
+    return bool(_NOT_A_REPORT.search(url.rsplit("/", 1)[-1]))
+
+
 def worth_keeping(text, pages):
     """Is this a record with findings in it, or an office document? (bool, why).
 
@@ -162,6 +180,12 @@ def read_index(index_url, link_pattern, source_key, limit=None,
         except Exception as e:                              # noqa: BLE001
             log.info("%s: could not fetch %s (%s)", source_key, url[:70], e)
             out["failed"] += 1
+            continue
+
+        if looks_like_office_document(url):
+            log.info("%s: skipping %s — filename is a manual or guide, not a "
+                     "report", source_key, url.rsplit("/", 1)[-1][:46])
+            out["skipped"] += 1
             continue
 
         sha = archive.digest(raw)

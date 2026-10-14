@@ -151,7 +151,7 @@ def recurring_objection(rows, j, min_years=MIN_CONSECUTIVE_YEARS):
                      f"{len(run)} consecutive audit years "
                      f"({run[0]}–{run[-1]}) and never resolved")
             if total:
-                claim += f", {j.format_money(round(total))} in total"
+                claim += f", {j.format_money(_round_money(total))} in total"
             out.append(_synthesis(
                 kind="recurring", claim=claim, members=members, j=j,
                 entities=[entity], years=[str(y) for y in run],
@@ -191,7 +191,7 @@ def structural_failure(rows, j, min_entities=MIN_ENTITIES,
                  f"{' and others' if len(entities) > 6 else ''}")
         top_entity, top_amount, share = _concentration(group)
         if total:
-            claim += f", {j.format_money(round(total))} across them"
+            claim += f", {j.format_money(_round_money(total))} across them"
             # SAY SO WHEN THE SUM IS ONE STATE.
             #
             # Measured over the first real corpus, 2026-09-25: all eight
@@ -207,7 +207,7 @@ def structural_failure(rows, j, min_entities=MIN_ENTITIES,
             # a finding, so the concentration travels WITH the total instead of
             # being left for whoever reads it to discover.
             if share and share >= CONCENTRATION_FLOOR:
-                claim += (f" — of which {j.format_money(round(top_amount))} "
+                claim += (f" — of which {j.format_money(_round_money(top_amount))} "
                           f"is {top_entity} alone ({round(share * 100)}%)")
         out.append(_synthesis(
             kind="structural", claim=claim, members=group, j=j,
@@ -298,10 +298,10 @@ def no_follow_through(rows, coverage, j, gap=FOLLOW_UP_GAP_YEARS):
         through = max(t for _, t in members)
         total = _sum_amounts(rows_only) or 0
         if len(rows_only) == 1:
-            what = j.format_money(round(total))
+            what = j.format_money(_round_money(total))
         else:
             what = (f"{len(rows_only)} findings totalling "
-                    f"{j.format_money(round(total))}")
+                    f"{j.format_money(_round_money(total))}")
         claim = (f"{entity}: {what} of "
                  f"{_phrase(category or 'audit finding')} in {year} "
                  f"{'is' if len(rows_only) == 1 else 'are'} not named again in "
@@ -347,8 +347,8 @@ def wrong_direction(rows, j, min_years=MIN_CONSECUTIVE_YEARS,
                 continue
             members = [per_year[y] for y in run]
             claim = (f"{entity}: {_phrase(category)} grew every year from "
-                     f"{j.format_money(round(amounts[0]))} in {run[0]} to "
-                     f"{j.format_money(round(amounts[-1]))} in {run[-1]}")
+                     f"{j.format_money(_round_money(amounts[0]))} in {run[0]} to "
+                     f"{j.format_money(_round_money(amounts[-1]))} in {run[-1]}")
             out.append(_synthesis(
                 kind="wrong-direction", claim=claim, members=members, j=j,
                 entities=[entity], years=[str(y) for y in run],
@@ -488,6 +488,17 @@ def _sum_amounts(rows):
     total = sum(_as_float(r.get("amount_cr")) or 0 for r in rows)
     return total or None
 
+
+
+def _round_money(x):
+    """Whole crore for large sums, two decimals below 10.
+
+    `round(0.3)` is 0, which printed "₹0 crore" on claims about real sub-crore
+    findings (2026-10-14). Rounding must not turn a quantified finding into a
+    zero.
+    """
+    x = float(x or 0)
+    return round(x) if x >= 10 else round(x, 2)
 
 def _as_float(v):
     if v is None:
