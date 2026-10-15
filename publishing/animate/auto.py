@@ -13,7 +13,7 @@ Selection follows the charter (impact x under-coverage), applied mechanically to
     search can veto a pick.
 Hard topic exclusions in CHARTER section 3 cannot match a state audit report, so none is needed here.
 
-Authoring (Haiku) then three proofs. Any failure rejects the document and nothing is written as approved:
+Authoring (the writing model, CLAUDE_MODEL) then three proofs. Any failure rejects the document and nothing is written as approved:
   1. build_piece's grounding gate: every declared figure/date is in the cited findings, every excerpt is copied from the DB.
   2. A second model pass reads each spoken line against the cited excerpts and lists any claim they do not support.
   3. Shape: spoken words and pace fit the reel, no bare acronyms in speech, a derived figure is labelled derived.
@@ -122,8 +122,8 @@ def _client():
 
 
 def _ask(system, user, max_tokens=4000):
-    from shared.config import HAIKU_MODEL
-    r = _client().messages.create(model=HAIKU_MODEL, max_tokens=max_tokens, system=system,
+    from shared.config import CLAUDE_MODEL as MODEL
+    r = _client().messages.create(model=MODEL, max_tokens=max_tokens, system=system,
                                   messages=[{"role": "user", "content": user}])
     return "".join(b.text for b in r.content if b.type == "text")
 
@@ -149,7 +149,7 @@ def author(sha, title, src, rows, feedback=None):
         print("RAW>>>", raw[:1500], "<<<")
     story = _json(raw)
     story["doc_sha256"] = sha
-    story.setdefault("source", {})["title"] = title
+    story.setdefault("source", {})["title"] = re.sub(r"\s+", " ", title).strip()
     story["source"].setdefault("publisher", "Comptroller and Auditor General of India")
     story.pop("approved", None)
     return story
@@ -185,7 +185,7 @@ def shape_problems(story):
     return out
 
 
-def verify_claims(story, rows):
+def verify_claims(story, rows, header=""):
     """Second pass: every spoken statement must follow from the cited excerpts."""
     by_id = {r["id"]: r for r in rows}
     parts = []
@@ -198,7 +198,8 @@ def verify_claims(story, rows):
         parts.append("SPOKEN: " + " ".join(l["text"] for l in b["say"]) + "\nSHOWN: " + json.dumps(b.get("data", {}), ensure_ascii=False)
                      + "\nEXCERPTS:\n" + "\n".join(f"- {c['excerpt']}" for c in cited))
     sys_p = ("You are a strict fact checker. For each block, list every statement in SPOKEN or SHOWN that the EXCERPTS do not directly support: "
-             "a number, date, name or place not in the excerpts, a causal or motive claim, a comparison or total the excerpts do not state "
+             f"The REPORT line is also known: {header}. A sentence that only names that report, its state or its period is supported. "
+             "Flag: a number, date, name or place not in the excerpts, a causal or motive claim, a comparison or total the excerpts do not state "
              "(simple arithmetic on two stated numbers, labelled derived, is allowed), or any wording that says more than the excerpt does. "
              'Reply with ONLY JSON: {"unsupported": ["..."]}. Empty list if everything is supported.')
     res = _json(_ask(sys_p, "\n\n".join(parts), max_tokens=1500))
@@ -238,7 +239,7 @@ def attempt(sha, title, src, dry=False):
             if not problems:
                 from publishing.animate.build_piece import check_and_fill
                 check_and_fill(json.loads(json.dumps(story)))
-                problems = [f"unsupported: {u}" for u in verify_claims(story, rows)]
+                problems = [f"unsupported: {u}" for u in verify_claims(story, rows, f"{title} ({src})")]
         except SystemExit as e:
             problems = [str(e)]
         except Exception as e:                                   # noqa: BLE001
