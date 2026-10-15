@@ -7,5 +7,7 @@ Type=oneshot
 User=ubuntu
 WorkingDirectory=/home/ubuntu/thelivu
 EnvironmentFile=/home/ubuntu/thelivu/ops/oracle-vm/reel-worker.env
+# Author at most one qualifying story a day (auto.py has the daily cap); a failure here must not stop the render pass.
+ExecStartPre=-/home/ubuntu/thelivu/venv/bin/python -m publishing.animate.auto
 ExecStart=/home/ubuntu/thelivu/venv/bin/python -m publishing.animate.worker
 # Builds and holds only. Posting stays the Telegram Post tap. See publishing/animate/worker.py.

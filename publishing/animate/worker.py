@@ -160,7 +160,8 @@ def _park(path, err):
 
 
 def main(argv):
-    paths = [Path(a) for a in argv] or sorted(STORIES.glob("*/story.json"))
+    from publishing.animate.auto import OUT
+    paths = [Path(a) for a in argv] or sorted(STORIES.glob("*/story.json")) + sorted(OUT.glob("*/story.json"))
     failed = 0
     for p in paths:
         try:
