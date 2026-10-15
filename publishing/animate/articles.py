@@ -174,13 +174,13 @@ def attempt(run_id):
 def run(dry=False, max_stories=1):
     from datetime import date
     today = date.today().isoformat()
-    if not dry and _kv("animate_auto_last") == today:
+    if not dry and _kv("animate_article_last") == today:
         log.info("already authored a story today, nothing to do"); return 0
     if not dry:
-        tries = int(_kv(f"animate_auto_tries_{today}") or 0)
+        tries = int(_kv(f"animate_article_tries_{today}") or 0)
         if tries >= auto.MAX_PASSES_PER_DAY:
             log.info("already ran %s authoring passes today without a story, stopping for the day", tries); return 0
-        _kv(f"animate_auto_tries_{today}", str(tries + 1))
+        _kv(f"animate_article_tries_{today}", str(tries + 1))
     made = 0
     for run_id in candidates():
         if made >= max_stories:
@@ -199,7 +199,7 @@ def run(dry=False, max_stories=1):
         auto.make_image(story, folder)
         story["approved"] = True
         (folder / "story.json").write_text(json.dumps(story, indent=2, ensure_ascii=False) + "\n")
-        _kv(f"animate_run_{run_id}", f"authored: {story['name']}"); _kv("animate_auto_last", today)
+        _kv(f"animate_run_{run_id}", f"authored: {story['name']}"); _kv("animate_article_last", today)
         log.info("wrote %s", folder / "story.json"); made += 1
     return made
 
