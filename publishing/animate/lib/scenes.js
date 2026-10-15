@@ -52,7 +52,21 @@ function itemT(e, cue, k, n) {
   return t0 + 0.2 + k * (t1 - t0 - 0.6) / n;
 }
 // the headline lines at the top of a scene
+// a faint generated picture behind a data scene (data.bg): slow push and drift, so the frame is never still and never bare.
+// It is atmosphere only. Every number, date and word is drawn on top of it, never in it.
+function backdrop(e) {
+  const img = e.beat.data && ASSETS[e.beat.data.bg];
+  if (!img) return;
+  const u = clamp((TT - e.t0) / (e.t1 - e.t0)), s = Math.max(W / img.width, H / img.height) * (1.06 + 0.12 * u), iw = img.width * s, ih = img.height * s;
+  ctx.save(); ctx.globalAlpha = 0.5 * runS(e.t0, 0.6);
+  ctx.drawImage(img, (W - iw) / 2 + (30 - 60 * u), (H - ih) / 2 - 40 * u, iw, ih);
+  ctx.globalAlpha = 1; ctx.fillStyle = 'rgba(23,20,13,0.38)'; ctx.fillRect(0, 0, W, H);
+  const g = ctx.createLinearGradient(0, 1250, 0, 1920); g.addColorStop(0, 'rgba(23,20,13,0)'); g.addColorStop(1, 'rgba(23,20,13,0.85)');
+  ctx.fillStyle = g; ctx.fillRect(0, 1250, W, 670); ctx.restore();
+}
+
 function heads(e, y0 = 470, size = 58) {
+  backdrop(e);
   const H_ = e.beat.head || [];
   H_.forEach((s, i) => line(s, CX, y0 + i * (size + 20), i === 0 ? size : size - 12, runS(e.t0 + 0.25 + i * 0.4, 0.9), i === 0 ? CREAM : DIM));
 }

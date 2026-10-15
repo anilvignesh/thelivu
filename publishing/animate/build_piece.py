@@ -93,11 +93,12 @@ def build(story_path, out, check=True):
         shutil.copy(HERE / "lib" / f, out / "src" / f)
     shutil.copy(LOGO, out / "assets" / "logo.png")
     for b in story["beats"]:
-        img = b.get("data", {}).get("image")
-        if img:   # jpeg keeps the single-file page small
-            subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(story_path.parent / "assets" / img), "-q:v", "3",
-                            str(out / "assets" / (Path(img).stem + ".jpg"))], check=True)
-            b["data"]["image"] = Path(img).stem + ".jpg"
+        for key in ("image", "bg"):
+            img = b.get("data", {}).get(key)
+            if img:   # jpeg keeps the single-file page small
+                subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(story_path.parent / "assets" / img), "-q:v", "3",
+                                str(out / "assets" / (Path(img).stem + ".jpg"))], check=True)
+                b["data"][key] = Path(img).stem + ".jpg"
     # the image names changed to .jpg: rewrite the head's copy of the story
     head = (HERE / "lib" / "head.html").read_text(encoding="utf-8")
     head = head.replace("__TITLE__", story["title"]).replace("__STORY__", json.dumps(story, ensure_ascii=False))

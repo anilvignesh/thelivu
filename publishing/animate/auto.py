@@ -130,6 +130,8 @@ Rules, all enforced by code after you write:
 - timeline events: at "YYYY-MM", label short. compare: two values with the same unit, data.fmt "inr" for plain counts. list: 2-4 items, each short.
 - illustration beat: data.image is "open.png" and data.prompt is ONE sentence describing a conceptual, non-photoreal, symbolic image with no
   people's faces, no text, no lettering, no numbers, no logos, no real people.
+- EVERY beat except the first also has data.bg_prompt: one sentence describing a conceptual, non-photoreal, symbolic picture that sits faintly
+  behind that beat (objects and space related to what the beat is about; no people, no faces, no text, no numbers, no logos). Each is different.
 - head: 1-2 short on-screen headline lines per beat. stamp: "CAG AUDIT · <PLACE IN CAPS>".
 - caption: 3-5 plain sentences for the post, written with digits ("258", "2018-19", "₹40 lakh"), not number words, ending "Source: <report>. Sources in bio." Any derived figure is labelled as derived.
 - Output ONLY the JSON object, same shape as the example. Ids in "say" are short unique slugs. "after" is the pause after the line in seconds (0.5-2.4).
@@ -230,7 +232,7 @@ def verify_claims(story, rows, header=""):
             cited.append(by_id[b["data"]["excerpt_of"]])
         if not b.get("say"):
             continue
-        parts.append("SPOKEN: " + " ".join(l["text"] for l in b["say"]) + "\nSHOWN: " + json.dumps(b.get("data", {}), ensure_ascii=False)
+        parts.append("SPOKEN: " + " ".join(l["text"] for l in b["say"]) + "\nSHOWN: " + json.dumps({k: v for k, v in b.get("data", {}).items() if k not in ("bg_prompt", "prompt", "bg", "image")}, ensure_ascii=False)
                      + "\nEXCERPTS:\n" + "\n".join(f"- {c['excerpt']}" for c in cited))
     allx = {r["id"]: r for b in story["beats"] for r in [by_id.get(i) for i in b.get("refs", [])] if r}
     parts.append("SPOKEN: " + story.get("caption", "") + "\nSHOWN: {}\nEXCERPTS:\n" + "\n".join(f"- {c['excerpt']}" for c in allx.values()))
@@ -244,15 +246,27 @@ def verify_claims(story, rows, header=""):
 
 
 def make_image(story, folder):
+    """One generated picture per beat: the opening illustration, then a faint backdrop (data.bg) for every data scene."""
     from publishing.illustrate import generate_beat_images
-    beat = story["beats"][0]
-    prompt = beat["data"].pop("prompt", None) or "an empty public office desk under one lamp at night"
-    paths = generate_beat_images([prompt], folder / "assets", seed=11)
-    if not paths or not paths[0]:
-        raise RuntimeError("illustration failed")
-    p = Path(paths[0]); target = folder / "assets" / "open.png"
-    if p != target:
-        p.replace(target)
+    jobs = []                                           # (beat, key, prompt, file)
+    for k, b in enumerate(story["beats"]):
+        d = b["data"]
+        if k == 0:
+            jobs.append((b, "image", d.pop("prompt", None) or "an empty public office desk under one lamp at night", "open.png"))
+        elif d.get("bg_prompt"):
+            jobs.append((b, "bg", d.pop("bg_prompt"), f"b{k}.png"))
+    for b in story["beats"][1:]:
+        b["data"].pop("bg_prompt", None)
+    paths = generate_beat_images([j[2] for j in jobs], folder / "assets", seed=11)
+    for (b, key, _, name), p in zip(jobs, paths):
+        if not p:
+            if key == "image":
+                raise RuntimeError("opening illustration failed")
+            continue                                    # a missing backdrop only costs that beat its atmosphere
+        target = folder / "assets" / name
+        if Path(p) != target:
+            Path(p).replace(target)
+        b["data"][key] = name
 
 
 def slug(src, title, sha):
