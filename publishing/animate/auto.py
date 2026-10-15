@@ -156,7 +156,7 @@ def _json(text):
     return json.loads(m.group(0), strict=False)
 
 
-def author(sha, title, src, rows, feedback=None):
+def author(sha, title, src, rows, feedback=None, prev=None):
     example = json.loads(EXAMPLE.read_text())
     for k in ("approved",):
         example.pop(k, None)
@@ -164,7 +164,9 @@ def author(sha, title, src, rows, feedback=None):
             f"REPORT: {title}\nsource_key: {src}\ndoc_sha256: {sha}\n\nFINDINGS:\n" +
             "\n".join(f"[{r['id']}] amount_cr={r['amount_cr']} category={r['category']}\n  claim: {r['claim']}\n  excerpt: {r['excerpt']}" for r in rows))
     if feedback:
-        user += f"\n\nYour previous attempt was rejected: {feedback}\nFix exactly that and write the whole file again."
+        user += (f"\n\nYOUR PREVIOUS FILE:\n{json.dumps(prev, ensure_ascii=False) if prev else '(none)'}\n\nIt was rejected for ALL of these reasons: {feedback}\n"
+                 "Change only what is needed to fix every one of them (delete a statement the excerpts do not support rather than rephrasing it), "
+                 "and write the whole file again.")
     raw = _ask(_RULES, user, max_tokens=6000)
     if os.environ.get("ANIMATE_DEBUG"):
         print("RAW>>>", raw[:1500], "<<<")
@@ -261,28 +263,34 @@ def slug(src, title, sha):
 
 def attempt(sha, title, src, dry=False):
     rows = findings_for(sha)
-    feedback = None
+    feedback, prev = None, None
     for n in (1, 2, 3, 4):
         try:
-            story = author(sha, title, src, rows, feedback)
+            story = author(sha, title, src, rows, feedback, prev)
         except ValueError as e:                                  # unparseable JSON: ask again, say why
             feedback = f"your output was not valid JSON ({e}); escape quotes inside strings and write one object"
             log.info("attempt %s unparseable: %s", n, e)
             continue
         story["name"] = slug(src, title, sha)
+        problems = []
         try:
-            problems = shape_problems(story)
-            if not problems:
-                from publishing.animate.build_piece import check_and_fill
-                check_and_fill(json.loads(json.dumps(story)))
-                problems = [f"unsupported: {u}" for u in verify_claims(story, rows, f"{title} ({src})")]
-        except SystemExit as e:
-            problems = [str(e)]
+            problems += shape_problems(story)
         except Exception as e:                                   # noqa: BLE001
-            problems = [f"{type(e).__name__}: {e}"]
+            problems.append(f"shape check could not run: {type(e).__name__}: {e}")
+        try:
+            from publishing.animate.build_piece import check_and_fill
+            check_and_fill(json.loads(json.dumps(story)))
+        except SystemExit as e:
+            problems.append(str(e))
+        except Exception as e:                                   # noqa: BLE001
+            problems.append(f"{type(e).__name__}: {e}")
+        try:                                                     # all checks every time, so one retry can fix every class of problem
+            problems += [f"unsupported: {u}" for u in verify_claims(story, rows, f"{title} ({src})")]
+        except Exception as e:                                   # noqa: BLE001
+            problems.append(f"verifier could not run: {type(e).__name__}: {e}")
         if not problems:
             return story
-        feedback = "; ".join(problems)[:900]
+        feedback, prev = "; ".join(problems)[:1600], story
         log.info("%s attempt %s rejected: %s", story["name"], n, feedback)
     raise RuntimeError(feedback or "no valid story produced")
 
