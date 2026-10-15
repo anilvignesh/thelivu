@@ -124,6 +124,7 @@ def _client():
 def _ask(system, user, max_tokens=4000):
     from shared.config import CLAUDE_MODEL as MODEL
     r = _client().messages.create(model=MODEL, max_tokens=max_tokens, system=system,
+                                  thinking={"type": "disabled"},
                                   messages=[{"role": "user", "content": user}])
     return "".join(b.text for b in r.content if b.type == "text")
 
