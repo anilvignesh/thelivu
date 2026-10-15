@@ -1,0 +1,11 @@
+[Unit]
+Description=Thelivu animate worker — approved story files to held reels
+After=network.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/thelivu
+EnvironmentFile=/home/ubuntu/thelivu/ops/oracle-vm/reel-worker.env
+ExecStart=/home/ubuntu/thelivu/venv/bin/python -m publishing.animate.worker
+# Builds and holds only. Posting stays the Telegram Post tap. See publishing/animate/worker.py.

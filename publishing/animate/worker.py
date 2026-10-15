@@ -125,6 +125,9 @@ def process(story_path):
     story = json.loads(Path(story_path).read_text())
     if not story.get("approved"):
         log.info("%s: not approved, skipping", story["name"]); return None
+    from shared.db import kv_get, kv_set
+    if kv_get(f"animate_parked_{story['name']}"):
+        log.info("%s: parked after a failure, skipping (clear with kv_set('animate_parked_%s', ''))", story["name"], story["name"]); return None
     if _run_for(story["name"]):
         log.info("%s: already has a run, skipping", story["name"]); return None
     cap = caption(story)
@@ -140,6 +143,22 @@ def process(story_path):
     return reel_id
 
 
+def _park(path, err):
+    """A failed story is parked, not retried: a retry restarts the 4.5GB voice server and re-renders for the same input.
+    One Telegram alert; fix the story file (or the cause) and clear the flag."""
+    try:
+        from shared.db import kv_set
+        name = json.loads(Path(path).read_text())["name"]
+        kv_set(f"animate_parked_{name}", str(err)[:300])
+        import requests
+        tok, chat = os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_DRAFT_CHAT_ID")
+        if tok and chat:
+            requests.post(f"https://api.telegram.org/bot{tok}/sendMessage", timeout=20, json={
+                "chat_id": chat, "text": f"⚠️ Animate story '{name}' failed and is parked: {str(err)[:400]}"})
+    except Exception as e:                                       # noqa: BLE001
+        log.warning("could not park/alert: %s", e)
+
+
 def main(argv):
     paths = [Path(a) for a in argv] or sorted(STORIES.glob("*/story.json"))
     failed = 0
@@ -149,6 +168,7 @@ def main(argv):
         except Exception as e:                                   # noqa: BLE001
             failed += 1
             log.error("%s: %s", p, e)
+            _park(p, e)
     return 1 if failed else 0
 
 
