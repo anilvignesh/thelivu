@@ -1,0 +1,46 @@
+{
+  "name": "gujarat-bocw",
+  "title": "Gujarat construction workers' welfare board",
+  "stamp": "CAG AUDIT · GUJARAT",
+  "doc_sha256": "340c89ca259849be08f40427064629d28621d48365bbb8b321fbb9eb8c7098ee",
+  "source": {
+    "publisher": "Comptroller and Auditor General of India",
+    "title": "Welfare of Building and Other Construction Workers for the period ended March 2022",
+    "report": "Report No. 2 of 2025",
+    "place": "Gujarat"
+  },
+  "beats": [
+    { "type": "illustration", "title": "the audit", "head": ["Construction workers", "Gujarat"],
+      "say": [{ "id": "open", "text": "This is the audit of Gujarat's welfare board for construction workers.", "after": 1.8 }],
+      "data": { "image": "open.png" } },
+    { "type": "timeline", "title": "oversight lapsed", "head": ["Oversight lapsed"],
+      "refs": [1364, 1363], "numbers": ["June 2011", "March 2022", "November 2017"],
+      "say": [{ "id": "time", "text": "Its advisory committee lapsed in June twenty eleven, and was not set up again until March twenty twenty-two. The board itself has held no meetings since November twenty seventeen.", "after": 2.4 }],
+      "data": { "from": 2010, "to": 2023,
+        "events": [
+          { "at": "2011-06", "label": "Advisory committee's term ends", "kind": "late", "cue": ["june"] },
+          { "at": "2017-11", "label": "No board meetings held after this", "kind": "late", "cue": ["november"] },
+          { "at": "2022-03", "label": "Committee set up again", "kind": "normal", "cue": ["march"] } ],
+        "spans": [{ "from": "2011-06", "to": "2022-03", "label": "10 years 9 months", "note": "with no advisory committee (derived)", "kind": "late" }] } },
+    { "type": "excerpt", "title": "no welfare fund", "head": ["No welfare fund"],
+      "refs": [1365, 1301],
+      "say": [{ "id": "fund", "text": "The law requires a welfare fund. The audit found the board never set one up. So the cess collected is held in a government account.", "after": 2.4 }],
+      "data": { "excerpt_of": 1365, "mark": ["had not constituted the Welfare Fund"], "cue": ["never"], "where": "CAG audit report, Gujarat" } },
+    { "type": "compare", "turn": true, "title": "registered workers fell", "head": ["Active registered workers"],
+      "refs": [1323], "numbers": ["4,67,682", "1,56,955", "March 2018", "March 2022"],
+      "say": [
+        { "id": "drop", "text": "Active registered workers fell from about four lakh sixty-eight thousand in March twenty eighteen, to about one lakh fifty-seven thousand in March twenty twenty-two.", "after": 1.8 },
+        { "id": "third", "text": "That is a fall of two in every three.", "after": 2.4 }],
+      "data": { "fmt": "inr",
+        "a": { "label": "March 2018", "value": 467682, "cue": { "w": ["four"], "line": "drop" } },
+        "b": { "label": "March 2022", "value": 156955, "cue": { "w": ["one"], "line": "drop" } },
+        "derived": "derived from 4,67,682 and 1,56,955" } },
+    { "type": "list", "title": "stopped and missing", "head": ["Meanwhile"],
+      "refs": [1361, 1358, 1340], "numbers": ["13", "31", "May 2019", "2017-2022"],
+      "say": [{ "id": "rest", "text": "Thirteen of thirty-one welfare schemes were closed or on hold. The old age pension has been on hold since May twenty nineteen. And no annual report was prepared for twenty seventeen to twenty-two.", "after": 0.5 }],
+      "data": { "items": [
+        { "text": "13 of 31 welfare schemes closed or on hold", "cue": ["thirteen", "13"] },
+        { "text": "Old age pension on hold since May 2019", "cue": { "w": ["pension"], "lead": 0.4 } },
+        { "text": "No annual report for 2017-2022", "cue": ["annual"] } ] } }
+  ]
+}

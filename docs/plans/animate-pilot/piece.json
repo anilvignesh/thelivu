@@ -1,0 +1,26 @@
+{
+ "name": "nagaland-mgnregs",
+ "title": "Nagaland MGNREGS",
+ "format": {
+  "width": 1080,
+  "height": 1920,
+  "fps": 24,
+  "bpm": 120,
+  "duration": 44.56,
+  "frames": 1070
+ },
+ "storyFormat": "chronology, hard cuts on the 8th grid",
+ "style": "math",
+ "review": {
+  "safe": {
+   "top": 240,
+   "bottom": 420,
+   "right": 140
+  },
+  "refs": {}
+ },
+ "voice": {
+  "file": "voice/voice.wav",
+  "music": -12
+ }
+}

@@ -1,0 +1,36 @@
+{
+ "lead": 0.6,
+ "tail": 5.0,
+ "lines": [
+  {
+   "id": "rule",
+   "text": "In Nagaland, central money for the rural jobs scheme must be passed on within three days.",
+   "after": 1.8
+  },
+  {
+   "id": "delay",
+   "text": "The audit found one thousand seven hundred and ten crore rupees released late. Anywhere from four days, to two hundred and thirty-eight.",
+   "after": 2.4
+  },
+  {
+   "id": "bill",
+   "text": "Late releases carry interest at twelve per cent. The audit puts that bill at twenty-two point three seven crore rupees.",
+   "after": 2.4
+  },
+  {
+   "id": "owed",
+   "text": "Then the State's own share. It owed three hundred and thirty-eight crore rupees. It released two hundred and thirty-four.",
+   "after": 1.8
+  },
+  {
+   "id": "short",
+   "text": "A hundred and four crore rupees short.",
+   "after": 1.6
+  },
+  {
+   "id": "reply",
+   "text": "The State government replied in December twenty twenty-four. It noted the findings, and said they would be pursued.",
+   "after": 0.5
+  }
+ ]
+}
