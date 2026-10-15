@@ -149,7 +149,7 @@ SCENE.figure = (e) => {
   const v = keysM([[t, 0], [t + 1.8, d.value]]), s = (d.prefix || '') + v.toFixed(d.decimals ?? 0).replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (d.suffix || '');
   const fw = textW((d.prefix || '') + d.value.toFixed(d.decimals ?? 0) + (d.suffix || ''), 130, { bold: true });
   mText(s, CX - fw / 2, 1000, 130, { color: d.color === 'gold' ? GOLD : LATE, align: 'left', bold: true, alpha: runS(t - 0.1, 0.3) });
-  fade(d.label, CX, 1090, 46, runS(t + 1.6, 0.8), CREAM, { align: 'center' });
+  wrapLines(d.label, 820, 46).forEach((r, i) => fade(r, CX, 1090 + i * 60, 46, runS(t + 1.6, 0.8), CREAM, { align: 'center' }));
   furniture();
 };
 

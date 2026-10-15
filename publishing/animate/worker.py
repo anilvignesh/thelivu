@@ -90,13 +90,15 @@ def render(story_path):
     story = json.loads(Path(story_path).read_text())
     piece = PIECES / story["name"]
     build_piece.build(story_path, str(piece))
-    ensure_voice()
-    try:
-        rc, out = _sh([sys.executable, str(Path(__file__).parent / "synth_voice.py"), str(piece), VOICE_NAME])
-        if rc:
-            raise RuntimeError(f"voice synthesis failed: {out[-400:]}")
-    finally:
-        release_voice()
+    script = json.loads((piece / "voice" / "script.json").read_text())["lines"]
+    if any(not (piece / "voice" / f"{l['id']}.wav").exists() for l in script):     # only wake the 4.5GB voice server for missing takes
+        ensure_voice()
+        try:
+            rc, out = _sh([sys.executable, str(Path(__file__).parent / "synth_voice.py"), str(piece), VOICE_NAME])
+            if rc:
+                raise RuntimeError(f"voice synthesis failed: {out[-400:]}")
+        finally:
+            release_voice()
     for label, cmd in (("voice align", ["node", "tools/voice.mjs", str(piece)]),
                        ("build", ["node", "tools/build.mjs", str(piece)]),
                        ("export", ["node", "tools/export.mjs", str(piece), "--share", "--workers", "2"])):
