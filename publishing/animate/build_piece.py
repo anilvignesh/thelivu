@@ -45,8 +45,16 @@ def check_and_fill(story, check=True):
         raise SystemExit(f"draft beats not yet approved (remove _draft): {drafts}")
     ids = {i for b in story["beats"] for i in b.get("refs", [])}
     ids |= {b["data"]["excerpt_of"] for b in story["beats"] if "excerpt_of" in b.get("data", {})}
-    rows = _fetch(ids) if (check and ids) else {}
+    if check and story.get("run_id"):                       # an article story: the evidence is the article's own passages
+        from publishing.animate import articles
+        rows, headline = articles.rows_for(story["run_id"])
+        rows = {i: {"claim": _squash(r["claim"]), "excerpt": _squash(r["excerpt"])} for i, r in rows.items()}
+    else:
+        headline = None
+        rows = _fetch(ids) if (check and ids) else {}
     problems = []
+    if headline is not None and _squash(story["source"]["title"]) != _squash(headline):
+        problems.append("source.title is not the article's headline")
     if check and story.get("doc_sha256"):
         import psycopg2
         conn = psycopg2.connect(os.environ["DATABASE_URL"]); cur = conn.cursor()

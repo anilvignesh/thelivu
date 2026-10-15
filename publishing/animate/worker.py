@@ -130,11 +130,16 @@ def process(story_path):
     from shared.db import kv_get, kv_set
     if kv_get(f"animate_parked_{story['name']}"):
         log.info("%s: parked after a failure, skipping (clear with kv_set('animate_parked_%s', ''))", story["name"], story["name"]); return None
-    if _run_for(story["name"]):
+    if story.get("run_id"):
+        from shared.db import _conn
+        c = _conn(); cur = c.cursor(); cur.execute("SELECT 1 FROM reels WHERE run_id = %s", (story["run_id"],)); had = cur.fetchone(); c.close()
+        if had:
+            log.info("%s: article run %s already has a reel, skipping", story["name"], story["run_id"]); return None
+    elif _run_for(story["name"]):
         log.info("%s: already has a run, skipping", story["name"]); return None
     cap = caption(story)
     mp4, review = render(story_path)
-    run_id = _make_run(story)
+    run_id = story.get("run_id") or _make_run(story)
     reel_id = save_reel(run_id, mp4.read_bytes(), cap, kind="animate", presentation_style="animate")
     update_reel(reel_id, status="held", notes="animate reel, held for the video gate")
     log.info("%s: reel #%s held for run #%s", story["name"], reel_id, run_id)
