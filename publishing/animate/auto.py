@@ -153,7 +153,7 @@ def _json(text):
     m = re.search(r"\{.*\}", text, re.S)
     if not m:
         raise ValueError("no JSON in model output")
-    return json.loads(m.group(0), strict=False)
+    return json.JSONDecoder(strict=False).raw_decode(text[m.start():])[0]
 
 
 def author(sha, title, src, rows, feedback=None, prev=None):
