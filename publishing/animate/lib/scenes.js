@@ -36,7 +36,8 @@ function furniture() {
   const tag = STORY.stamp;
   ctx.save(); ctx.translate(70, 300); ctx.rotate(-0.052);
   ctx.font = `30px ${MONOF}`; ctx.letterSpacing = '4px';
-  const w = ctx.measureText(tag).width;
+  let w = ctx.measureText(tag).width;
+  for (let px = 30; w > 600 && px > 18; px -= 2) { ctx.font = `${px}px ${MONOF}`; w = ctx.measureText(tag).width; }   // never reach the wordmark
   ctx.strokeStyle = GOLD; ctx.lineWidth = 2.5; ctx.strokeRect(-14, -34, w + 24, 52);
   ctx.fillStyle = GOLD; ctx.textBaseline = 'alphabetic'; ctx.fillText(tag, -2, 2); ctx.restore();
   mono('THELIVU', 940, 304, 34, GOLD, 'right', 1, 8);
@@ -170,9 +171,11 @@ SCENE.compare = (e) => {
     const w = Math.max(2, bw * v / mx); ctx.fillRect(x0, y - hh / 2, w, hh); ctx.strokeRect(x0, y - hh / 2, w, hh); ctx.restore();
     if (p > 0.01) mText((d.fmt === 'inr' ? inr(v) : Math.round(v)) + (d.unit || ''), Math.min(x0 + Math.max(2, bw * v / mx) + 20, 900 - 330), y + 22, 66, { color: col, align: 'left', bold: true, alpha: runS(t, 0.3) });
   });
-  const dp = runS(HIT, 0.6), pc = Math.round((1 - d.b.value / d.a.value) * 100);
-  line('−' + pc + '%', CX, 1330, 150, dp, LATE, { bold: true });
-  fade(d.derived, CX, 1400, 34, runS(HIT + 0.4, 0.8), DIM, { align: 'center' });
+  if (d.derived) {                           // the change between the bars, drawn only when the story labels it as derived
+    const dp = runS(HIT, 0.6), pc = Math.round(Math.abs(1 - d.b.value / d.a.value) * 100), down = d.b.value < d.a.value;
+    line((down ? '−' : '+') + pc + '%', CX, 1330, 150, dp, LATE, { bold: true });
+    fade(d.derived, CX, 1400, 34, runS(HIT + 0.4, 0.8), DIM, { align: 'center' });
+  }
   furniture();
 };
 

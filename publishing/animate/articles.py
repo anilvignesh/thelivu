@@ -110,7 +110,7 @@ _RULES = auto._RULES.replace(
     "or a denial, is spoken and captioned with its source ('the agency alleges', 'the company denies'), never as established fact.") \
     .replace("the form \"the audit found ...\"", "the form \"the agency alleges ...\" / \"records show ...\" (name who says it)") \
     .replace("excerpt beats: data.excerpt_of is a finding id,", "excerpt beats: data.excerpt_of is a passage id (a1, a2, ...),") \
-    .replace("stamp: \"CAG AUDIT · <PLACE IN CAPS>\"", "stamp: \"THELIVU · <TOPIC IN CAPS>\"") \
+    .replace("stamp: \"CAG AUDIT · <PLACE IN CAPS>\" (at most 26 characters)", "stamp: a topic label in capitals, at most 24 characters, never starting with THELIVU (the wordmark is already on screen)") \
     .replace("ending \"Source: <report>. Sources in bio.\"", "ending \"Sources in bio.\"") \
     .replace("the excerpt", "the passage").replace("excerpts", "passages").replace("findings", "passages")
 

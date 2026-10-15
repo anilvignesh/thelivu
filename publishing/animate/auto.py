@@ -113,7 +113,7 @@ Rules, all enforced by code after you write:
   and quantity you say must also be drawn in that beat's data (a figure's value, a share's value, a compare bar, a timeline event, a list item, a
   marked excerpt phrase). Never say a fact the screen does not show. Never leave the same picture up while a new fact is spoken: give it a new beat.
 - Scene guide: figure = one count or rupee amount (data: value, prefix, suffix, decimals, label, cue). share = one percentage of a whole
-  (data: value 0-100, decimals, label like "of interception cases had no online report", cue). compare = two values of the same kind.
+  (data: value 0-100, decimals, label like "of interception cases had no online report", cue). compare = two values of the SAME unit and kind (two rupee amounts, two counts of the same thing, two shares), within 50 times of each other; never years against rupees or a count against an amount. Set data.derived (e.g. "derived: the difference between the two") only when the change between them is itself a stated or plainly computed fact.
   list = 2-4 short items that went wrong. timeline = dated events. excerpt = the report's own sentence, marked phrase 1-2, one line spoken about it.
 - "say" lines are spoken aloud by a text-to-speech voice. Write numbers in words ("one lakh fifty-seven thousand", "twenty twenty-two"),
   never digits. Never write an acronym or abbreviation in speech: spell out the body ("the audit", "the state government").
@@ -137,7 +137,7 @@ Rules, all enforced by code after you write:
   on one or two others, so the picture itself changes as the facts land.
 - data.motion on every beat except the first: how the picture moves, chosen from the content: push (closing in on a subject), pull (opening out to
   show scale), pan_l or pan_r (a place, a journey, a line of things), rise (growth, a climb, a tower), sway (something unsettled or waiting). Vary it.
-- head: 1-2 short on-screen headline lines per beat. stamp: "CAG AUDIT · <PLACE IN CAPS>".
+- head: 1-2 short on-screen headline lines per beat. stamp: "CAG AUDIT · <PLACE IN CAPS>" (at most 26 characters).
 - caption: 3-5 plain sentences for the post, written with digits ("258", "2018-19", "₹40 lakh"), not number words, ending "Source: <report>. Sources in bio." Any derived figure is labelled as derived.
 - Output ONLY the JSON object, same shape as the example. Ids in "say" are short unique slugs. "after" is the pause after the line in seconds (0.5-2.4).
 """
@@ -194,11 +194,24 @@ def _shown_items(b):
     return {"compare": 2, "timeline": len(d.get("events", [])), "list": len(d.get("items", []))}.get(t, 1)
 
 
+STAMP_MAX = 26
 MOTIONS = {"push", "pull", "pan_l", "pan_r", "rise", "sway"}
 
 
 def shape_problems(story):
     out = []
+    stamp = story.get("stamp", "")
+    if not stamp or len(stamp) > STAMP_MAX or stamp.upper().startswith("THELIVU"):
+        out.append(f"stamp must be a short topic label of at most {STAMP_MAX} characters that does not repeat the wordmark ('THELIVU'); got '{stamp}'")
+    for b in story["beats"]:
+        d = b.get("data", {})
+        if b["type"] == "compare":
+            try:
+                lo, hi = sorted([float(d["a"]["value"]), float(d["b"]["value"])])
+            except (KeyError, TypeError, ValueError):
+                out.append("compare beat needs numeric a.value and b.value"); continue
+            if lo <= 0 or hi / lo > 50:
+                out.append(f"compare beat '{b.get('title')}' sets {d['a']['value']} against {d['b']['value']}: two bars that far apart are not the same kind of quantity; use a figure beat for each instead")
     for b in story["beats"][1:]:
         if b.get("data", {}).get("motion") not in MOTIONS:
             out.append(f"beat '{b.get('title')}' needs data.motion, one of {sorted(MOTIONS)}")
@@ -249,7 +262,7 @@ def verify_claims(story, rows, header=""):
     parts.append("SPOKEN: " + story.get("caption", "") + "\nSHOWN: {}\nEXCERPTS:\n" + "\n".join(f"- {c['excerpt']}" for c in allx.values()))
     sys_p = ("You are a strict fact checker. For each block, list every statement in SPOKEN or SHOWN that the EXCERPTS do not directly support: "
              f"The REPORT line is also known: {header}. A sentence that only names that report, its state or its period is supported. "
-             "Flag: a number, date, name or place not in the excerpts, any number, date, name or quantity in SPOKEN that is not drawn in SHOWN (the viewer must see every fact as it is spoken), a causal or motive claim, a comparison or total the excerpts do not state "
+             "Flag: a compare beat whose two bars are not the same kind of quantity in the same unit, a number, date, name or place not in the excerpts, any number, date, name or quantity in SPOKEN that is not drawn in SHOWN (the viewer must see every fact as it is spoken), a causal or motive claim, a comparison or total the excerpts do not state "
              "(simple arithmetic on two stated numbers, labelled derived, is allowed), or any wording that says more than the excerpt does. "
              'Reply with ONLY JSON: {"unsupported": ["..."]}. Empty list if everything is supported.')
     res = _json(_ask(sys_p, "\n\n".join(parts), max_tokens=1500))
