@@ -207,6 +207,8 @@ def verify_claims(story, rows, header=""):
             continue
         parts.append("SPOKEN: " + " ".join(l["text"] for l in b["say"]) + "\nSHOWN: " + json.dumps(b.get("data", {}), ensure_ascii=False)
                      + "\nEXCERPTS:\n" + "\n".join(f"- {c['excerpt']}" for c in cited))
+    allx = {r["id"]: r for b in story["beats"] for r in [by_id.get(i) for i in b.get("refs", [])] if r}
+    parts.append("SPOKEN: " + story.get("caption", "") + "\nSHOWN: {}\nEXCERPTS:\n" + "\n".join(f"- {c['excerpt']}" for c in allx.values()))
     sys_p = ("You are a strict fact checker. For each block, list every statement in SPOKEN or SHOWN that the EXCERPTS do not directly support: "
              f"The REPORT line is also known: {header}. A sentence that only names that report, its state or its period is supported. "
              "Flag: a number, date, name or place not in the excerpts, a causal or motive claim, a comparison or total the excerpts do not state "
