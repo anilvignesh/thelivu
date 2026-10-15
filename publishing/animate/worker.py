@@ -91,14 +91,18 @@ def render(story_path):
     piece = PIECES / story["name"]
     build_piece.build(story_path, str(piece))
     script = json.loads((piece / "voice" / "script.json").read_text())["lines"]
-    if any(not (piece / "voice" / f"{l['id']}.wav").exists() for l in script):     # only wake the 4.5GB voice server for missing takes
+    for attempt in (1, 2, 3):                   # reel_worker releases the shared voice server whenever ITS queue is empty, which can land mid-synthesis; takes already made are kept
+        if all((piece / "voice" / f"{l['id']}.wav").exists() for l in script):
+            break
         ensure_voice()
         try:
             rc, out = _sh([sys.executable, str(Path(__file__).parent / "synth_voice.py"), str(piece), VOICE_NAME])
-            if rc:
-                raise RuntimeError(f"voice synthesis failed: {out[-400:]}")
         finally:
             release_voice()
+        if rc:
+            log.warning("%s: voice synthesis attempt %s failed: %s", story["name"], attempt, out[-200:].replace("\n", " "))
+    if any(not (piece / "voice" / f"{l['id']}.wav").exists() for l in script):
+        raise RuntimeError("voice synthesis failed after 3 attempts")
     for label, cmd in (("voice align", ["node", "tools/voice.mjs", str(piece)]),
                        ("build", ["node", "tools/build.mjs", str(piece)]),
                        ("export", ["node", "tools/export.mjs", str(piece), "--share", "--workers", "2"])):
