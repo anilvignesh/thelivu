@@ -38,7 +38,7 @@ EXAMPLE = Path(__file__).parent / "stories" / "gujarat-bocw" / "story.json"
 LINE_MAX = 26
 MIN_FINDINGS, MIN_AMOUNTS, AMOUNT_CAP_CR = 4, 2, 10_000
 MAX_FINDINGS_SHOWN = 14
-WORDS_MIN, WORDS_MAX, WPS_MAX = 95, 150, 3.3      # spoken words in the whole piece; words/second per line
+WORDS_MIN, WORDS_MAX = 95, 170      # spoken words in the whole piece; words/second per line
 _JUNK = re.compile(r"manual|guide|style|dictionary|recruit|holiday|vacanc|state financ|finance accounts|appropriation", re.I)
 _ACRONYM = re.compile(r"\b[A-Z]{2,}\b")
 _SPOKEN_OK = {"I", "II", "III", "IV", "V"}
@@ -105,8 +105,15 @@ _RULES = """You write a 55-65 second explainer video as a STORY FILE (JSON), for
 Use ONLY the findings given. Each has an id, a claim and a verbatim excerpt from the audit report. Nothing else is known.
 
 Rules, all enforced by code after you write:
-- 4 or 5 beats, then nothing else (a source card and a sign-off are added automatically). Beat types: illustration (the first beat only),
-  timeline, excerpt, compare, figure, list. Use at least 3 different types. Exactly one beat has "turn": true (the biggest fact).
+- 6 to 8 beats, then nothing else (a source card and a sign-off are added automatically). Beat types: illustration (the first beat only),
+  timeline, excerpt, compare, figure, share, list. Use at least 4 different types. Exactly one beat has "turn": true (the biggest fact).
+- THE SCREEN MUST CHANGE WITH EVERY FACT. The viewer sees each fact as it is spoken. So: a beat has ONE spoken line, except compare (two lines,
+  one per bar), timeline (one line per event, events >= lines) and list (items >= lines, each item cued on its own words). Every number, date, name
+  and quantity you say must also be drawn in that beat's data (a figure's value, a share's value, a compare bar, a timeline event, a list item, a
+  marked excerpt phrase). Never say a fact the screen does not show. Never leave the same picture up while a new fact is spoken: give it a new beat.
+- Scene guide: figure = one count or rupee amount (data: value, prefix, suffix, decimals, label, cue). share = one percentage of a whole
+  (data: value 0-100, decimals, label like "of interception cases had no online report", cue). compare = two values of the same kind.
+  list = 2-4 short items that went wrong. timeline = dated events. excerpt = the report's own sentence, marked phrase 1-2, one line spoken about it.
 - "say" lines are spoken aloud by a text-to-speech voice. Write numbers in words ("one lakh fifty-seven thousand", "twenty twenty-two"),
   never digits. Never write an acronym or abbreviation in speech: spell out the body ("the audit", "the state government").
   Plain, flat, factual sentences, in the form "the audit found ...". No adjectives of judgement, no motive, no "scandal".
@@ -169,8 +176,20 @@ def spoken(story):
     return [l for b in story["beats"] for l in b.get("say", [])]
 
 
+def _shown_items(b):
+    d, t = b.get("data", {}), b["type"]
+    return {"compare": 2, "timeline": len(d.get("events", [])), "list": len(d.get("items", []))}.get(t, 1)
+
+
 def shape_problems(story):
     out = []
+    if not 6 <= len(story["beats"]) <= 8:
+        out.append(f"{len(story['beats'])} beats, need 6-8")
+    for b in story["beats"]:
+        if b["type"] not in ("illustration", "timeline", "excerpt", "compare", "figure", "share", "list"):
+            out.append(f"unknown beat type {b['type']}")
+        elif len(b.get("say", [])) > _shown_items(b):
+            out.append(f"beat '{b.get('title')}' speaks {len(b['say'])} lines but shows {_shown_items(b)} item(s): the screen would stay still while new facts are spoken")
     words = sum(len(l["text"].split()) for l in spoken(story))
     if not WORDS_MIN <= words <= WORDS_MAX:
         out.append(f"{words} spoken words, need {WORDS_MIN}-{WORDS_MAX}")
@@ -186,8 +205,8 @@ def shape_problems(story):
     if sum(1 for b in story["beats"] if b.get("turn")) != 1:
         out.append("need exactly one turn beat")
     types = {b["type"] for b in story["beats"]}
-    if len(types) < 3:
-        out.append("use at least 3 scene types")
+    if len(types) < 4:
+        out.append("use at least 4 scene types")
     if story["beats"][0]["type"] != "illustration" or any(b["type"] == "illustration" for b in story["beats"][1:]):
         out.append("illustration must be the first beat and only there")
     if not (story.get("caption") or "").strip():
@@ -211,7 +230,7 @@ def verify_claims(story, rows, header=""):
     parts.append("SPOKEN: " + story.get("caption", "") + "\nSHOWN: {}\nEXCERPTS:\n" + "\n".join(f"- {c['excerpt']}" for c in allx.values()))
     sys_p = ("You are a strict fact checker. For each block, list every statement in SPOKEN or SHOWN that the EXCERPTS do not directly support: "
              f"The REPORT line is also known: {header}. A sentence that only names that report, its state or its period is supported. "
-             "Flag: a number, date, name or place not in the excerpts, a causal or motive claim, a comparison or total the excerpts do not state "
+             "Flag: a number, date, name or place not in the excerpts, any number, date, name or quantity in SPOKEN that is not drawn in SHOWN (the viewer must see every fact as it is spoken), a causal or motive claim, a comparison or total the excerpts do not state "
              "(simple arithmetic on two stated numbers, labelled derived, is allowed), or any wording that says more than the excerpt does. "
              'Reply with ONLY JSON: {"unsupported": ["..."]}. Empty list if everything is supported.')
     res = _json(_ask(sys_p, "\n\n".join(parts), max_tokens=1500))
@@ -231,8 +250,9 @@ def make_image(story, folder):
 
 
 def slug(src, title, sha):
+    from datetime import date
     place = src.replace("cag-", "")
-    return f"{place}-{re.sub(r'[^a-z0-9]+', '-', (title or 'report').lower())[:28].strip('-')}-{sha[:6]}"
+    return f"{place}-{re.sub(r'[^a-z0-9]+', '-', (title or 'report').lower())[:24].strip('-')}-{sha[:6]}-{date.today():%m%d}"
 
 
 def attempt(sha, title, src, dry=False):

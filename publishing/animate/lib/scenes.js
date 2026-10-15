@@ -3,7 +3,7 @@
 //  cream = neutral text, gold = what is real or released, red = what is missing, late or lost, dim = labels.
 //  Frame furniture (BRAND.md): gold stamp, THELIVU wordmark, progress line, handle footer; a silent source card and
 //  the real logo (assets/logo.png) close every piece. No captions: the voice and the picture carry the story.
-//  Scene types: illustration, timeline, excerpt, compare, figure, list, source, signoff. Each is drawn from the beat's
+//  Scene types: illustration, timeline, excerpt, compare, figure, share, list, source, signoff. Each is drawn from the beat's
 //  declared data (STORY.beats[i].data); nothing is read off the narration.
 // =====================================================================
 const INK = '#17140D', LOGO_INK = '#1B1710', CREAM = '#E9E0C8', GOLD = '#D2AA6D', DIM = '#B3A891', LATE = MC.red;
@@ -139,6 +139,22 @@ SCENE.compare = (e) => {
   const dp = runS(HIT, 0.6), pc = Math.round((1 - d.b.value / d.a.value) * 100);
   line('−' + pc + '%', CX, 1330, 150, dp, LATE, { bold: true });
   fade(d.derived, CX, 1400, 34, runS(HIT + 0.4, 0.8), DIM, { align: 'center' });
+  furniture();
+};
+
+// SHARE: a declared percentage as 100 dots, counted up; the red dots are the share that went wrong
+SCENE.share = (e) => {
+  const d = e.beat.data, t = itemT(e, d.cue, 0, 1), sp = 66, x0 = CX - 4.5 * sp, y0 = 760, col = d.color === 'gold' ? GOLD : LATE;
+  fillAll(INK); heads(e);
+  const v = keysM([[t, 0], [t + 1.8, d.value]]);
+  const fw = textW(d.value.toFixed(d.decimals ?? 0) + '%', 130, { bold: true });
+  mText(v.toFixed(d.decimals ?? 0) + '%', CX - fw / 2, 700, 130, { color: col, align: 'left', bold: true, alpha: runS(t - 0.1, 0.3) });
+  for (let i = 0; i < 100; i++) {
+    const on = clamp(v - i), cx = x0 + (i % 10) * sp, cy = y0 + Math.floor(i / 10) * sp;
+    ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, 22, 0, Math.PI * 2);
+    ctx.globalAlpha = 0.9; ctx.fillStyle = on > 0 ? rgbaM(col, 0.25 + 0.75 * on) : rgbaM(DIM, 0.16); ctx.fill(); ctx.restore();
+  }
+  wrapLines(d.label, 820, 42).forEach((r, i) => fade(r, CX, 1440 + i * 54, 42, runS(t + 1.6, 0.8), CREAM, { align: 'center' }));
   furniture();
 };
 
