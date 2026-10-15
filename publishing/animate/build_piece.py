@@ -40,6 +40,9 @@ def _year(s):
 
 
 def check_and_fill(story, check=True):
+    drafts = [b.get("title", "?") for b in story["beats"] if b.get("_draft")]
+    if drafts:
+        raise SystemExit(f"draft beats not yet approved (remove _draft): {drafts}")
     ids = {i for b in story["beats"] for i in b.get("refs", [])}
     ids |= {b["data"]["excerpt_of"] for b in story["beats"] if "excerpt_of" in b.get("data", {})}
     rows = _fetch(ids) if (check and ids) else {}
