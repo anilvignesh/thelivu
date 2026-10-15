@@ -130,8 +130,13 @@ Rules, all enforced by code after you write:
 - timeline events: at "YYYY-MM", label short. compare: two values with the same unit, data.fmt "inr" for plain counts. list: 2-4 items, each short.
 - illustration beat: data.image is "open.png" and data.prompt is ONE sentence describing a conceptual, non-photoreal, symbolic image with no
   people's faces, no text, no lettering, no numbers, no logos, no real people.
-- EVERY beat except the first also has data.bg_prompt: one sentence describing a conceptual, non-photoreal, symbolic picture that sits faintly
-  behind that beat (objects and space related to what the beat is about; no people, no faces, no text, no numbers, no logos). Each is different.
+- EVERY beat except the first also has data.bg_prompt: one sentence describing the picture that fills the screen behind that beat, so it must be
+  bright, richly coloured, well lit and cinematic, with one clear subject that shows what the beat is about (a place, objects, machinery, documents,
+  weather, a landscape; no faces, no text, no numbers, no logos). Each beat's picture is different and fits THIS story, not a generic symbol.
+  Add data.bg_prompt2 (a second picture of the same subject changed to match the beat's turn: after, later, emptier, fuller) on the turn beat and
+  on one or two others, so the picture itself changes as the facts land.
+- data.motion on every beat except the first: how the picture moves, chosen from the content: push (closing in on a subject), pull (opening out to
+  show scale), pan_l or pan_r (a place, a journey, a line of things), rise (growth, a climb, a tower), sway (something unsettled or waiting). Vary it.
 - head: 1-2 short on-screen headline lines per beat. stamp: "CAG AUDIT · <PLACE IN CAPS>".
 - caption: 3-5 plain sentences for the post, written with digits ("258", "2018-19", "₹40 lakh"), not number words, ending "Source: <report>. Sources in bio." Any derived figure is labelled as derived.
 - Output ONLY the JSON object, same shape as the example. Ids in "say" are short unique slugs. "after" is the pause after the line in seconds (0.5-2.4).
@@ -189,8 +194,14 @@ def _shown_items(b):
     return {"compare": 2, "timeline": len(d.get("events", [])), "list": len(d.get("items", []))}.get(t, 1)
 
 
+MOTIONS = {"push", "pull", "pan_l", "pan_r", "rise", "sway"}
+
+
 def shape_problems(story):
     out = []
+    for b in story["beats"][1:]:
+        if b.get("data", {}).get("motion") not in MOTIONS:
+            out.append(f"beat '{b.get('title')}' needs data.motion, one of {sorted(MOTIONS)}")
     if not 6 <= len(story["beats"]) <= 8:
         out.append(f"{len(story['beats'])} beats, need 6-8")
     for b in story["beats"]:
@@ -253,10 +264,14 @@ def make_image(story, folder):
         d = b["data"]
         if k == 0:
             jobs.append((b, "image", d.pop("prompt", None) or "an empty public office desk under one lamp at night", "open.png"))
-        elif d.get("bg_prompt"):
-            jobs.append((b, "bg", d.pop("bg_prompt"), f"b{k}.png"))
+        else:
+            has_bg = bool(d.get("bg_prompt"))
+            if has_bg:
+                jobs.append((b, "bg", d.pop("bg_prompt"), f"b{k}.png"))
+            if d.get("bg_prompt2") and has_bg:
+                jobs.append((b, "bg2", d.pop("bg_prompt2"), f"b{k}b.png"))
     for b in story["beats"][1:]:
-        b["data"].pop("bg_prompt", None)
+        b["data"].pop("bg_prompt", None); b["data"].pop("bg_prompt2", None)
     paths = generate_beat_images([j[2] for j in jobs], folder / "assets", seed=11)
     for (b, key, _, name), p in zip(jobs, paths):
         if not p:

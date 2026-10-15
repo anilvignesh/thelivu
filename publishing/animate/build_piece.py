@@ -101,7 +101,7 @@ def build(story_path, out, check=True):
         shutil.copy(HERE / "lib" / f, out / "src" / f)
     shutil.copy(LOGO, out / "assets" / "logo.png")
     for b in story["beats"]:
-        for key in ("image", "bg"):
+        for key in ("image", "bg", "bg2"):
             img = b.get("data", {}).get(key)
             if img:   # jpeg keeps the single-file page small
                 subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(story_path.parent / "assets" / img), "-q:v", "3",

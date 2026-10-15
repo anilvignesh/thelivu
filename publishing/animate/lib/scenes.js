@@ -54,15 +54,30 @@ function itemT(e, cue, k, n) {
 // the headline lines at the top of a scene
 // a faint generated picture behind a data scene (data.bg): slow push and drift, so the frame is never still and never bare.
 // It is atmosphere only. Every number, date and word is drawn on top of it, never in it.
+// picture motion, chosen per beat by what the beat is about (data.motion); every move is slow and continuous
+const MOTION = {
+  push: (u) => [1.08 + 0.22 * u, 50 - 100 * u, -60 * u],            // closing in on the subject
+  pull: (u) => [1.3 - 0.22 * u, -50 + 100 * u, 60 * u - 60],        // opening out to show the scale of it
+  pan_l: (u) => [1.22, 160 - 320 * u, 0],
+  pan_r: (u) => [1.22, -160 + 320 * u, 0],
+  rise: (u) => [1.2, 0, 130 - 260 * u],                              // a slow tilt up
+  sway: (u) => [1.18, 90 * Math.sin(u * 6.283), 45 * Math.cos(u * 6.283)],
+};
+function pic(img, alpha, u, motion) {
+  const [k, dx, dy] = (MOTION[motion] || MOTION.push)(u), s = Math.max(W / img.width, H / img.height) * k, iw = img.width * s, ih = img.height * s;
+  ctx.globalAlpha = alpha; ctx.drawImage(img, (W - iw) / 2 + dx, (H - ih) / 2 + dy, iw, ih);
+}
 function backdrop(e) {
-  const img = e.beat.data && ASSETS[e.beat.data.bg];
+  const d = e.beat.data || {}, img = ASSETS[d.bg];
   if (!img) return;
-  // the picture is the scene's ground, not a watermark: near full strength, a slow push and drift, and just enough
-  // shade behind the text band (and the footer) to keep the figures readable
-  const u = clamp((TT - e.t0) / (e.t1 - e.t0)), s = Math.max(W / img.width, H / img.height) * (1.08 + 0.2 * u), iw = img.width * s, ih = img.height * s;
-  ctx.save(); ctx.globalAlpha = 0.92 * runS(e.t0, 0.5);
-  ctx.drawImage(img, (W - iw) / 2 + (50 - 100 * u), (H - ih) / 2 - 60 * u, iw, ih);
-  ctx.globalAlpha = 1; ctx.fillStyle = 'rgba(23,20,13,0.22)'; ctx.fillRect(0, 0, W, H);
+  // the picture is the scene's ground, not a watermark: near full strength, moving, with a second picture crossfading in
+  // mid-beat when there is one (data.bg2), and just enough shade behind the text band and the footer to keep figures readable
+  const u = clamp((TT - e.t0) / (e.t1 - e.t0)), a = 0.95 * runS(e.t0, 0.5);
+  ctx.save();
+  const img2 = d.bg2 && ASSETS[d.bg2], x = img2 ? clamp((u - 0.42) / 0.16) : 0;
+  pic(img, a * (1 - x * 0.0), u, d.motion);
+  if (img2) pic(img2, a * x, u, d.motion2 || d.motion);
+  ctx.globalAlpha = 1; ctx.fillStyle = 'rgba(23,20,13,0.2)'; ctx.fillRect(0, 0, W, H);
   const band = ctx.createLinearGradient(0, 380, 0, 1300);
   band.addColorStop(0, 'rgba(23,20,13,0)'); band.addColorStop(0.35, 'rgba(23,20,13,0.5)'); band.addColorStop(0.7, 'rgba(23,20,13,0.5)'); band.addColorStop(1, 'rgba(23,20,13,0)');
   ctx.fillStyle = band; ctx.fillRect(0, 380, W, 920);
