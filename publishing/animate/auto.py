@@ -120,7 +120,7 @@ Rules, all enforced by code after you write:
 - illustration beat: data.image is "open.png" and data.prompt is ONE sentence describing a conceptual, non-photoreal, symbolic image with no
   people's faces, no text, no lettering, no numbers, no logos, no real people.
 - head: 1-2 short on-screen headline lines per beat. stamp: "CAG AUDIT · <PLACE IN CAPS>".
-- caption: 3-5 plain sentences for the post, ending "Source: <report>. Sources in bio." Any derived figure is labelled as derived.
+- caption: 3-5 plain sentences for the post, written with digits ("258", "2018-19", "₹40 lakh"), not number words, ending "Source: <report>. Sources in bio." Any derived figure is labelled as derived.
 - Output ONLY the JSON object, same shape as the example. Ids in "say" are short unique slugs. "after" is the pause after the line in seconds (0.5-2.4).
 """
 
