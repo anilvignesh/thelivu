@@ -35,12 +35,21 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [animate_auto] %(mes
 
 OUT = Path(os.environ.get("ANIMATE_STORIES", os.path.expanduser("~/animate-stories")))
 EXAMPLE = Path(__file__).parent / "stories" / "gujarat-bocw" / "story.json"
+LINE_MAX = 26
 MIN_FINDINGS, MIN_AMOUNTS, AMOUNT_CAP_CR = 4, 2, 10_000
 MAX_FINDINGS_SHOWN = 14
 WORDS_MIN, WORDS_MAX, WPS_MAX = 95, 150, 3.3      # spoken words in the whole piece; words/second per line
 _JUNK = re.compile(r"manual|guide|style|dictionary|recruit|holiday|vacanc|state financ|finance accounts|appropriation", re.I)
 _ACRONYM = re.compile(r"\b[A-Z]{2,}\b")
 _SPOKEN_OK = {"I", "II", "III", "IV", "V"}
+
+
+MAX_TRIES = 3          # a document the writer cannot ground in this many authoring runs is left alone
+
+
+def _tries(v):
+    m = re.match(r"rejected:(\d+)", str(v))
+    return int(m.group(1)) if m else 1
 
 
 def _db():
@@ -66,8 +75,8 @@ def candidates(limit=5):
         where f.cause = 'state' and f.excerpt is not null and f.excerpt <> ''
         group by d.sha256, d.title, f.source_key""", (AMOUNT_CAP_CR,))
     rows = cur.fetchall()
-    cur.execute("select key from kv_store where key like 'animate_doc_%%'")
-    done = {r[0] for r in cur.fetchall()}
+    cur.execute("select key, value from kv_store where key like 'animate_doc_%%'")
+    done = {k for k, v in cur.fetchall() if not str(v).startswith("rejected") or _tries(v) >= MAX_TRIES}
     conn.close()
     out = []
     for sha, title, src, n, na, amt in rows:
@@ -101,7 +110,7 @@ Rules, all enforced by code after you write:
 - "say" lines are spoken aloud by a text-to-speech voice. Write numbers in words ("one lakh fifty-seven thousand", "twenty twenty-two"),
   never digits. Never write an acronym or abbreviation in speech: spell out the body ("the audit", "the state government").
   Plain, flat, factual sentences, in the form "the audit found ...". No adjectives of judgement, no motive, no "scandal".
-  Total spoken words 95 to 150 across the whole piece. At most 22 words per line.
+  Total spoken words 95 to 150 across the whole piece. At most 26 words per line.
 - Every figure, date, name and claim must come from the excerpts of the findings you cite in "refs" for that beat. Do not round up,
   infer, combine across years, or add context you were not given. If you compute a number (a difference or percentage), set it in
   data as derived and say "derived" on screen via the derived note; the two inputs must be in the cited excerpts.
@@ -167,8 +176,8 @@ def shape_problems(story):
         out.append(f"{words} spoken words, need {WORDS_MIN}-{WORDS_MAX}")
     for l in spoken(story):
         n = len(l["text"].split())
-        if n > 22:
-            out.append(f"line {l['id']} has {n} words (max 22)")
+        if n > LINE_MAX:
+            out.append(f"line {l['id']} has {n} words (max {LINE_MAX})")
         if re.search(r"\d", l["text"]):
             out.append(f"line {l['id']} has digits; write numbers as words")
         bad = [a for a in _ACRONYM.findall(l["text"]) if a not in _SPOKEN_OK]
@@ -227,7 +236,7 @@ def slug(src, title, sha):
 def attempt(sha, title, src, dry=False):
     rows = findings_for(sha)
     feedback = None
-    for n in (1, 2, 3):
+    for n in (1, 2, 3, 4):
         try:
             story = author(sha, title, src, rows, feedback)
         except ValueError as e:                                  # unparseable JSON: ask again, say why
@@ -265,7 +274,7 @@ def run(dry=False, max_stories=1):
         try:
             story = attempt(sha, title, src)
         except Exception as e:                                   # noqa: BLE001
-            _kv(f"animate_doc_{sha}", f"rejected: {str(e)[:200]}")
+            _kv(f"animate_doc_{sha}", f"rejected:{_tries(_kv(f'animate_doc_{sha}') or 'rejected:0') + 1}: {str(e)[:200]}")
             log.warning("rejected %s: %s", title[:60], e)
             continue
         if dry:
