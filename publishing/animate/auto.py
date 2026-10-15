@@ -144,7 +144,10 @@ def author(sha, title, src, rows, feedback=None):
             "\n".join(f"[{r['id']}] amount_cr={r['amount_cr']} category={r['category']}\n  claim: {r['claim']}\n  excerpt: {r['excerpt']}" for r in rows))
     if feedback:
         user += f"\n\nYour previous attempt was rejected: {feedback}\nFix exactly that and write the whole file again."
-    story = _json(_ask(_RULES, user))
+    raw = _ask(_RULES, user, max_tokens=6000)
+    if os.environ.get("ANIMATE_DEBUG"):
+        print("RAW>>>", raw[:1500], "<<<")
+    story = _json(raw)
     story["doc_sha256"] = sha
     story.setdefault("source", {})["title"] = title
     story["source"].setdefault("publisher", "Comptroller and Auditor General of India")
