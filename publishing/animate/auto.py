@@ -44,6 +44,7 @@ _ACRONYM = re.compile(r"\b[A-Z]{2,}\b")
 _SPOKEN_OK = {"I", "II", "III", "IV", "V"}
 
 
+MAX_PASSES_PER_DAY = 3   # each pass can spend ~20 model calls; a failing writer must not burn a day's budget
 MAX_TRIES = 3          # a document the writer cannot ground in this many authoring runs is left alone
 
 
@@ -291,6 +292,11 @@ def run(dry=False, max_stories=1):
     today = date.today().isoformat()
     if not dry and _kv("animate_auto_last") == today:
         log.info("already authored a story today, nothing to do"); return 0
+    if not dry:
+        tries = int(_kv(f"animate_auto_tries_{today}") or 0)
+        if tries >= MAX_PASSES_PER_DAY:
+            log.info("already ran %s authoring passes today without a story, stopping for the day", tries); return 0
+        _kv(f"animate_auto_tries_{today}", str(tries + 1))
     made = 0
     for _, score, sha, title, src in candidates():
         if made >= max_stories:
