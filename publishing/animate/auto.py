@@ -132,7 +132,7 @@ def _json(text):
     m = re.search(r"\{.*\}", text, re.S)
     if not m:
         raise ValueError("no JSON in model output")
-    return json.loads(m.group(0))
+    return json.loads(m.group(0), strict=False)
 
 
 def author(sha, title, src, rows, feedback=None):
@@ -225,8 +225,13 @@ def slug(src, title, sha):
 def attempt(sha, title, src, dry=False):
     rows = findings_for(sha)
     feedback = None
-    for n in (1, 2):
-        story = author(sha, title, src, rows, feedback)
+    for n in (1, 2, 3):
+        try:
+            story = author(sha, title, src, rows, feedback)
+        except ValueError as e:                                  # unparseable JSON: ask again, say why
+            feedback = f"your output was not valid JSON ({e}); escape quotes inside strings and write one object"
+            log.info("attempt %s unparseable: %s", n, e)
+            continue
         story["name"] = slug(src, title, sha)
         try:
             problems = shape_problems(story)
@@ -242,7 +247,7 @@ def attempt(sha, title, src, dry=False):
             return story
         feedback = "; ".join(problems)[:900]
         log.info("%s attempt %s rejected: %s", story["name"], n, feedback)
-    raise RuntimeError(feedback)
+    raise RuntimeError(feedback or "no valid story produced")
 
 
 def run(dry=False, max_stories=1):
