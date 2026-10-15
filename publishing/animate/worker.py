@@ -119,6 +119,25 @@ def render(story_path):
     return mp4, review
 
 
+TG_LIMIT = 19_000_000        # Telegram will not fetch a video over 20 MB by URL, so the review push would fail
+
+
+def fit(mp4):
+    """The same video, re-encoded to fit Telegram's fetch limit when the render is larger. Audio and picture size are untouched."""
+    mp4 = Path(mp4)
+    if mp4.stat().st_size <= TG_LIMIT:
+        return mp4
+    dur = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(mp4)],
+                               capture_output=True, text=True, check=True).stdout)
+    kbps = int(TG_LIMIT * 8 / dur / 1000 * 0.9) - 128
+    out = mp4.with_name("final-tg.mp4")
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(mp4), "-c:v", "libx264", "-preset", "slow", "-b:v", f"{kbps}k",
+                    "-maxrate", f"{int(kbps * 1.3)}k", "-bufsize", f"{kbps * 2}k", "-pix_fmt", "yuv420p", "-c:a", "copy",
+                    "-movflags", "+faststart", str(out)], check=True)
+    log.info("%s: %.1f MB re-encoded to %.1f MB to fit Telegram", mp4.parent.parent.name, mp4.stat().st_size / 1e6, out.stat().st_size / 1e6)
+    return out
+
+
 def caption(story):
     c = (story.get("caption") or "").strip()
     if not c:
@@ -136,13 +155,14 @@ def process(story_path):
         log.info("%s: parked after a failure, skipping (clear with kv_set('animate_parked_%s', ''))", story["name"], story["name"]); return None
     if story.get("run_id"):
         from shared.db import _conn
-        c = _conn(); cur = c.cursor(); cur.execute("SELECT 1 FROM reels WHERE run_id = %s", (story["run_id"],)); had = cur.fetchone(); c.close()
+        c = _conn(); cur = c.cursor(); cur.execute("SELECT 1 FROM reels WHERE run_id = %s AND status NOT IN ('superseded', 'killed')", (story["run_id"],)); had = cur.fetchone(); c.close()
         if had:
             log.info("%s: article run %s already has a reel, skipping", story["name"], story["run_id"]); return None
     elif _run_for(story["name"]):
         log.info("%s: already has a run, skipping", story["name"]); return None
     cap = caption(story)
     mp4, review = render(story_path)
+    mp4 = fit(mp4)
     run_id = story.get("run_id") or _make_run(story)
     reel_id = save_reel(run_id, mp4.read_bytes(), cap, kind="animate", presentation_style="animate")
     update_reel(reel_id, status="held", notes="animate reel, held for the video gate")
