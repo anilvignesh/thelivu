@@ -1,0 +1,8 @@
+targets: ['cag-rajasthan']
+Detected 12 diacritics
+cag-rajasthan: English-Full-Report-06a87eff66d7d72.42670979.pdf — 138 pages, 283783 chars
+cag-rajasthan: AG-Book-English-06a87e4e9757d45.04682900.pdf — 102 pages, 211860 chars
+Detected 10 diacritics
+cag-rajasthan: Road-Sefty-English-06a86df755d4684.42544060.pdf — 102 pages, 202723 chars
+cag-rajasthan: 3 read, 0 already held, 0 failed
+{'read': 3, 'skipped': 0, 'failed': 0}

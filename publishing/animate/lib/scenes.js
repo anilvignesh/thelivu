@@ -57,10 +57,15 @@ function itemT(e, cue, k, n) {
 function backdrop(e) {
   const img = e.beat.data && ASSETS[e.beat.data.bg];
   if (!img) return;
-  const u = clamp((TT - e.t0) / (e.t1 - e.t0)), s = Math.max(W / img.width, H / img.height) * (1.06 + 0.12 * u), iw = img.width * s, ih = img.height * s;
-  ctx.save(); ctx.globalAlpha = 0.5 * runS(e.t0, 0.6);
-  ctx.drawImage(img, (W - iw) / 2 + (30 - 60 * u), (H - ih) / 2 - 40 * u, iw, ih);
-  ctx.globalAlpha = 1; ctx.fillStyle = 'rgba(23,20,13,0.38)'; ctx.fillRect(0, 0, W, H);
+  // the picture is the scene's ground, not a watermark: near full strength, a slow push and drift, and just enough
+  // shade behind the text band (and the footer) to keep the figures readable
+  const u = clamp((TT - e.t0) / (e.t1 - e.t0)), s = Math.max(W / img.width, H / img.height) * (1.08 + 0.2 * u), iw = img.width * s, ih = img.height * s;
+  ctx.save(); ctx.globalAlpha = 0.92 * runS(e.t0, 0.5);
+  ctx.drawImage(img, (W - iw) / 2 + (50 - 100 * u), (H - ih) / 2 - 60 * u, iw, ih);
+  ctx.globalAlpha = 1; ctx.fillStyle = 'rgba(23,20,13,0.22)'; ctx.fillRect(0, 0, W, H);
+  const band = ctx.createLinearGradient(0, 380, 0, 1300);
+  band.addColorStop(0, 'rgba(23,20,13,0)'); band.addColorStop(0.35, 'rgba(23,20,13,0.5)'); band.addColorStop(0.7, 'rgba(23,20,13,0.5)'); band.addColorStop(1, 'rgba(23,20,13,0)');
+  ctx.fillStyle = band; ctx.fillRect(0, 380, W, 920);
   const g = ctx.createLinearGradient(0, 1250, 0, 1920); g.addColorStop(0, 'rgba(23,20,13,0)'); g.addColorStop(1, 'rgba(23,20,13,0.85)');
   ctx.fillStyle = g; ctx.fillRect(0, 1250, W, 670); ctx.restore();
 }

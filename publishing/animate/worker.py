@@ -11,8 +11,7 @@ The workflow, end to end:
   3. Voice: the shared Chatterbox server is started for this pass and released after (reel_worker.ensure_voice/release_voice).
   4. Render with the animate skill (voice alignment, build, export), then its review. A cut-off or overlapping text, or a
      cut off the grid, blocks the reel; narration density and dead beats are reported, not blocking.
-  5. GATE 2, the video: the reel is stored with status 'held' and sent to Telegram with the same Post / Kill buttons every
-     reel has. 'held' is invisible to the autopost sweep, so nothing goes out until a person taps Post.
+  5. GATE 2, the video: a reel that passes every check is stored `ready` and the autopost sweep posts it in the next 10:00/18:00 IST slot (Kill in Telegram stops it); one with a layout WARN, an allegation-only claim, a legal flag or the kill switch is stored `held` for a Post tap.
 
 A story is one `pipeline_runs` row (source 'animate', status 'animate', slug = story name) so the existing reel machinery
 (posting, double-post guard, YouTube cross-post, command center) works unchanged. The status keeps it out of the article
@@ -164,14 +163,62 @@ def process(story_path):
     mp4, review = render(story_path)
     mp4 = fit(mp4)
     run_id = story.get("run_id") or _make_run(story)
+    reasons = needs_review(story, review)
+    auto = not reasons
     reel_id = save_reel(run_id, mp4.read_bytes(), cap, kind="animate", presentation_style="animate")
-    update_reel(reel_id, status="held", notes="animate reel, held for the video gate")
-    log.info("%s: reel #%s held for run #%s", story["name"], reel_id, run_id)
-    from publishing.reel_worker import _notify_reel_ready
-    _notify_reel_ready(reel_id, run_id, story["title"], "animate",
-                       notes="held — tap Post to publish. " + "; ".join(
-                           l.strip() for l in review.splitlines() if "WARN" in l or "FAIL" in l)[:300])
+    update_reel(reel_id, status="ready" if auto else "held",
+                notes="animate reel, clean on every gate: auto-posts at the next slot" if auto else "animate reel, held for review: " + "; ".join(reasons))
+    log.info("%s: reel #%s %s for run #%s%s", story["name"], reel_id, "READY (auto-post)" if auto else "held", run_id, "" if auto else " - " + "; ".join(reasons))
+    _notify(reel_id, run_id, story["title"], reasons)
     return reel_id
+
+
+def needs_review(story, review):
+    """Reasons a person must look before this reel posts. Empty means every gate passed and the autopost sweep may take it.
+
+    The factual gates (grounding, claim verifier, shape) already had to pass for the story to exist. What is left is what no
+    machine here can judge: a layout the review flagged, a claim that is only an allegation, a legal flag, or the kill switch."""
+    from shared.db import kv_get, _conn
+    out = []
+    if kv_get("animate_autopost_off"):
+        out.append("auto-post is switched off (kv animate_autopost_off)")
+    out += [f"layout: {l.strip()}" for l in review.splitlines() if re.match(r"\s*(" + "|".join(BLOCKING) + r")\b", l, re.I) and "WARN" in l]
+    if story.get("run_id"):
+        c = _conn(); cur = c.cursor()
+        cur.execute("SELECT verification_report, legal_flag FROM pipeline_runs WHERE id = %s", (story["run_id"],))
+        rep, legal = cur.fetchone(); c.close()
+        if legal:
+            out.append("the article carries a legal flag")
+        loose = [l for l in (rep or "").splitlines() if l.startswith("|") and re.search(r"allegation|unverified|contested|disputed|partly|partially|unsupported", l, re.I)]
+        if loose:
+            out.append(f"{len(loose)} claim(s) in the article are allegation-only or not fully verified")
+    return out
+
+
+def _next_slot():
+    from datetime import datetime, timedelta, timezone
+    from engine.distribution.sweep import POST_SLOTS_IST
+    ist = datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
+    for add in (0, 1):
+        for h, m in POST_SLOTS_IST:
+            t = (ist + timedelta(days=add)).replace(hour=h, minute=m, second=0, microsecond=0)
+            if t > ist:
+                return t.strftime("%a %H:%M IST")
+
+
+def _notify(reel_id, run_id, title, reasons):
+    from publishing.reel_worker import _tg_post_video
+    base = os.environ.get("SLIDE_SERVER_BASE_URL", "").rstrip("/")
+    if not base:
+        return
+    if reasons:
+        head = f"🎬 Reel #{reel_id} HELD for your review (run #{run_id}, animate)\n{title}\n\nWhy: " + "; ".join(reasons) + "\n\nWatch, then tap Post or Kill."
+    else:
+        head = (f"🎬 Reel #{reel_id} passed every check and posts itself at {_next_slot()} (run #{run_id}, animate)\n{title}\n\n"
+                "Tap Kill before then to stop it. Tap Post to send it now.")
+    keyboard = {"inline_keyboard": [[{"text": "✓ Post now", "callback_data": f"reelapprove_{reel_id}"},
+                                     {"text": "✗ Kill", "callback_data": f"reelkill_{reel_id}"}]]}
+    _tg_post_video(f"{base}/reel/{reel_id}.mp4", head, keyboard)
 
 
 def _park(path, err):
