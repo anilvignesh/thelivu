@@ -5,7 +5,7 @@
 All findings must come from one document. Output is a skeleton, not a script: each beat carries `"_draft": true`
 and its spoken text is the finding's claim verbatim. build_piece refuses to build while any `_draft` remains. The editor
 rewrites each line for the ear (numbers in words, no bare acronyms), picks the scene type, adds the opening illustration,
-and deletes the `_draft` flags. The grounding gate in build_piece then checks every figure and date.
+and deletes the `_draft` flags, writes the `caption`, and sets `"approved": true` (the script gate; the worker skips anything else). The grounding gate in build_piece then checks every figure and date.
 """
 import json
 import os
@@ -45,7 +45,7 @@ def draft(ids):
         if amt:
             beat["_note"] = f"finding {i} carries amount_cr={amt}; consider a figure or compare beat, declare it in `numbers`"
         beats.append(beat)
-    return {"name": "TODO-slug", "title": "TODO", "stamp": "CAG AUDIT · TODO", "doc_sha256": first[1],
+    return {"name": "TODO-slug", "title": "TODO", "stamp": "CAG AUDIT · TODO", "caption": "TODO: plain caption, sources in bio. Derived figures labelled as derived.", "doc_sha256": first[1],
             "source": {"publisher": "Comptroller and Auditor General of India", "title": first[6], "report": "TODO", "place": "TODO"},
             "beats": beats}
 
