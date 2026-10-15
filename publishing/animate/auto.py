@@ -121,6 +121,9 @@ Rules, all enforced by code after you write:
 - Every figure, date, name and claim must come from the excerpts of the findings you cite in "refs" for that beat. Do not round up,
   infer, combine across years, or add context you were not given. If you compute a number (a difference or percentage), set it in
   data as derived and say "derived" on screen via the derived note; the two inputs must be in the cited excerpts.
+- LENGTH: 100 to 165 spoken words in total over 6-8 beats, so about 15-20 words per line and NEVER more than 26. Count them.
+- "numbers" holds digit strings only, exactly as printed in the excerpt ("3,16,000", "June 2024", "69.33"), never number words. Words belong only in "say".
+- Do not total, add or restate: say a figure only as the excerpt states it. A stated percentage is shown as a share; a count as a figure.
 - "numbers": every figure/date string, written exactly as it appears in the cited excerpts, that the beat shows or says.
 - excerpt beats: data.excerpt_of is a finding id, data.mark is a list of exact substrings of that excerpt to highlight (1-2, short).
 - timeline events: at "YYYY-MM", label short. compare: two values with the same unit, data.fmt "inr" for plain counts. list: 2-4 items, each short.
