@@ -12,6 +12,7 @@ pricing pages on 2026-07-26, Gemini re-verified 2026-08-04. `RATES` is the intro
 steward reads it); `cost_usd` is the resolver — model strings in `token_usage`
 are whatever the provider was called with, so matching is substring-based.
 """
+from datetime import date
 
 RATES = {
     # tier          (input, output)  USD per MTok
@@ -38,14 +39,15 @@ RATES = {
     "gemini-pro":    (1.25, 10.00),
     # Gemini 3.8 Flash replaced 2.5 Flash (retiring 2026-10-16) as the default.
     # $0.75/$3.75 through 2026-12-31, then $1.50/$7.50 from 2027-01-01 — CHANGE
-    # THE ROW BELOW THEN. Thinking tokens bill as output. Verified against
+    # THE ROW BELOW THEN (done: it switches by date; re-verify the price page in January). Thinking tokens bill as output. Verified against
     # ai.google.dev/gemini-api/docs/pricing 2026-10-13.
     # Flash OUTPUT was raised to $2.50 (it is $1.00 in plenty of older
     # write-ups, which is where the stale value came from). Verified against
     # ai.google.dev/gemini-api/docs/pricing on 2026-08-04, page updated
     # 2026-07-30. Understating this by 2.5x understated every research call the
     # engine makes — the budget governor's whole job is to be right about this.
-    "gemini":        (0.75,  3.75),   # flash — Gemini 3.8 Flash intro rate, see below
+    "gemini":        (1.50,  7.50) if date.today() >= date(2027, 1, 1) else (0.75, 3.75),   # flash — switches itself on 2027-01-01, see above;
+    # costs are repriced from tokens at read time, so a 30-day view that spans the date shows the older rows at the new rate
     "gemini-lite":   (0.30,  2.50),   # flash-lite (3.5 Flash-Lite: stable price)
     "free":          (0.00,  0.00),   # NVIDIA-hosted Gemma/FLUX, attended work
 }

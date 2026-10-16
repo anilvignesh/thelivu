@@ -1,0 +1,29 @@
+import { defineRailway, github, postgres, preserve, project, service, volume } from "railway/iac";
+
+export default defineRailway(() => {
+  const repo = github("anilvignesh/thelivu", { checkSuites: false });
+
+  const Postgres = postgres("Postgres", { region: "asia-southeast1-eqsg3a" });
+  Postgres.networking = { privateNetworkEndpoint: "postgres", tcpProxies: { "5432": {} } };
+  const thelivuVolume = volume("thelivu-volume", { alerts: { usage: { "100": {}, "80": {}, "95": {} } }, allowOnlineResize: true, region: "asia-southeast1-eqsg3a", sizeMB: 5000 });
+  const postgresVolume = volume("postgres-volume", { alerts: { usage: { "100": {}, "80": {}, "95": {} } }, allowOnlineResize: true, region: "asia-southeast1-eqsg3a", sizeMB: 5000 });
+  const thelivu = service("thelivu", {
+    source: repo,
+    build: { builder: "NIXPACKS" },
+    deploy: { startCommand: "python run.py", restartPolicyType: "ALWAYS" },
+    replicas: { "asia-southeast1-eqsg3a": 1 },
+    volumeMounts: { "/data": thelivuVolume },
+    env: { ANTHROPIC_API_KEY: preserve(), APPROVAL_MODE: preserve(), CLOUDFLARE_ACCOUNT_ID: preserve(), CLOUDFLARE_API_TOKEN: preserve(), DATABASE_URL: preserve(), DB_PATH: preserve(), GEMINI_API_KEY: preserve(), IG_ACCESS_TOKEN: preserve(), IG_USER_ID: preserve(), NIXPACKS_START_CMD: preserve(), NVIDIA_API_KEY: preserve(), SLIDE_SERVER_BASE_URL: preserve(), TELEGRAM_BOT_TOKEN: preserve(), TELEGRAM_CHANNEL_ID: preserve(), TELEGRAM_DRAFT_CHAT_ID: preserve() },
+  });
+  const thelivuAgent = service("thelivu-agent", {
+    source: repo,
+    build: { builder: "NIXPACKS" },
+    deploy: { startCommand: "python run.py", restartPolicyType: "ALWAYS" },
+    replicas: { "asia-southeast1-eqsg3a": 1 },
+    env: { ANTHROPIC_API_KEY: preserve(), APPROVAL_MODE: preserve(), CHANNEL_PUBLIC_URL: preserve(), CHECK_INTERVAL_HOURS: preserve(), CLOUDFLARE_ACCOUNT_ID: preserve(), CLOUDFLARE_API_TOKEN: preserve(), DATABASE_URL: preserve(), DB_PATH: preserve(), DEEPSEEK_API_KEY: preserve(), GEMINI_API_KEY: preserve(), GROQ_API_KEY: preserve(), IG_ACCESS_TOKEN: preserve(), IG_USER_ID: preserve(), MISTRAL_API_KEY: preserve(), NIXPACKS_START_CMD: preserve(), NVIDIA_API_KEY: preserve(), SLIDE_SERVER_BASE_URL: preserve(), TELEGRAM_BOT_TOKEN: preserve(), TELEGRAM_CHANNEL_ID: preserve(), TELEGRAM_DRAFT_CHAT_ID: preserve(), THELIVU_CLAUDE_MODEL: preserve(), YOUTUBE_CLIENT_ID: preserve(), YOUTUBE_CLIENT_SECRET: preserve(), YOUTUBE_REFRESH_TOKEN: preserve() },
+  });
+
+  return project("brave-determination", {
+    resources: [Postgres, thelivu, thelivuAgent, thelivuVolume, postgresVolume],
+  });
+});
