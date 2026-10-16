@@ -10,6 +10,7 @@ Entry point: python -m thelivu_bot.bot
 """
 
 import json
+import os
 import logging
 import sys
 import time
@@ -582,6 +583,7 @@ FYI ONLY (the engine explaining itself, no action needed):
 KEY COMMANDS:
 /pending — everything waiting on you, one card
 /drafts /held /queue /status — what's in the pipeline
+/reels — every reel waiting on you, with its video and Post / Kill
 /topic [text] — submit a story idea
 /remake <reel_id> <notes> — rebuild a reel with what to change
 /dig [theme] — targeted watchlist dig (no theme = scout picks the ripest)
@@ -722,6 +724,35 @@ async def cmd_drafts(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("⏸ Hold",   callback_data=f"hold_{run_id}"),
         ]])
         await update.message.reply_text(text, reply_markup=keyboard)
+
+
+async def cmd_reels(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Every reel waiting on you (held) or waiting for its slot (ready), newest last, each with its video and Post / Kill buttons.
+    The channel scrolls fast; this brings the videos back to the bottom of it."""
+    from shared.db import _conn, _fetchall
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT r.id, r.run_id, r.kind, r.status, r.caption FROM reels r WHERE r.status IN ('held', 'ready') "
+                    "AND NOT EXISTS (SELECT 1 FROM reels p WHERE p.run_id = r.run_id AND p.status = 'posted') "
+                    "AND r.id = (SELECT max(x.id) FROM reels x WHERE x.run_id = r.run_id AND x.status IN ('held', 'ready')) "
+                    "ORDER BY r.id DESC LIMIT 8")
+        rows = list(reversed(_fetchall(cur)))
+    finally:
+        conn.close()
+    if not rows:
+        await update.message.reply_text("No reels waiting.")
+        return
+    base = os.environ.get("SLIDE_SERVER_BASE_URL", "").rstrip("/")
+    await update.message.reply_text(f"{len(rows)} reel(s) waiting. 'held' needs your Post tap; 'ready' posts itself at the next slot unless you Kill it.")
+    for r in rows:
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("✓ Post now", callback_data=f"reelapprove_{r['id']}"),
+                                    InlineKeyboardButton("✗ Kill", callback_data=f"reelkill_{r['id']}")]])
+        cap = f"🎬 Reel #{r['id']} · {r['status'].upper()} · {r['kind']}\n\n{(r.get('caption') or '')[:800]}"
+        try:
+            await update.message.reply_video(video=f"{base}/reel/{r['id']}.mp4", caption=cap[:1024], reply_markup=kb)
+        except Exception as e:                                   # noqa: BLE001
+            await update.message.reply_text(f"{cap[:900]}\n\nVideo link: {base}/reel/{r['id']}.mp4\n(Telegram would not load it inline: {str(e)[:120]})", reply_markup=kb)
 
 
 async def cmd_held(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1761,6 +1792,7 @@ def main():
     app.add_handler(CommandHandler("runnow", cmd_runnow))
     app.add_handler(CommandHandler("republish", cmd_republish))
     app.add_handler(CommandHandler("held", cmd_held))
+    app.add_handler(CommandHandler("reels", cmd_reels))
     app.add_handler(CommandHandler("recheck", cmd_recheck))
     app.add_handler(CommandHandler("reset", cmd_reset))
     app.add_handler(CommandHandler("clearghosts", cmd_clearghosts))
