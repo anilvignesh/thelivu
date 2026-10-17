@@ -108,16 +108,20 @@ SCENE.illustration = (e) => {
 
 // TIMELINE: dated events on an axis, spans between them. Dates are decimal years (2011.46 = June 2011); every label is declared.
 SCENE.timeline = (e) => {
-  const d = e.beat.data, y = 1040, x0 = 130, x1 = 930, X = (v) => x0 + (v - d.from) / (d.to - d.from) * (x1 - x0);
+  const d = e.beat.data, y = 1040, x0 = 130, x1 = 930, num = (v) => { if (typeof v !== 'string') return v; const m = v.match(/^(\d{4})(?:-(\d{1,2}))?/); return m ? +m[1] + ((+m[2] || 1) - 1) / 12 : parseFloat(v); };
+  const lo = num(d.from), hi = Math.max(num(d.to), lo + 1), X = (v) => x0 + (num(v) - lo) / (hi - lo) * (x1 - x0);
+  // events dated too close together (a month, a day) would print on top of each other: spread them evenly in order
+  const slot = (d.events.length > 1 && d.events.some((ev, k) => k && Math.abs(X(ev.at) - X(d.events[k - 1].at)) < 300)) ? (k) => 230 + k * (480 / (d.events.length - 1)) : null;
   fillAll(INK); heads(e);
   const ap = runS(e.t0 + 0.5, 1.0);
   segLine(x0, y, x1, y, DIM, 4, ap);
-  const step = (d.to - d.from) > 14 ? 5 : (d.to - d.from) > 7 ? 2 : 1;
-  for (let yr = Math.ceil(d.from / step) * step; yr <= d.to; yr += step) { segLine(X(yr), y - 10, X(yr), y + 10, DIM, 3, ap); mText(String(yr), X(yr), y + 52, 32, { color: DIM, alpha: ap }); }
+  const step = (hi - lo) > 14 ? 5 : (hi - lo) > 7 ? 2 : 1;
+  for (let yr = Math.ceil(lo / step) * step; yr <= Math.floor(hi); yr += step) { segLine(X(yr), y - 10, X(yr), y + 10, DIM, 3, ap); mText(String(yr), X(yr), y + 52, 32, { color: DIM, alpha: ap }); }
   d.events.forEach((ev, k) => {
     const t = itemT(e, ev.cue, k, d.events.length), p = runS(t, 0.7), col = ev.kind === 'late' ? LATE : GOLD, h = k % 2 ? 300 : 170;
-    segLine(X(ev.at), y, X(ev.at), y - h, col, 5, p);
-    const lines = wrapLines(ev.label, 300, 38), cx = Math.min(Math.max(X(ev.at), 290), 780);
+    const ex = slot ? slot(k) : X(ev.at);
+    segLine(ex, y, ex, y - h, col, 5, p);
+    const lines = wrapLines(ev.label, 300, 38), cx = Math.min(Math.max(ex, 290), 780);
     lines.forEach((s, i) => fade(s, cx, y - h - 14 - (lines.length - 1 - i) * 46, 38, runS(t + 0.2, 0.7), col === GOLD ? CREAM : LATE, { align: 'center' }));
   });
   (d.spans || []).forEach((sp, k) => {
@@ -181,7 +185,7 @@ SCENE.compare = (e) => {
 
 // SHARE: a declared percentage as 100 dots, counted up; the red dots are the share that went wrong
 SCENE.share = (e) => {
-  const d = e.beat.data, t = itemT(e, d.cue, 0, 1), sp = 66, x0 = CX - 4.5 * sp, y0 = 760, col = d.color === 'gold' ? GOLD : LATE;
+  const d = e.beat.data, t = itemT(e, d.cue, 0, 1), sp = 60, x0 = CX - 4.5 * sp, y0 = 750, col = d.color === 'gold' ? GOLD : LATE;
   fillAll(INK); heads(e);
   const v = keysM([[t, 0], [t + 1.8, d.value]]);
   const fw = textW(d.value.toFixed(d.decimals ?? 0) + '%', 130, { bold: true });
@@ -191,7 +195,7 @@ SCENE.share = (e) => {
     ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, 22, 0, Math.PI * 2);
     ctx.globalAlpha = 0.9; ctx.fillStyle = on > 0 ? rgbaM(col, 0.25 + 0.75 * on) : rgbaM(DIM, 0.16); ctx.fill(); ctx.restore();
   }
-  wrapLines(d.label, 820, 42).forEach((r, i) => fade(r, CX, 1440 + i * 54, 42, runS(t + 1.6, 0.8), CREAM, { align: 'center' }));
+  wrapLines(d.label, 880, 42).forEach((r, i) => fade(r, CX, 1385 + i * 50, 42, runS(t + 1.6, 0.8), CREAM, { align: 'center' }));
   furniture();
 };
 

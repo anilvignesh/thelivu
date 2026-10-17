@@ -237,6 +237,11 @@ def _fetch_bytes(url, timeout=180):
 
     from engine.digger import robots
 
+    from urllib.parse import quote
+
+    # CAG's CDN paths carry raw spaces ("Civil Report PSU-2019 04-9-2021.pdf");
+    # urllib refuses them, so five offices read nothing. Encode only what is unsafe.
+    url = quote(url, safe=":/?&=%#@+,;~!$'()*[]")
     robots.check(url)
     req = urllib.request.Request(
         url, headers={"User-Agent": "ThelivuDigger/1.0 (+https://thelivu.com)"})
