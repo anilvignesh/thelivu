@@ -11,7 +11,7 @@ The workflow, end to end:
   3. Voice: the shared Chatterbox server is started for this pass and released after (reel_worker.ensure_voice/release_voice).
   4. Render with the animate skill (voice alignment, build, export), then its review. A cut-off or overlapping text, or a
      cut off the grid, blocks the reel; narration density and dead beats are reported, not blocking.
-  5. GATE 2, the video: a reel that passes every check is stored `ready` and the autopost sweep posts it in the next 10:00/18:00 IST slot (Kill in Telegram stops it); one with a layout WARN, an allegation-only claim, a legal flag or the kill switch is stored `held` for a Post tap.
+  5. GATE 2, the video: a reel that passes every check is stored `ready` and the autopost sweep posts it in the next 10:00/18:00 IST slot (Kill in Telegram stops it); only a legal flag or the kill switch stores it `held` for a Post tap.
 
 A story is one `pipeline_runs` row (source 'animate', status 'animate', slug = story name) so the existing reel machinery
 (posting, double-post guard, YouTube cross-post, command center) works unchanged. The status keeps it out of the article
@@ -177,21 +177,18 @@ def needs_review(story, review):
     """Reasons a person must look before this reel posts. Empty means every gate passed and the autopost sweep may take it.
 
     The factual gates (grounding, claim verifier, shape) already had to pass for the story to exist. What is left is what no
-    machine here can judge: a layout the review flagged, a claim that is only an allegation, a legal flag, or the kill switch."""
+    machine here can judge: a legal flag or the kill switch. Anil, 2026-10-18: "Let it be posted, I'll delete from Instagram if it's troublesome" - layout WARNs and
+    attributed allegations no longer hold a reel; Kill in Telegram stays as a veto."""
     from shared.db import kv_get, _conn
     out = []
     if kv_get("animate_autopost_off"):
         out.append("auto-post is switched off (kv animate_autopost_off)")
-    out += [f"layout: {l.strip()}" for l in review.splitlines() if re.match(r"\s*(" + "|".join(BLOCKING) + r")\b", l, re.I) and "WARN" in l]
     if story.get("run_id"):
         c = _conn(); cur = c.cursor()
-        cur.execute("SELECT verification_report, legal_flag FROM pipeline_runs WHERE id = %s", (story["run_id"],))
-        rep, legal = cur.fetchone(); c.close()
+        cur.execute("SELECT legal_flag FROM pipeline_runs WHERE id = %s", (story["run_id"],))
+        (legal,) = cur.fetchone(); c.close()
         if legal:
             out.append("the article carries a legal flag")
-        loose = [l for l in (rep or "").splitlines() if l.startswith("|") and re.search(r"allegation|unverified|contested|disputed|partly|partially|unsupported", l, re.I)]
-        if loose:
-            out.append(f"{len(loose)} claim(s) in the article are allegation-only or not fully verified")
     return out
 
 

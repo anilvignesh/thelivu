@@ -219,7 +219,9 @@ def _eligible_ranked(items, get_run_fn):
         if not _autopublish_eligible(run):
             continue
         out.append((run, item))
+    # animate reels (fact-checked, current) go ahead of the older reel backlog; the slots then space them one per window
     out.sort(key=lambda pair: (0 if ((pair[0] or {}).get("desk") or "news") == "news" else 1,
+                                0 if pair[1].get("kind") == "animate" else 1,
                                 pair[1]["id"]))
     return out
 
