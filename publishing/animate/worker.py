@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -102,6 +103,13 @@ def render(story_path):
             log.warning("%s: voice synthesis attempt %s failed: %s", story["name"], attempt, out[-200:].replace("\n", " "))
     if any(not (piece / "voice" / f"{l['id']}.wav").exists() for l in script):
         raise RuntimeError("voice synthesis failed after 3 attempts")
+    try:
+        return _render_steps(piece)
+    finally:                                    # the frames are 2.7GB a piece and rebuilt by export; the mp4 is what is kept (the VM disk filled up on 2026-10-18)
+        shutil.rmtree(piece / "frames", ignore_errors=True)
+
+
+def _render_steps(piece):
     for label, cmd in (("voice align", ["node", "tools/voice.mjs", str(piece)]),
                        ("build", ["node", "tools/build.mjs", str(piece)]),
                        ("export", ["node", "tools/export.mjs", str(piece), "--share", "--workers", "2"])):
@@ -234,7 +242,28 @@ def _park(path, err):
         log.warning("could not park/alert: %s", e)
 
 
+MIN_FREE_BYTES = 8_000_000_000      # one export needs about 3GB of frames; below this, stop and say so instead of failing mid-render
+
+
+def _disk_guard():
+    free = shutil.disk_usage(PIECES).free
+    if free < MIN_FREE_BYTES:
+        msg = f"⚠️ Animate worker stopped: only {free / 1e9:.1f} GB free on the VM (needs {MIN_FREE_BYTES / 1e9:.0f}). Old frames or renders need clearing."
+        log.error(msg)
+        try:
+            import requests
+            tok, chat = os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
+            if tok and chat:
+                requests.post(f"https://api.telegram.org/bot{tok}/sendMessage", json={"chat_id": chat, "text": msg}, timeout=20)
+        except Exception:                                        # noqa: BLE001
+            pass
+        return False
+    return True
+
+
 def main(argv):
+    if not _disk_guard():
+        return 1
     from publishing.animate.auto import OUT
     paths = [Path(a) for a in argv] or sorted(STORIES.glob("*/story.json")) + sorted(OUT.glob("*/story.json"))
     failed = 0
