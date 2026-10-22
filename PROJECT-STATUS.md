@@ -1,3 +1,5 @@
+> **Superseded for current state by `docs/wiki/` (2026-10-22).** Start there. This file is kept as history.
+
 # Thelivu — Project Status & Continuation Guide
 
 *Read this to pick up the project where the build session left off. It's the living
