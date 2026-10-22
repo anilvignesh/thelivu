@@ -25,12 +25,12 @@ def check(name, got, want):
 
 
 GAP_TABLE = [   # sanctioned vs actual — the shortfall is what did not arrive
-    {"state_ut": "Kerala",   "sanctioned_budget": "100", "actual_expenditure": "95"},
-    {"state_ut": "Gujarat",  "sanctioned_budget": "200", "actual_expenditure": "186"},
-    {"state_ut": "Bihar",    "sanctioned_budget": "800", "actual_expenditure": "590"},
-    {"state_ut": "Assam",    "sanctioned_budget": "150", "actual_expenditure": "142"},
-    {"state_ut": "Punjab",   "sanctioned_budget": "120", "actual_expenditure": "113"},
-    {"state_ut": "Odisha",   "sanctioned_budget": "180", "actual_expenditure": "170"},
+    {"state_ut": "Kerala",   "sanctioned_expenditure": "100", "actual_expenditure": "95"},
+    {"state_ut": "Gujarat",  "sanctioned_expenditure": "200", "actual_expenditure": "186"},
+    {"state_ut": "Bihar",    "sanctioned_expenditure": "800", "actual_expenditure": "590"},
+    {"state_ut": "Assam",    "sanctioned_expenditure": "150", "actual_expenditure": "142"},
+    {"state_ut": "Punjab",   "sanctioned_expenditure": "120", "actual_expenditure": "113"},
+    {"state_ut": "Odisha",   "sanctioned_expenditure": "180", "actual_expenditure": "170"},
 ]
 
 SHARE_TABLE = [  # projects vs delayed — the story is the affected proportion
@@ -69,13 +69,13 @@ def t_outliers_are_judged_against_the_table_not_a_threshold():
     check("the outlier is flagged", "Bihar" in flagged, True)
     check("the ordinary rows are not", "Kerala" in flagged or "Assam" in flagged, False)
 
-    uniform = [{"state_ut": s, "sanctioned_budget": "100", "actual_expenditure": "60"}
+    uniform = [{"state_ut": s, "sanctioned_expenditure": "100", "actual_expenditure": "60"}
                for s in ("A", "B", "C", "D", "E", "F")]
     check("a uniformly bad table flags nobody", dw.examine(uniform)["anomalies"], [])
 
 
 def t_near_total_gap_is_flagged_even_without_peers():
-    rows = [{"state_ut": s, "sanctioned_budget": "100", "actual_expenditure": v}
+    rows = [{"state_ut": s, "sanctioned_expenditure": "100", "actual_expenditure": v}
             for s, v in [("A", "98"), ("B", "97"), ("C", "99"), ("D", "96"), ("E", "0")]]
     out = dw.examine(rows)
     flagged = {a["key"]: a for a in out["anomalies"]}
@@ -87,8 +87,8 @@ def t_near_total_gap_is_flagged_even_without_peers():
 def t_small_denominators_are_excluded():
     """2 of 3 is not a 67% failure rate in any useful sense, and small
     denominators generate most false anomalies."""
-    rows = [{"state_ut": "Tiny", "sanctioned_budget": "3", "actual_expenditure": "1"},
-            {"state_ut": "Real", "sanctioned_budget": "500", "actual_expenditure": "480"}]
+    rows = [{"state_ut": "Tiny", "sanctioned_expenditure": "3", "actual_expenditure": "1"},
+            {"state_ut": "Real", "sanctioned_expenditure": "500", "actual_expenditure": "480"}]
     out = dw.examine(rows)
     check("tiny row excluded", list(out["state"]), ["Real"])
 

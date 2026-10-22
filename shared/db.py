@@ -1,6 +1,9 @@
 import json
+import logging
 import os
 from datetime import datetime, timezone
+
+log = logging.getLogger(__name__)
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 

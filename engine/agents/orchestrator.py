@@ -1274,11 +1274,11 @@ def _run_topic_intake(pending):
     except Exception as e:
         # Provider outage → requeue and wait; a content/code failure that keeps
         # breaking gets capped and dropped so it can't head-of-line-block the queue.
+        failure = f"repeated failures: {e}"      # bound now: `e` is unbound once this block ends
         _route_spine_failure(
             None, topic_text[:120], e, fail_key=f"topicfail_{topic_id}",
             requeue_fn=lambda: requeue_topic(topic_id),
-            drop_fn=lambda: finish_topic(topic_id, "abandoned",
-                                         reason=f"repeated failures: {e}"),
+            drop_fn=lambda: finish_topic(topic_id, "abandoned", reason=failure),
         )
         return
 

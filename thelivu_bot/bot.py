@@ -1532,7 +1532,7 @@ async def _handle_approve(query, run_id, run):
     if msg_ids and TELEGRAM_CHANNEL_ID:
         ch = TELEGRAM_CHANNEL_ID.lstrip("@")
         try:
-            ch_int = abs(int(ch.lstrip("-100")))
+            ch_int = int(ch.removeprefix("-100"))
             channel_link = f"\nt.me/c/{ch_int}/{msg_ids[0]}"
         except ValueError:
             channel_link = f"\nt.me/{ch}/{msg_ids[0]}"

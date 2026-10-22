@@ -373,7 +373,6 @@ def run_once():
     # design — most passes find nothing here (Anil, 2026-09-11: "if we find
     # something substantial which needs a long video we do that").
     try:
-        from publishing.longform_build import render_pending
         # Re-imported every pass rather than held from process start: this
         # service runs for days, and on 2026-09-13 a pass executing code from
         # before a fix clobbered a live render that was using the fixed code.
