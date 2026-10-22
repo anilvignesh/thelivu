@@ -63,37 +63,12 @@ def _split_chunks(text):
     return chunks
 
 
-def _strip_draft_scaffolding(text):
-    """Drop the writer's review-only header so it never reaches the channel.
-    Shared implementation lives in publishing.parser (the orchestrator's
-    preview path uses the same one)."""
-    from publishing.parser import strip_scaffolding
-    return strip_scaffolding(text)
-
-
 def _prepare_for_publish(text):
     """Turn an approved draft into exactly what goes to the channel. Shared
     implementation in publishing.parser — the /a/ article pages use the same
     one, so channel and web always show identical text."""
     from publishing.parser import prepare_for_publish
     return prepare_for_publish(text, CONTACT_HANDLE)
-
-
-def _post_html_to_channel(html_text):
-    """Post a single HTML-formatted message to the channel (the teaser). Web
-    preview stays on so Telegram renders the Telegraph Instant-View card."""
-    r = requests.post(
-        f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-        json={
-            "chat_id": TELEGRAM_CHANNEL_ID,
-            "text": html_text,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": False,
-        },
-        timeout=30,
-    )
-    r.raise_for_status()
-    return [r.json()["result"]["message_id"]]
 
 
 def _post_to_channel(text):

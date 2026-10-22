@@ -348,24 +348,6 @@ def repeated_figures(parsed):
     return sorted(out, key=lambda p: -p[1])
 
 
-def _no_evidence_chapters(parsed):
-    """Chapters carrying no figure, table, record, photo or clip.
-
-    A chapter whose only declared asset is a generated illustration has nothing
-    to show. On the first skill-written script that was chapter 5 — the one that
-    adds the findings up, which is exactly where a viewer wants the numbers
-    back on screen.
-    """
-    out = []
-    for c in parsed.get("chapters", []):
-        hard = sum(len(c.get(k) or [])
-                   for k in ("figures", "tables", "records", "photos", "clips"))
-        if not hard:
-            out.append(f"Chapter {c['n']} ({c['title']}) declares no figure, "
-                       f"table or record — nothing to show but an illustration")
-    return out
-
-
 def _frame_mix(parsed):
     """One line on how much of the video the safety net would be carrying.
 

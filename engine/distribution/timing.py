@@ -159,20 +159,3 @@ def _hours_until_daypart(now_utc, daypart_name):
             return (target - ist_now).total_seconds() / 3600.0
     return 0.0
 
-
-def format_time_priors_block(priors=None, now=None):
-    """Human-readable block — for /timepriors and the command centre, same pattern
-    as learning.format_priors_block."""
-    priors = priors if priors is not None else compute_time_priors(now)
-    if not priors:
-        return "No posting-time data yet."
-    lines = ["LEARNED POSTING-TIME PRIORS (advisory, provisional — see module docstring):"]
-    by_type = {}
-    for (t, dp), (score, n) in priors.items():
-        by_type.setdefault(t, []).append((dp, score, n))
-    for t, entries in by_type.items():
-        lines.append(f"  {t}:")
-        for dp, score, n in sorted(entries, key=lambda e: -e[1]):
-            flag = "" if n >= MIN_EFFECTIVE_N else "  (low confidence)"
-            lines.append(f"    {dp:12s} score={score:.2f} n_eff={n}{flag}")
-    return "\n".join(lines)

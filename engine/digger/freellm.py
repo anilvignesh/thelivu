@@ -132,13 +132,6 @@ def complete(prompt, model=None, max_tokens=800, temperature=0.0, timeout=90):
     return text
 
 
-def routed_model(response_json):
-    """freellmapi reports which provider/model actually served a request in
-    `_routed_via` — worth recording, since 'auto' says nothing by itself."""
-    via = (response_json or {}).get("_routed_via") or {}
-    return via.get("model") or (response_json or {}).get("model") or "unknown"
-
-
 def ping(timeout=10):
     try:
         with urllib.request.urlopen(f"{base_url()}/api/ping", timeout=timeout) as r:

@@ -180,11 +180,6 @@ def _same_finding(a, b, threshold=0.4):
     return len(shared) / min(len(ta), len(tb)) >= threshold
 
 
-def _key(finding):
-    """Stable label for a finding, used only for reporting."""
-    return " ".join(sorted(_tokens(finding))[:8])
-
-
 def cross_check(doc, brief, model_a=None, model_b=None):
     """Two different models read the same document.
 

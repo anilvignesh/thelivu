@@ -270,17 +270,6 @@ def _permalink(media_id):
         return ""
 
 
-def publish_photo(image_url, caption=""):
-    """Publish one image (already at a public image_url) to the configured IG
-    account. Returns (media_id, permalink). Raises IGNotConfigured if the Meta
-    app isn't set up, or IGPublishError on any Graph API failure."""
-    _require_config()
-    container_id = _create_container(image_url, caption)
-    _wait_until_ready(container_id)
-    media_id = _publish_container(container_id, caption=caption)
-    return media_id, _permalink(media_id)
-
-
 def publish_reel(video_url, caption="", progress=None):
     """Publish a single vertical video as an Instagram Reel. Returns
     (media_id, permalink). Three steps: create a REELS container from a public

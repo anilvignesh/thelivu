@@ -140,12 +140,6 @@ def clause_caption(line):
     return raw
 
 
-def _fallback_scene(line):
-    """A scene when no model wrote one. `illustrate.scene_from_beat` already does
-    this from the caption, so this only needs to exist for the script text."""
-    return ""
-
-
 def dress_spine(lines, *, headline="", series="", place="", timeout=300):
     """Ask the free NVIDIA-hosted model for captions, scenes and hashtags.
 

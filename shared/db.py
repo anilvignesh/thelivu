@@ -3118,43 +3118,6 @@ def count_youtube_crossposts_today():
         conn.close()
 
 
-def most_recent_ig_post_at():
-    """The latest real post time, or None if nothing's ever posted. Added
-    2026-08-17 for the autopublish sweep's posting cooldown
-    (engine/distribution/sweep.py).
-
-    FIXED 2026-08-18 — this was a real incident, not a hypothetical: it
-    originally read only ig_media.posted_at (populated by the Instagram API
-    sync, engine/agents/ig_insights.py, on a 6-hour cadence) because
-    reels.posted_at / carousel_runs.posted_at were unset on every row at the
-    time this was written. Later THE SAME DAY, publish.py was fixed to
-    actually set those columns — but this function never got updated to
-    match, so the cooldown kept reading a signal that could be up to 6 hours
-    stale. Consequence, caught 2026-08-18: 6 backlog reels posted within 9
-    minutes of each other, because every cooldown check saw the last IG-sync
-    timestamp from the day before and concluded nothing had posted recently.
-    Exactly the burst-posting pattern this function exists to prevent.
-
-    Now takes the MAX across reels.posted_at, carousel_runs.posted_at (set
-    immediately at post time) AND ig_media.posted_at (the synced cross-check,
-    kept as a fallback/second signal, not the only one)."""
-    conn = _conn()
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT max(posted_at) FROM ("
-            "SELECT posted_at FROM reels WHERE posted_at IS NOT NULL "
-            "UNION ALL "
-            "SELECT posted_at FROM carousel_runs WHERE posted_at IS NOT NULL "
-            "UNION ALL "
-            "SELECT posted_at FROM ig_media WHERE posted_at IS NOT NULL"
-            ") t")
-        row = cur.fetchone()
-        return row[0] if row else None
-    finally:
-        conn.close()
-
-
 def get_ready_reels():
     """The LATEST reel waiting for its Post tap, one per run — one query, NOT a
     per-run lookup. Added 2026-08-16 alongside the autopublish sweep.
@@ -4127,19 +4090,6 @@ def record_archived_doc(sha256, url, final_url=None, content_type=None,
             row)
         conn.commit()
         return sha256
-    finally:
-        conn.close()
-
-
-def archived_doc(sha256):
-    """One archived document's row, or None."""
-    conn = _conn()
-    try:
-        cur = conn.cursor()
-        ph = "%s" if _is_postgres() else "?"
-        cur.execute(f"SELECT * FROM archived_docs WHERE sha256 = {ph}", (sha256,))
-        rows = _fetchall(cur)
-        return rows[0] if rows else None
     finally:
         conn.close()
 

@@ -522,12 +522,3 @@ def attribution(candidate):
         bits.insert(0, candidate["date"])
     return " · ".join(b for b in bits if b) + " · Wikimedia Commons"
 
-
-def as_photo_line(candidate, shows):
-    """Format a candidate as the CHAPTER n PHOTO: line a script would carry.
-
-    `shows` is the human's claim about what the picture depicts, and it is the
-    part no API can supply — see the module docstring.
-    """
-    return (f"{shows} | {candidate['url']} | {candidate['licence']}, "
-            f"{candidate['author']} | {candidate.get('date') or ''}").rstrip(" |")

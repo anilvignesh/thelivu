@@ -181,15 +181,6 @@ def spooled():
     return out
 
 
-def drop_spooled(blob):
-    """Remove a document from the spool once it is safely stored elsewhere."""
-    for p in (blob, blob.with_suffix(blob.suffix + ".json")):
-        try:
-            p.unlink()
-        except FileNotFoundError:
-            pass
-
-
 # --------------------------------------------------------------------------
 # Archive — the laptop side. Permanent.
 # --------------------------------------------------------------------------

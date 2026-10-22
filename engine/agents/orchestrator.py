@@ -30,7 +30,6 @@ from shared.config import (
     WATCHLIST_YAML,
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_DRAFT_CHAT_ID,
-    GEMINI_API_KEY,
     APPROVAL_MODE,
     ARTICLES_DIR,
     DRY_RUN_LOG,
@@ -209,31 +208,6 @@ def _extract_claims_via_skill(url, transcript=None):
     raise ValueError("source-ingestor did not return valid JSON")
 
 
-def _ingest_via_gemini(video_url):
-    from google import genai
-    from shared.config import GEMINI_MODEL
-    from google.genai import types
-    client = genai.Client(api_key=GEMINI_API_KEY)
-    prompt = (
-        "Extract from this video (faithfully, without endorsing):\n"
-        "1. throughline: the video's central argument in 1-2 sentences.\n"
-        "2. claims: each discrete factual assertion with timestamp, provisional "
-        "bucket (fact|allegation|inference), and any source the video cites.\n"
-        "3. notable_visuals: any on-screen documents or figures that carry meaning "
-        "the audio alone does not.\n\n"
-        'Return ONLY valid JSON: {"throughline":"...","claims":[...],"notable_visuals":[...]}'
-    )
-    resp = client.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=types.Content(parts=[
-            types.Part(file_data=types.FileData(file_uri=video_url)),
-            types.Part(text=prompt),
-        ]),
-    )
-    text = re.sub(r"^```(?:json)?|```$", "", resp.text.strip(), flags=re.MULTILINE).strip()
-    return json.loads(text)
-
-
 def ingest_source(source):
     """Fetch RSS, return list of new lead dicts (deduped against seen_items)."""
     feed_url = source.get("feed")
@@ -399,38 +373,6 @@ def _tg_post(chat_id, text, reply_markup=None, parse_mode=None):
         _tg_post.last_error = f"{type(e).__name__}: {e}"[:500]
         log.error("Telegram send failed: %s", e)
         return None
-
-
-def _tg_post_photo(chat_id, photo_path, caption="", reply_markup=None):
-    """Send a local image file as a Telegram photo message. Returns
-    (message_id, file_url) — file_url is Telegram's own CDN link for the
-    largest photo size Telegram generated, reusable as a public image_url
-    elsewhere (Instagram's Graph API needs one). Telegraph's unofficial
-    upload endpoint proved too unreliable ("Unknown error" on valid images)
-    to depend on for this."""
-    payload = {"chat_id": str(chat_id)}
-    if caption:
-        payload["caption"] = caption[:1024]
-    if reply_markup:
-        payload["reply_markup"] = json.dumps(reply_markup)
-    try:
-        with open(photo_path, "rb") as f:
-            r = requests.post(
-                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto",
-                data=payload,
-                files={"photo": f},
-                timeout=30,
-            )
-        r.raise_for_status()
-        result = r.json().get("result", {})
-        message_id = result.get("message_id")
-        photos = result.get("photo") or []
-        file_id = photos[-1]["file_id"] if photos else None
-        file_url = _tg_file_url(file_id) if file_id else None
-        return message_id, file_url
-    except Exception as e:
-        log.error("Telegram photo send failed: %s", e)
-        return None, None
 
 
 def _tg_file_url(file_id):

@@ -112,11 +112,6 @@ def fetch_instagram(url, timeout=30):
     }
 
 
-def youtube_id(url):
-    m = _YT_RE.search(url or "")
-    return m.group(1) if m else None
-
-
 def _get(url, tries=6):
     """GET with backoff — Indian ISPs reset connections to many hosts (HANDOFF §5)."""
     last = None

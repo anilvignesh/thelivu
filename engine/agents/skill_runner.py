@@ -474,32 +474,6 @@ def _run_gemini(skill_name, input_text, system_prompt, max_tokens, run_id=None,
     return text.strip()
 
 
-def _run_openai_compat(client, model, skill_name, input_text, system_prompt,
-                        max_tokens, run_id=None):
-    """Shared runner for Groq, DeepSeek, Mistral (all OpenAI-compatible)."""
-    from shared.db import record_usage
-
-    log.info("Running %s via %s", skill_name, model)
-    response = client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user",   "content": input_text},
-        ],
-        max_tokens=max_tokens,
-        temperature=0.3,
-    )
-    try:
-        u = response.usage
-        record_usage(skill=skill_name, model=model,
-                     input_tokens=u.prompt_tokens,
-                     output_tokens=u.completion_tokens,
-                     run_id=run_id)
-    except Exception:
-        pass
-    return response.choices[0].message.content.strip()
-
-
 def _run_nvidia(skill_name, input_text, system_prompt, max_tokens, run_id=None):
     """Presentation-side skills (carousel / video) via free NVIDIA-hosted Gemma 4.
     OpenAI-compatible endpoint, called with plain requests (no extra SDK). NVIDIA has
