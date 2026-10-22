@@ -16,7 +16,6 @@ shared/config.py. Until set, YouTubeNotConfigured is raised so callers degrade
 gracefully — same contract as IGNotConfigured in instagram.py.
 """
 import logging
-import time
 
 import requests
 

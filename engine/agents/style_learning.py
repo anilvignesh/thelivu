@@ -66,7 +66,7 @@ def compute_style_scores(now=None):
     comments + saved + shares, over reach) per presentation_style, using each
     reel's latest available metrics snapshot. Reads the DB directly — stateless,
     recomputed on every call, same as compute_learned_priors()."""
-    from shared.db import _conn, _is_postgres
+    from shared.db import _conn
     now = now or datetime.now(timezone.utc)
     conn = _conn()
     try:

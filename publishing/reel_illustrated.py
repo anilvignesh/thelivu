@@ -22,7 +22,6 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from publishing.slides import SERIF_BOLD, MONO, MONO_BOLD, PALETTE, _font
-import publishing.reel as reel
 from publishing.reel import W, H, _draw_emph_block
 
 log = logging.getLogger("reel_illustrated")

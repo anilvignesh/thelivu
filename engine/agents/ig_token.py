@@ -36,7 +36,7 @@ an expiry.
 
 import logging
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 log = logging.getLogger("ig_token")
 
@@ -122,7 +122,7 @@ def refresh_due():
 
 def refresh(force=False):
     """Exchange the current token for a fresh 60-day one. Returns a status str."""
-    from shared.db import kv_get, kv_set
+    from shared.db import kv_set
     token = current_token()
     if not token:
         return "no IG token configured"

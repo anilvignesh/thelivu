@@ -49,7 +49,6 @@ def _configured_models():
     same way the real call sites resolve them — env override first, else the
     module default — so this checks what's ACTUALLY in use, not a hardcoded
     guess that drifts out of sync with a future model swap."""
-    import os
     models = set()
     try:
         from publishing.make_reel import _NVIDIA_SCRIPT_MODEL

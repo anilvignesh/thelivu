@@ -52,7 +52,7 @@ if service == "thelivu-agent":
 
     _cost_report_sent_date = None
 
-    from shared.db import pop_next_topic, finish_topic
+    from shared.db import pop_next_topic
 
     # Seed the RSS timer from the last completed cycle so a redeploy doesn't
     # immediately run a fresh (token-spending) cycle — every push was

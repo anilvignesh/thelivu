@@ -21,7 +21,6 @@ Usage:
 """
 import argparse
 import sys
-import textwrap
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont

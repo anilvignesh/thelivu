@@ -23,8 +23,7 @@ from datetime import datetime, timezone
 
 # Shared engine helpers (respect DATABASE_URL — same DB the dashboard talks to).
 from shared.db import (
-    list_digs, get_dig, get_dig_updates, create_dig, update_dig, add_dig_update,
-    queue_ingest, kv_get, kv_set,
+    list_digs, get_dig_updates, create_dig, update_dig, queue_ingest, kv_get, kv_set,
 )
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -1270,7 +1269,7 @@ with t_tasks:
         if sig_key:
             if jc4.button("Run now", key=f"job_{last_key}_{sig_key}", use_container_width=True):
                 signal(sig_key, sig_val)
-                st.success(f"Signalled — runs within ~2 min."); st.cache_data.clear()
+                st.success("Signalled — runs within ~2 min."); st.cache_data.clear()
         else:
             jc4.caption("automatic")
 

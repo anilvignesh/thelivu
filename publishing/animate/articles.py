@@ -16,7 +16,6 @@ rejection counter as auto.py. Stories land in ANIMATE_STORIES, held for the Tele
 """
 import argparse
 import json
-import logging
 import re
 import sys
 

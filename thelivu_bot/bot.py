@@ -9,7 +9,6 @@ Handles the human approval gate:
 Entry point: python -m thelivu_bot.bot
 """
 
-import json
 import os
 import logging
 import sys
@@ -27,11 +26,10 @@ from telegram.ext import (
 from shared.config import (
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_CHANNEL_ID,
-    TELEGRAM_DRAFT_CHAT_ID,
     CONTACT_HANDLE,
     SLIDE_SERVER_BASE_URL,
 )
-from shared.db import get_run, get_pending_runs, get_cost_report_data, get_queue_state, kv_get, kv_set, init_db, save_publication, update_run, queue_topic, approve_proposal, skip_proposal, reset_run_for_review, get_recheckable_runs, clear_agents_for_run, clear_stale_agents, clear_stale_topics, deactivate_approved_source, get_approved_sources, queue_carousel_run, get_carousel_run, update_carousel_run, get_carousel_slides, add_bio_link, list_bio_links, delete_bio_link, set_bio_link_pinned, set_run_slug, get_reel, update_reel
+from shared.db import get_run, get_pending_runs, get_cost_report_data, get_queue_state, kv_get, kv_set, init_db, update_run, queue_topic, approve_proposal, skip_proposal, reset_run_for_review, get_recheckable_runs, clear_agents_for_run, clear_stale_agents, clear_stale_topics, deactivate_approved_source, get_approved_sources, get_carousel_run, update_carousel_run, add_bio_link, list_bio_links, delete_bio_link, set_bio_link_pinned, get_reel, update_reel
 
 logging.basicConfig(
     level=logging.INFO,
@@ -375,7 +373,7 @@ async def cmd_feeds(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append(f"    {lean}")
 
     if candidates:
-        lines.append(f"\nCandidates (not yet active):")
+        lines.append("\nCandidates (not yet active):")
         for s in candidates:
             lines.append(f"  ? {s['name']} — {s.get('notes','')[:60]}")
 

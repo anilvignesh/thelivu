@@ -41,7 +41,7 @@ os.environ["THELIVU_ATTENDED"] = "1"
 from shared import quota                                    # noqa: E402
 from shared.config import REPO_ROOT                          # noqa: E402
 from shared.db import (init_db, kv_get, queue_topic, pop_next_topic,  # noqa: E402
-                       get_queued_leads, get_runs_by_status, _conn, _fetchall)
+                       get_runs_by_status, _conn, _fetchall)
 from engine.agents.skill_runner import ATTEND_DIR_NAME       # noqa: E402
 
 log = logging.getLogger("attend")
@@ -216,7 +216,6 @@ def cmd_reel(args):
     the model step — it points you here. This is the path that actually builds it.
     """
     from publishing.make_reel import make_narrated_reel
-    from shared.db import get_reel_for_run
 
     run_id = args.run_id
     _preamble(f"reel for run #{run_id}")
@@ -246,8 +245,8 @@ def cmd_reel(args):
         print(f"\n  ✓ reel #{rid} built — {res.get('kind', 'narrated')}, "
               f"{res['beats']} beats, {res['size_kb']} KB.")
         print(f"    preview : {os.environ.get('SLIDE_SERVER_BASE_URL','').rstrip('/')}/reel/{rid}.mp4")
-        print(f"    then approve + post it from the dashboard (Carousels tab) — "
-              f"posting is still yours alone.")
+        print("    then approve + post it from the dashboard (Carousels tab) — "
+              "posting is still yours alone.")
     elif res.get("voice_down"):
         print(f"\n  ✗ {res.get('error')}")
         print(f"    Try `{res.get('hint')}` by hand and check ~/.jarvis/chatterbox_server.log.")

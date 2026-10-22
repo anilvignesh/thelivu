@@ -38,8 +38,6 @@ See docs/attended-mode.md.
 
 import json
 import logging
-import os
-import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -332,7 +330,6 @@ def status():
 
 def main(argv=None):
     import argparse
-    import sys
 
     ap = argparse.ArgumentParser(description="Attended corpus extraction")
     sub = ap.add_subparsers(dest="cmd", required=True)

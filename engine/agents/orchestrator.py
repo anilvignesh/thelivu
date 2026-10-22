@@ -31,11 +31,9 @@ from shared.config import (
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_DRAFT_CHAT_ID,
     GEMINI_API_KEY,
-    ANTHROPIC_API_KEY,
     APPROVAL_MODE,
     ARTICLES_DIR,
     DRY_RUN_LOG,
-    CHECK_INTERVAL_HOURS,
 )
 from shared.db import (
     init_db,
@@ -44,7 +42,6 @@ from shared.db import (
     save_run,
     update_run,
     update_run_legal_flag,
-    get_held_runs,
     get_cost_report_data,
     get_daily_costs,
     get_approved_sources,
@@ -70,7 +67,6 @@ from shared.db import (
     get_dig,
     list_digs,
     get_dig_updates,
-    get_due_digs,
     get_recent_leads_by_source,
 )
 from engine.agents.skill_runner import (run_skill, run_structured_skill,
@@ -2306,7 +2302,7 @@ def run_story_tracker():
 def _build_steward_snapshot():
     """Telemetry the steward reasons over: where the money went, what runs on
     what, and the state of the two safety valves."""
-    from shared.costs import spend_by_skill_model, daily_spend_usd, RATES
+    from shared.costs import spend_by_skill_model, RATES
     from shared import budget, quota
     from engine.agents.skill_runner import (
         _HAIKU_SKILLS, _GEMINI_SKILLS, _GEMINI_PRO_SKILLS, _NVIDIA_SKILLS)

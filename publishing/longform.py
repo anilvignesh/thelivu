@@ -384,7 +384,7 @@ def request_longform(run_id, why="", by="owner"):
     So: a person names a run. Everything downstream is unchanged — the script is
     written automatically, and both human gates still stand.
     """
-    from shared.db import get_run, queue_longform, longform_item, longform_queue
+    from shared.db import get_run, queue_longform, longform_queue
 
     run = get_run(run_id)
     if not run:
@@ -725,7 +725,7 @@ RENDER_OVERHEAD_MIN = 25     # illustration + assembly, on top of narration
 
 def next_slot(now):
     """The next Saturday-morning publication slot at or after `now`."""
-    from datetime import datetime, timedelta
+    from datetime import timedelta
     target = now.replace(hour=PUBLISH_HOUR, minute=0, second=0, microsecond=0)
     days = (PUBLISH_WEEKDAY - target.weekday()) % 7
     target = target + timedelta(days=days)

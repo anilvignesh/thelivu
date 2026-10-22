@@ -153,11 +153,11 @@ def caption(story):
 
 
 def process(story_path):
-    from shared.db import save_reel, update_reel, update_run
+    from shared.db import save_reel, update_reel
     story = json.loads(Path(story_path).read_text())
     if not story.get("approved"):
         log.info("%s: not approved, skipping", story["name"]); return None
-    from shared.db import kv_get, kv_set
+    from shared.db import kv_get
     if kv_get(f"animate_parked_{story['name']}"):
         log.info("%s: parked after a failure, skipping (clear with kv_set('animate_parked_%s', ''))", story["name"], story["name"]); return None
     if story.get("run_id"):

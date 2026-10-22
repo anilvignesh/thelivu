@@ -11,8 +11,7 @@ from starlette.responses import Response
 from starlette.routing import Route
 
 from command_center import db, jobs
-from command_center.api.util import (J, endpoint, err, breaker_state, list_query,
-                                     SORTS_BASE)
+from command_center.api.util import (J, endpoint, err, breaker_state, list_query)
 from shared.db import (
     get_run, get_carousel_slides, queue_carousel_run, get_reel_bytes,
     update_reel, add_bio_link, list_bio_links, delete_bio_link,

@@ -25,7 +25,7 @@ log = logging.getLogger(__name__)
 from PIL import Image, ImageDraw
 
 from publishing.slides import (
-    SERIF_BOLD, MONO, MONO_BOLD, PALETTE, _font, _wrap_to_width,
+    SERIF_BOLD, MONO, MONO_BOLD, PALETTE, _font,
 )
 
 # 9:16 for Reels. IG overlays UI on the bottom ~15% and right edge — keep text out.
@@ -1163,7 +1163,7 @@ def build_reel(fields, dark, out_mp4, kicker=None, backend=None, render_frame=No
         silence = work / "gap.wav"
         subprocess.run(
             ["ffmpeg", "-y", "-f", "lavfi", "-i",
-             f"anullsrc=r=22050:cl=mono", "-t", f"{GAP_SECS:.3f}", str(silence)],
+             "anullsrc=r=22050:cl=mono", "-t", f"{GAP_SECS:.3f}", str(silence)],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
         a_list.write_text("".join(f"file '{w}'\nfile '{silence}'\n" for w, _ in wav_paths))
