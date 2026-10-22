@@ -59,18 +59,18 @@ BASE_CSS = """
     font-family: var(--sans); font-weight: 600; font-size: .95rem; letter-spacing: .3em; text-transform: uppercase;
     color: var(--accent); text-decoration: none;
   }
-  .tag { font-family: var(--sans); font-size: .72rem; color: var(--dim); text-align: right; }
+  .tag { font-family: var(--sans); font-size: .78rem; color: var(--dim); text-align: right; }
 
   /* status block + date: the confidence label, never an emoji */
   .meta { display: flex; align-items: center; gap: .6rem; margin-bottom: .75rem; font-family: var(--sans); }
   .status {
-    font-size: .68rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
-    padding: .22rem .55rem; line-height: 1.2; border: 1.5px solid var(--accent);
+    font-size: .75rem; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+    padding: .2rem .55rem; line-height: 1.2; border: 1.5px solid var(--accent);
   }
   .status.confirmed { background: var(--accent); color: var(--on-accent); }
   .status.developing { color: var(--accent); }
   .status.contested { background: var(--alert); border-color: var(--alert); color: var(--on-alert); }
-  .when { font-size: .75rem; color: var(--dim); font-variant-numeric: tabular-nums; }
+  .when { font-size: .82rem; color: var(--dim); font-variant-numeric: tabular-nums; }
 
   /* anything pressable answers the press; hover only where a pointer can hover */
   a.story, a.hero, .logo, footer a { transition: transform 160ms var(--ease-out), color 160ms ease; }
@@ -78,6 +78,9 @@ BASE_CSS = """
   @media (hover: hover) and (pointer: fine) {
     a.story:hover h3, a.hero:hover h2 { color: var(--accent); }
   }
+  /* the browser's own surfaces, themed from the palette */
+  ::selection { background: var(--accent); color: var(--on-accent); }
+  html { accent-color: var(--accent); caret-color: var(--accent); scrollbar-color: var(--line) var(--bg); }
   a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }

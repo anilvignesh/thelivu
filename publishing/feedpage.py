@@ -1,28 +1,15 @@
-"""Render the public homepage: an editorial feed, not a repeated card grid.
+"""Render the public homepage: an editorial feed.
 
-The newest story runs as a full-bleed hero with scroll-scrubbed media (the
-actual "scrollytelling" mechanic — motion tied to scroll position, not a
-one-shot fade-in). Everything after it is tiered by Thelivu's own confidence
-signal instead of one uniform card: Confirmed stories run wide and full
-treatment, Developing stories run standard, Contested stories run compact and
-text-forward. That tiering is the point — it's Thelivu's actual editorial
-model made visible in the layout, not decoration borrowed from a template.
+The newest story runs as the lead with its media; everything after it is tiered by Thelivu's own confidence signal instead of one
+uniform card: Confirmed runs wide with media, Developing runs standard (thumbnail beside the text), Contested runs compact and
+text-only. That tiering is Thelivu's editorial model made visible in the layout.
 
-This replaces the flat link list as the *real* homepage for organic/direct
-visitors and shared article links. `/bio` (publishing/biopage.py) is untouched
-and keeps serving the minimal, self-contained link list Instagram's in-app
-browser opens from the bio tap — the two are deliberately different pages for
-different readers now. See docs/homepage-feed.md.
+This is the real homepage for organic/direct visitors and shared article links. `/bio` (publishing/biopage.py) is untouched and
+keeps serving the minimal link list Instagram's in-app browser opens from the bio tap. See docs/homepage-feed.md.
 
-Self-contained except two same-origin, self-hosted GSAP files served from
-publishing/static/ via the /static/ route in fileserver.py — no third-party
-CDN, matching this project's own no-external-host stance (see articlepage.py's
-note on why Telegraph was dropped for article hosting). One self-hosted font (Archivo, 25 KB woff2, see sitestyle.py) for headlines;
-body copy is Charter/Georgia. Shared look lives in publishing/sitestyle.py. Progressive enhancement throughout: every
-section is fully visible and readable with no JS at all; GSAP only layers
-scroll motion on top (the hero's zoom-settle degrades to a static, still-
-uncropped image), and reel previews only autoplay (muted, in place) if
-IntersectionObserver is available.
+Self-contained: one same-origin font (Archivo, publishing/static/), shared look in publishing/sitestyle.py, no third-party host and
+no GSAP here. Motion is one authored moment (the lead's media settles in on load, ease-out) plus press feedback; everything is fully
+visible and readable with no JS, and reel previews autoplay (muted, in place) only if IntersectionObserver is available.
 """
 import html
 
@@ -59,13 +46,14 @@ _PAGE = """<!DOCTYPE html>
   /* Lead: the newest story, media full width of the column */
   .hero {{ display: block; margin-bottom: 3rem; color: var(--fg); text-decoration: none; }}
   .hero-media-wrap {{ overflow: hidden; max-height: 62vh; background: var(--line); margin-bottom: 1.25rem; }}
-  .hero-media {{ display: block; width: 100%; max-height: 62vh; object-fit: cover; transform: scale(1.06); will-change: transform; }}
+  .hero-media {{ display: block; width: 100%; max-height: 62vh; object-fit: cover; animation: settle 700ms var(--ease-out) both; }}
+  @keyframes settle {{ from {{ transform: scale(1.05); opacity: .6; }} to {{ transform: none; opacity: 1; }} }}
   .hero h2 {{ font-size: clamp(1.7rem, 5.5vw, 2.5rem); line-height: 1.1; margin-bottom: .75rem; }}
   .hero p.hook {{ font-size: 1.12rem; line-height: 1.55; color: var(--fg); max-width: 38rem; }}
 
   .section-label {{
     display: flex; align-items: center; gap: .8rem; margin: 0 0 .5rem;
-    font-family: var(--sans); font-size: .75rem; font-weight: 600; letter-spacing: .2em; text-transform: uppercase;
+    font-family: var(--sans); font-size: .78rem; font-weight: 600; letter-spacing: .2em; text-transform: uppercase;
     color: var(--accent);
   }}
   .section-label::after {{ content: ""; flex: 1; border-top: 1px solid var(--line); }}
@@ -87,8 +75,7 @@ _PAGE = """<!DOCTYPE html>
   .story.standard h3 {{ font-size: 1.12rem; line-height: 1.25; }}
   .story.standard p.hook {{ font-size: .94rem; }}
 
-  /* Contested: text only, red edge */
-  .story.compact {{ border-left: 4px solid var(--alert); padding-left: 1rem; }}
+  /* Contested: text only; the red status block carries the signal */
   .story.compact h3 {{ font-size: 1.02rem; line-height: 1.3; }}
 
   .empty {{ font-style: italic; color: var(--dim); padding: 3rem 0; }}
@@ -100,27 +87,7 @@ _PAGE = """<!DOCTYPE html>
 {header}{channel_line}
 {body}
 <footer>Every story fact-checked before it reaches you &middot; <a href="/bio">link in bio</a></footer>
-<script src="/static/gsap.min.js"></script>
-<script src="/static/ScrollTrigger.min.js"></script>
 <script>
-(function() {{
-  if (!window.gsap || !window.ScrollTrigger) return;
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-  gsap.registerPlugin(ScrollTrigger);
-  var hero = document.querySelector('.hero-media');
-  if (hero) {{
-    gsap.to(hero, {{
-      scale: 1, ease: 'none',
-      scrollTrigger: {{trigger: '.hero', start: 'top top', end: 'bottom top', scrub: true}}
-    }});
-  }}
-  gsap.utils.toArray('.story').forEach(function(el) {{
-    gsap.fromTo(el, {{opacity: 0, y: 10}}, {{
-      opacity: 1, y: 0, duration: .35, ease: 'power3.out',
-      scrollTrigger: {{trigger: el, start: 'top 90%'}}
-    }});
-  }});
-}})();
 (function() {{
   var vids = document.querySelectorAll('video.hero-media, video.story-media');
   if (!vids.length || !('IntersectionObserver' in window)) return;

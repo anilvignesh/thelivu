@@ -126,8 +126,8 @@ _PAGE = """<!DOCTYPE html>
   li {{ margin-bottom: .4rem; }}
   /* a quoted source: translucent panel, gold edge — the same panel the reels use for the record's own words */
   blockquote {{
-    background: var(--panel); border: 2px solid color-mix(in srgb, var(--accent) 50%, transparent);
-    border-left: 8px solid var(--accent); padding: 1rem 1.1rem; margin: 1.6rem 0; font-style: normal;
+    background: var(--panel); border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
+    padding: 1.1rem 1.2rem; margin: 1.8rem 0; font-style: normal;
   }}
   /* the view label on a contested-frame piece: outlined, no italics, must not read as a pull-quote */
   aside.callout {{
