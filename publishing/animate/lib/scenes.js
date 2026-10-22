@@ -76,7 +76,7 @@ function captions() {
   if (i < 0) return;
   const c = CAPS[i], size = 46, a = clamp((TT - c.t0 + 0.05) / 0.12);
   ctx.save(); ctx.font = `700 ${size}px ${SERIF}`; ctx.textBaseline = 'alphabetic'; ctx.globalAlpha = a;
-  let x = 70; const y = 1452 + (1 - eo(a)) * 8;
+  let x = 70; const y = 1500 + (1 - eo(a)) * 8;
   c.words.forEach((w) => {
     const on = TT >= w.t0 - 0.02 && TT < w.t1 + 0.02, t = w.w + ' ', wd = ctx.measureText(t).width;
     ctx.lineWidth = 6; ctx.strokeStyle = 'rgba(23,20,13,0.9)'; ctx.lineJoin = 'round'; ctx.strokeText(t, x, y);
@@ -95,7 +95,7 @@ function furniture() {
   ctx.save(); ctx.fillStyle = 'rgba(233,224,200,0.55)'; ctx.fillRect(70, 326, 870, 3); ctx.restore();
   ctx.save(); ctx.globalAlpha = 0.9; ctx.fillStyle = 'rgba(179,168,145,0.3)'; ctx.fillRect(70, 1528, 870, 3);
   ctx.fillStyle = GOLD; ctx.fillRect(70, 1528, 870 * clamp(TT / DURATION), 3); ctx.restore();
-  mono('thelivu.up.railway.app · sources in bio', 70, 1496, 26, DIM, 'left', 0.75, 1);
+  mono('thelivu.up.railway.app · sources in bio', 70, 1570, 26, DIM, 'left', 0.75, 1);
   captions();
 }
 
