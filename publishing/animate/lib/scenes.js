@@ -144,7 +144,8 @@ function backdrop(e) {
 function heads(e, y0 = 470, size = 66) {
   backdrop(e);
   const H_ = e.beat.head || [];
-  H_.forEach((s, i) => line(s, 70, y0 + i * (size + 20), i === 0 ? size : size - 14, runS(e.t0 + 0.25 + i * 0.4, 0.9), i === 0 ? CREAM : DIM, { bold: i === 0, align: 'left' }));
+  const fit = (str, sz, bold) => { while (sz > 30 && (ctx.save(), ctx.font = `${bold ? 700 : 400} ${sz}px ${SERIF}`, ctx.measureText(str).width * 1.04 > 870 ? (ctx.restore(), true) : (ctx.restore(), false))) sz -= 2; return sz; };
+  H_.forEach((s, i) => line(s, 70, y0 + i * (size + 20), fit(s, i === 0 ? size : size - 14, i === 0), runS(e.t0 + 0.25 + i * 0.4, 0.9), i === 0 ? CREAM : DIM, { bold: i === 0, align: 'left' }));
 }
 
 const SCENE = {};
