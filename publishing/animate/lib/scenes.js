@@ -4,7 +4,7 @@
 //  Our voice is set in Archivo; the source's own words in Charter, on a kraft sheet, so the viewer can tell who is speaking.
 //  Figures sit on a gold block (real) or a red block (missing/late); no tilted stamp, no mono kicker.
 //  Frame furniture: document header (wordmark left, topic right, hairline), progress line, handle footer; a silent source card and
-//  the real logo (assets/logo.png) close every piece. No captions: the voice and the picture carry the story.
+//  the real logo (assets/logo.png) close every piece. Burned-in captions (word timings from VOICE) sit under the progress line: most reels are watched on mute.
 //  Scene types: illustration, timeline, excerpt, compare, figure, share, list, source, signoff. Each is drawn from the beat's
 //  declared data (STORY.beats[i].data); nothing is read off the narration.
 // =====================================================================
@@ -55,6 +55,36 @@ function fade(s, x, y, size, p, color = CREAM, o = {}) {
   ctx.globalAlpha = clamp(p) * (o.alpha ?? 1); ctx.fillStyle = color; ctx.fillText(s, x, y + (1 - clamp(p)) * 14); ctx.restore();
 }
 
+
+// burned-in captions: the spoken words in short phrases (VOICE word times), the word being said in gold. Left-aligned under the progress line.
+let CAPS = null;
+function captions() {
+  if (!CAPS) {
+    CAPS = [];
+    for (const L of VOICE.lines || []) {
+      let cur = [];
+      const flush = () => { if (cur.length) CAPS.push({ t0: cur[0].t0, t1: cur[cur.length - 1].t1, words: cur }); cur = []; };
+      for (const w of L.words || []) {
+        cur.push(w);
+        const len = cur.map((x) => x.w).join(' ').length;
+        if (cur.length >= 6 || len >= 30 || /[.!?;:]$/.test(w.w) || (len >= 18 && /,$/.test(w.w))) flush();
+      }
+      flush();
+    }
+  }
+  const i = CAPS.findIndex((c, k) => TT >= c.t0 - 0.05 && TT < (CAPS[k + 1] ? Math.min(c.t1 + 0.35, CAPS[k + 1].t0) : c.t1 + 0.35));
+  if (i < 0) return;
+  const c = CAPS[i], size = 46, a = clamp((TT - c.t0 + 0.05) / 0.12);
+  ctx.save(); ctx.font = `700 ${size}px ${SERIF}`; ctx.textBaseline = 'alphabetic'; ctx.globalAlpha = a;
+  let x = 70; const y = 1612 + (1 - eo(a)) * 8;
+  c.words.forEach((w) => {
+    const on = TT >= w.t0 - 0.02 && TT < w.t1 + 0.02, t = w.w + ' ', wd = ctx.measureText(t).width;
+    ctx.lineWidth = 6; ctx.strokeStyle = 'rgba(23,20,13,0.9)'; ctx.lineJoin = 'round'; ctx.strokeText(t, x, y);
+    ctx.fillStyle = on ? GOLD : CREAM; ctx.fillText(t, x, y); x += wd;
+  });
+  ctx.restore();
+}
+
 // the frame, the same on every story scene: stamp, wordmark, progress line, handle
 function furniture() {
   const tag = citation();
@@ -66,6 +96,7 @@ function furniture() {
   ctx.save(); ctx.globalAlpha = 0.9; ctx.fillStyle = 'rgba(179,168,145,0.3)'; ctx.fillRect(70, 1528, 870, 3);
   ctx.fillStyle = GOLD; ctx.fillRect(70, 1528, 870 * clamp(TT / DURATION), 3); ctx.restore();
   mono('thelivu.up.railway.app · sources in bio', 70, 1496, 26, DIM, 'left', 0.75, 1);
+  captions();
 }
 
 // when item k of n appears: on the word it names (cue: ['thirteen','13'], optionally {line, n}), else spread across the beat's speech
