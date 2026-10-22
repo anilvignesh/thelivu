@@ -65,7 +65,7 @@ function furniture() {
   ctx.save(); ctx.fillStyle = 'rgba(233,224,200,0.55)'; ctx.fillRect(70, 326, 870, 3); ctx.restore();
   ctx.save(); ctx.globalAlpha = 0.9; ctx.fillStyle = 'rgba(179,168,145,0.3)'; ctx.fillRect(70, 1528, 870, 3);
   ctx.fillStyle = GOLD; ctx.fillRect(70, 1528, 870 * clamp(TT / DURATION), 3); ctx.restore();
-  mono('thelivu.reports · sources in bio', 70, 1496, 26, DIM, 'left', 0.75, 1);
+  mono('thelivu.up.railway.app · sources in bio', 70, 1496, 26, DIM, 'left', 0.75, 1);
 }
 
 // when item k of n appears: on the word it names (cue: ['thirteen','13'], optionally {line, n}), else spread across the beat's speech
@@ -273,5 +273,5 @@ SCENE.signoff = (e) => {
   line('Fact-checked stories.', CX, 1190, 44, runS(e.t0 + 0.7, 0.8), CREAM);
   line('Every claim verified, every piece', CX, 1250, 44, runS(e.t0 + 0.9, 0.8), CREAM);
   line('human-reviewed.', CX, 1310, 44, runS(e.t0 + 1.1, 0.8), CREAM);
-  mono('thelivu.reports', CX, 1400, 30, GOLD, 'center', runS(e.t0 + 1.5, 0.8), 6);
+  mono('thelivu.up.railway.app', CX, 1400, 32, GOLD, 'center', runS(e.t0 + 1.5, 0.8), 2);
 };
