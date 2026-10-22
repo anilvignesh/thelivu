@@ -1,0 +1,8 @@
+[Unit]
+Description=Thelivu Oracle VM auto-update (git pull + restart reel-worker/chatterbox)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/ubuntu/thelivu/deploy/auto-update.sh
+User=ubuntu
