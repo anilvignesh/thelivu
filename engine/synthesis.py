@@ -141,21 +141,26 @@ def recurring_objection(rows, j, min_years=MIN_CONSECUTIVE_YEARS):
             by[(r["entity"], r["category"])].append(r)
 
     for (entity, category), group in sorted(by.items()):
-        years = sorted({r["year"] for r in group})
-        for run in _consecutive_runs(years):
-            if len(run) < min_years:
-                continue
-            members = [r for r in group if r["year"] in set(run)]
-            total = _sum_amounts(members)
-            claim = (f"{entity}: {_phrase(category)} raised in "
-                     f"{len(run)} consecutive audit years "
-                     f"({run[0]}–{run[-1]}) and never resolved")
-            if total:
-                claim += f", {j.format_money(_round_money(total))} in total"
-            out.append(_synthesis(
-                kind="recurring", claim=claim, members=members, j=j,
-                entities=[entity], years=[str(y) for y in run],
-                category=category, amount_cr=total))
+        for cluster in _same_subject_clusters(group):
+            years = sorted({r["year"] for r in cluster})
+            for run in _consecutive_runs(years):
+                if len(run) < min_years:
+                    continue
+                members = [r for r in cluster if r["year"] in set(run)]
+                # One balance carried year to year is not additive: report the
+                # latest year's figure, never the sum (2026-10-20: Haryana
+                # "idle funds" summed to ₹20,394 crore across 16 unrelated items).
+                latest = [r for r in members if r["year"] == run[-1]]
+                total = max((_as_float(r.get("amount_cr")) or 0 for r in latest), default=0) or None
+                claim = (f"{entity}: {_phrase(category)} raised in "
+                         f"{len(run)} consecutive audit years "
+                         f"({run[0]}–{run[-1]}) and never resolved")
+                if total:
+                    claim += f", latest figure {j.format_money(_round_money(total))}"
+                out.append(_synthesis(
+                    kind="recurring", claim=claim, members=members, j=j,
+                    entities=[entity], years=[str(y) for y in run],
+                    category=category, amount_cr=total))
     return out
 
 
@@ -452,6 +457,39 @@ def _synthesis(kind, claim, members, j, entities, years, category=None,
             "entities": list(entities), "years": list(years),
             "category": category, "amount_cr": amount_cr,
             "peer_count": peer_count, "fingerprint": fp}
+
+
+def _tokens(text):
+    return {w for w in re.findall(r"[a-z]{4,}", (text or "").lower())} - _STOP
+
+
+_STOP = {"that", "with", "were", "this", "from", "which", "have", "been", "than", "into",
+         "crore", "lakh", "audit", "state", "government", "during", "under", "against"}
+SUBJECT_OVERLAP = 0.4
+
+
+def _same_subject_clusters(group):
+    """Link findings of different years whose claims share a subject (token overlap
+    >= SUBJECT_OVERLAP); a category alone lumps unrelated items together."""
+    parent = list(range(len(group)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+    toks = [_tokens(r.get("claim")) for r in group]
+    for i in range(len(group)):
+        for k in range(i + 1, len(group)):
+            if group[i]["year"] == group[k]["year"]:
+                continue
+            a, b = toks[i], toks[k]
+            if a and b and len(a & b) / min(len(a), len(b)) >= SUBJECT_OVERLAP:
+                parent[find(i)] = find(k)
+    clusters = defaultdict(list)
+    for i, r in enumerate(group):
+        clusters[find(i)].append(r)
+    return list(clusters.values())
 
 
 def _consecutive_runs(years):
