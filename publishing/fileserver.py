@@ -114,7 +114,7 @@ def _make_handler(slides_dir):
             # no-path-traversal posture as the slide serving below.
             if name.startswith("static/"):
                 fname = name[len("static/"):]
-                if fname not in ("gsap.min.js", "ScrollTrigger.min.js"):
+                if fname not in ("gsap.min.js", "ScrollTrigger.min.js", "Archivo.woff2"):
                     self.send_response(404)
                     self.end_headers()
                     return
@@ -125,9 +125,9 @@ def _make_handler(slides_dir):
                     return
                 data = path.read_bytes()
                 self.send_response(200)
-                self.send_header("Content-Type", "application/javascript; charset=utf-8")
+                self.send_header("Content-Type", "font/woff2" if fname.endswith(".woff2") else "application/javascript; charset=utf-8")
                 self.send_header("Content-Length", str(len(data)))
-                # These files only change when we bump the GSAP version by hand.
+                # These files only change when we bump the GSAP version or the font by hand.
                 self.send_header("Cache-Control", "public, max-age=86400")
                 self.end_headers()
                 self.wfile.write(data)

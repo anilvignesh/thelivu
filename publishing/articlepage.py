@@ -18,6 +18,8 @@ figure is fully visible with no JS at all.
 import html
 import re
 
+from publishing.sitestyle import BASE_CSS, header, status_block
+
 _SLUG_MAX = 60
 
 
@@ -112,83 +114,45 @@ _PAGE = """<!DOCTYPE html>
 <meta property="og:title" content="{title_attr}">
 <meta property="og:description" content="{hook_attr}">
 <style>
-  :root {{
-    --bg: #E6DCC3; --fg: #1B1710; --accent: #8C2A1B; --line: rgba(27,23,16,.25);
-  }}
-  @media (prefers-color-scheme: dark) {{
-    :root {{ --bg: #17140D; --fg: #E9E0C8; --accent: #D2AA6D; --line: rgba(233,224,200,.25); }}
-  }}
-  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-  body {{
-    background: var(--bg); color: var(--fg);
-    font-family: Georgia, 'Times New Roman', serif;
-    max-width: 40rem; margin: 0 auto; padding: 2rem 1.25rem 3rem;
-    line-height: 1.65; font-size: 1.06rem;
-  }}
-  .brand {{
-    display: block; text-align: center; margin-bottom: 2rem;
-    font-family: 'DejaVu Sans Mono', ui-monospace, monospace;
-    font-size: 1rem; letter-spacing: .35em; text-indent: .35em;
-    text-transform: uppercase; color: var(--fg); text-decoration: none;
-  }}
-  h1 {{
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
-    font-weight: 700; letter-spacing: -.02em;
-    font-size: clamp(1.5rem, 5vw, 2rem); line-height: 1.18; margin-bottom: .9rem;
-  }}
-  .meta {{
-    font-family: 'DejaVu Sans Mono', ui-monospace, monospace;
-    font-size: .8rem; opacity: .75; margin-bottom: 1.6rem;
-    padding-bottom: 1.2rem; border-bottom: 2px dashed var(--accent);
-  }}
-  h2, h3, h4 {{ margin: 1.6rem 0 .6rem; line-height: 1.3; }}
-  h2 {{ font-size: 1.25rem; }} h3 {{ font-size: 1.1rem; }} h4 {{ font-size: 1rem; }}
-  p {{ margin-bottom: 1rem; }}
-  ul {{ margin: 0 0 1rem 1.4rem; }}
-  li {{ margin-bottom: .35rem; }}
+{base_css}
+  body {{ max-width: 40rem; margin: 0 auto; padding: 1.75rem 1.25rem 3rem; line-height: 1.65; font-size: 1.08rem; }}
+  h1 {{ font-size: clamp(1.7rem, 6vw, 2.3rem); line-height: 1.12; margin-bottom: 1.2rem; }}
+  .meta {{ margin-top: .2rem; margin-bottom: 1.1rem; }}
+  article > .meta {{ padding-bottom: 0; }}
+  h2, h3, h4 {{ margin: 2rem 0 .6rem; line-height: 1.25; }}
+  h2 {{ font-size: 1.3rem; }} h3 {{ font-size: 1.12rem; }} h4 {{ font-size: 1rem; }}
+  p {{ margin-bottom: 1.1rem; }}
+  ul {{ margin: 0 0 1.1rem 1.4rem; }}
+  li {{ margin-bottom: .4rem; }}
+  /* a quoted source: translucent panel, gold edge — the same panel the reels use for the record's own words */
   blockquote {{
-    border-left: 3px solid var(--accent); padding: .2rem 0 .2rem 1rem;
-    margin: 0 0 1rem; font-style: italic; opacity: .9;
+    background: var(--panel); border: 2px solid color-mix(in srgb, var(--accent) 50%, transparent);
+    border-left: 8px solid var(--accent); padding: 1rem 1.1rem; margin: 1.6rem 0; font-style: normal;
   }}
-  /* The view label on a contested-frame piece. Solid border on all four sides,
-     no italics: it must not read as a pull-quote from the story. */
+  /* the view label on a contested-frame piece: outlined, no italics, must not read as a pull-quote */
   aside.callout {{
-    border: 2px solid var(--accent); border-radius: 4px;
-    padding: .7rem .9rem; margin: 0 0 1.4rem;
+    border: 2px solid var(--alert); padding: .8rem 1rem; margin: 0 0 1.5rem;
     font-size: .95rem; line-height: 1.5;
   }}
   aside.callout b {{
-    font-family: 'DejaVu Sans Mono', ui-monospace, monospace;
-    font-size: .8rem; letter-spacing: .04em; text-transform: uppercase;
-    color: var(--accent);
+    font-family: var(--sans); font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; color: var(--alert);
   }}
-  hr {{ border: none; border-top: 2px dashed var(--line); margin: 1.6rem auto; width: 6rem; }}
-  a {{ color: var(--accent); }}
-  em {{ opacity: .92; }}
-  #reading-progress {{
-    position: fixed; top: 0; left: 0; height: 3px; width: 0%;
-    background: var(--accent); z-index: 10;
-  }}
-  figure.slide-figure {{ margin: 1.8rem 0; }}
+  hr {{ border: none; border-top: 1px solid var(--line); margin: 2rem 0; }}
+  article a {{ color: var(--accent); text-underline-offset: 3px; text-decoration-thickness: 1px; }}
+  #reading-progress {{ position: fixed; top: 0; left: 0; height: 3px; width: 0%; background: var(--accent); z-index: 10; }}
+  figure.slide-figure {{ margin: 2rem 0; }}
   figure.slide-figure img {{ display: block; width: 100%; }}
-  figure.slide-figure figcaption {{
-    font-family: 'DejaVu Sans Mono', ui-monospace, monospace;
-    font-size: .78rem; opacity: .7; margin-top: .5rem; text-align: center;
-  }}
-  footer {{ margin-top: 2.5rem; text-align: center; }}
-  footer a {{
-    font-family: 'DejaVu Sans Mono', ui-monospace, monospace;
-    font-size: .85rem; text-decoration: none;
-    border-bottom: 1px dashed var(--accent); padding-bottom: .1rem;
-  }}
+  figure.slide-figure figcaption {{ font-family: var(--sans); font-size: .78rem; color: var(--dim); margin-top: .5rem; }}
+  footer {{ margin-top: 2.5rem; }}
+  footer a {{ font-family: var(--sans); font-size: .85rem; font-weight: 600; color: var(--accent); text-decoration: none; border-bottom: 1.5px solid var(--accent); padding-bottom: .1rem; }}
 </style>
 </head>
 <body>
 <div id="reading-progress"></div>
-<a class="brand" href="/">Thelivu</a>
+{header}
 <article>
+<p class="meta">{status}</p>
 <h1>{title}</h1>
-<p class="meta">{confidence_emoji} {confidence} &middot; published {date}</p>
 {body}
 </article>
 <footer><a href="/">&larr; all Thelivu stories</a></footer>
@@ -211,8 +175,8 @@ _PAGE = """<!DOCTYPE html>
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   gsap.registerPlugin(ScrollTrigger);
   gsap.utils.toArray('[data-reveal]').forEach(function(el) {{
-    gsap.fromTo(el, {{opacity: 0, y: 24}}, {{
-      opacity: 1, y: 0, duration: .6, ease: 'power2.out',
+    gsap.fromTo(el, {{opacity: 0, y: 10}}, {{
+      opacity: 1, y: 0, duration: .35, ease: 'power3.out',
       scrollTrigger: {{trigger: el, start: 'top 90%'}}
     }});
   }});
@@ -255,9 +219,9 @@ def render_article(article, published_at=None, slides=None):
         title=_inline(article.title),
         title_attr=html.escape(article.title, quote=True),
         hook_attr=html.escape(article.hook or "", quote=True),
-        confidence=html.escape(article.confidence_label),
-        confidence_emoji=article.confidence_emoji,
-        date=date or "recently",
+        base_css=BASE_CSS,
+        header=header("Article"),
+        status=status_block(article.confidence_label, "Published " + (date or "recently")),
         body=_blocks_to_html(article.blocks, slides),
     )
 

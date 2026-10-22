@@ -17,10 +17,8 @@ different readers now. See docs/homepage-feed.md.
 Self-contained except two same-origin, self-hosted GSAP files served from
 publishing/static/ via the /static/ route in fileserver.py — no third-party
 CDN, matching this project's own no-external-host stance (see articlepage.py's
-note on why Telegraph was dropped for article hosting). No new font assets
-either: display headlines use the system sans stack (bold, tight tracking),
-body copy stays the existing Georgia serif — a standard editorial pairing,
-zero extra weight to self-host. Progressive enhancement throughout: every
+note on why Telegraph was dropped for article hosting). One self-hosted font (Archivo, 25 KB woff2, see sitestyle.py) for headlines;
+body copy is Charter/Georgia. Shared look lives in publishing/sitestyle.py. Progressive enhancement throughout: every
 section is fully visible and readable with no JS at all; GSAP only layers
 scroll motion on top (the hero's zoom-settle degrades to a static, still-
 uncropped image), and reel previews only autoplay (muted, in place) if
@@ -30,6 +28,7 @@ import html
 
 from publishing.articlepage import make_slug
 from publishing.parser import parse_article, prepare_for_publish
+from publishing.sitestyle import BASE_CSS, header, status_block
 
 _CONF_TIER = {"confirmed": "feature", "developing": "standard", "contested": "compact"}
 
@@ -49,119 +48,58 @@ _PAGE = """<!DOCTYPE html>
 <meta property="og:title" content="Thelivu">
 <meta property="og:description" content="Verification-first journalism — every story fact-checked before it reaches you.">
 <style>
-  :root {{
-    --bg: #E6DCC3; --fg: #1B1710; --accent: #8C2A1B; --line: rgba(27,23,16,.25);
-    --card-bg: rgba(27,23,16,.03); --pill-bg: rgba(27,23,16,.06);
-  }}
-  @media (prefers-color-scheme: dark) {{
-    :root {{
-      --bg: #17140D; --fg: #E9E0C8; --accent: #D2AA6D; --line: rgba(233,224,200,.25);
-      --card-bg: rgba(233,224,200,.04); --pill-bg: rgba(233,224,200,.08);
-    }}
-  }}
-  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-  html {{ background: var(--bg); }}
-  body {{
-    background: var(--bg); color: var(--fg);
-    font-family: Georgia, 'Times New Roman', serif;
-    max-width: 44rem; margin: 0 auto; padding: 2.5rem 1.25rem 3.5rem;
-  }}
-  .display {{
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
-    font-weight: 700; letter-spacing: -.02em;
-  }}
-  header {{ text-align: center; margin-bottom: 3rem; }}
-  h1 {{
-    font-family: 'DejaVu Sans Mono', ui-monospace, monospace;
-    font-size: 1.6rem; letter-spacing: .35em; text-indent: .35em;
-    text-transform: uppercase; font-weight: 400;
-  }}
-  .rule {{ border: none; border-top: 2px dashed var(--accent); margin: 1rem auto; width: 6rem; }}
-  .tagline {{ font-style: italic; font-size: .95rem; opacity: .8; }}
+{base_css}
+  body {{ max-width: 44rem; margin: 0 auto; padding: 1.75rem 1.25rem 3.5rem; }}
   .channel {{
-    display: inline-block; margin-top: .6rem;
-    font-family: 'DejaVu Sans Mono', ui-monospace, monospace;
-    font-size: .9rem; color: var(--accent); text-decoration: none;
-    border-bottom: 1px dashed var(--accent); padding-bottom: .1rem;
+    display: inline-block; margin-bottom: 2rem; font-family: var(--sans); font-size: .85rem; font-weight: 600;
+    color: var(--accent); text-decoration: none; border-bottom: 1.5px solid var(--accent); padding-bottom: .1rem;
   }}
   a.story {{ display: block; color: var(--fg); text-decoration: none; }}
 
-  /* Pill meta line — shared by every tier */
-  .meta {{
-    display: inline-flex; align-items: center; gap: .4rem;
-    font-family: 'DejaVu Sans Mono', ui-monospace, monospace;
-    font-size: .74rem; letter-spacing: .02em; text-transform: uppercase;
-    background: var(--pill-bg); border-radius: 99px; padding: .3rem .7rem;
-    margin-bottom: .7rem;
-  }}
+  /* Lead: the newest story, media full width of the column */
+  .hero {{ display: block; margin-bottom: 3rem; color: var(--fg); text-decoration: none; }}
+  .hero-media-wrap {{ overflow: hidden; max-height: 62vh; background: var(--line); margin-bottom: 1.25rem; }}
+  .hero-media {{ display: block; width: 100%; max-height: 62vh; object-fit: cover; transform: scale(1.06); will-change: transform; }}
+  .hero h2 {{ font-size: clamp(1.7rem, 5.5vw, 2.5rem); line-height: 1.1; margin-bottom: .75rem; }}
+  .hero p.hook {{ font-size: 1.12rem; line-height: 1.55; color: var(--fg); max-width: 38rem; }}
 
-  /* Hero — the newest story, full-bleed, scroll-scrubbed media */
-  .hero {{ display: block; margin-bottom: 3.5rem; color: var(--fg); text-decoration: none; }}
-  .hero-media-wrap {{
-    width: 100vw; margin-left: calc(50% - 50vw); overflow: hidden;
-    max-height: 62vh; background: var(--line);
-  }}
-  .hero-media {{
-    display: block; width: 100%; max-height: 62vh; object-fit: cover;
-    transform: scale(1.08); will-change: transform;
-  }}
-  .hero-body {{ padding-top: 1.4rem; }}
-  .hero h2 {{ font-size: clamp(1.6rem, 5vw, 2.4rem); line-height: 1.12; margin-bottom: .7rem; }}
-  .hero p {{ font-size: 1.08rem; line-height: 1.55; opacity: .88; max-width: 38rem; }}
-
-  /* Section label between hero and the rest */
   .section-label {{
-    display: flex; align-items: center; gap: .8rem; margin: 0 0 1.6rem;
-    font-family: 'DejaVu Sans Mono', ui-monospace, monospace;
-    font-size: .78rem; letter-spacing: .18em; text-transform: uppercase; opacity: .65;
+    display: flex; align-items: center; gap: .8rem; margin: 0 0 .5rem;
+    font-family: var(--sans); font-size: .75rem; font-weight: 600; letter-spacing: .2em; text-transform: uppercase;
+    color: var(--accent);
   }}
-  .section-label::after {{ content: ""; flex: 1; border-top: 1px dashed var(--line); }}
+  .section-label::after {{ content: ""; flex: 1; border-top: 1px solid var(--line); }}
 
-  .feed {{ display: flex; flex-direction: column; gap: 2rem; }}
+  .feed {{ display: flex; flex-direction: column; }}
+  .story {{ padding: 1.4rem 0; border-bottom: 1px solid var(--line); }}
+  .story h3 {{ margin-bottom: .4rem; }}
+  .story p.hook {{ color: var(--dim); line-height: 1.5; }}
 
-  /* Feature tier — Confirmed: wide media, prominent */
-  .story.feature {{ border-bottom: 2px solid var(--line); padding-bottom: 2rem; }}
-  .story.feature .story-media {{
-    display: block; width: 100%; max-height: 20rem; object-fit: cover;
-    background: var(--line); margin-bottom: 1rem;
-  }}
-  .story.feature h3 {{ font-size: 1.4rem; line-height: 1.25; margin-bottom: .5rem; }}
-  .story.feature p.hook {{ font-size: 1rem; line-height: 1.5; opacity: .88; }}
+  /* Confirmed: media on top, the biggest headline */
+  .story.feature .story-media {{ display: block; width: 100%; max-height: 20rem; object-fit: cover; background: var(--line); margin-bottom: 1rem; }}
+  .story.feature h3 {{ font-size: 1.45rem; line-height: 1.2; }}
+  .story.feature p.hook {{ font-size: 1.02rem; }}
 
-  /* Standard tier — Developing: smaller media, same info */
+  /* Developing: thumbnail beside the text */
   .story.standard {{ display: flex; gap: 1rem; align-items: flex-start; }}
-  .story.standard .story-media {{
-    width: 7rem; height: 7rem; flex: none; object-fit: cover; background: var(--line);
-  }}
+  .story.standard .story-media {{ width: 6.5rem; height: 6.5rem; flex: none; object-fit: cover; background: var(--line); }}
   .story.standard .story-body {{ min-width: 0; }}
-  .story.standard h3 {{ font-size: 1.1rem; line-height: 1.3; margin-bottom: .35rem; }}
-  .story.standard p.hook {{ font-size: .92rem; line-height: 1.45; opacity: .85; }}
+  .story.standard h3 {{ font-size: 1.12rem; line-height: 1.25; }}
+  .story.standard p.hook {{ font-size: .94rem; }}
 
-  /* Compact tier — Contested: dense, text-forward, no media */
-  .story.compact {{
-    display: block; padding: .9rem 1rem; border: 1px solid var(--line);
-  }}
-  .story.compact h3 {{ font-size: .98rem; line-height: 1.3; }}
-  .story.compact .meta {{ margin-bottom: .4rem; }}
+  /* Contested: text only, red edge */
+  .story.compact {{ border-left: 4px solid var(--alert); padding-left: 1rem; }}
+  .story.compact h3 {{ font-size: 1.02rem; line-height: 1.3; }}
 
-  a.story:hover h3 {{ color: var(--accent); }}
-
-  .empty {{ text-align: center; font-style: italic; opacity: .7; padding: 3rem 0; }}
-  footer {{
-    margin-top: 3rem; text-align: center; font-size: .8rem; opacity: .6;
-    font-family: 'DejaVu Sans Mono', ui-monospace, monospace;
-  }}
+  .empty {{ font-style: italic; color: var(--dim); padding: 3rem 0; }}
+  footer {{ margin-top: 2.5rem; font-family: var(--sans); font-size: .78rem; color: var(--dim); }}
   footer a {{ color: var(--accent); }}
 </style>
 </head>
 <body>
-<header>
-  <h1>Thelivu</h1>
-  <hr class="rule">
-  <p class="tagline">Verification-first &middot; human-reviewed</p>{channel_line}
-</header>
+{header}{channel_line}
 {body}
-<footer>every story fact-checked before it reaches you &middot; <a href="/bio">link in bio</a></footer>
+<footer>Every story fact-checked before it reaches you &middot; <a href="/bio">link in bio</a></footer>
 <script src="/static/gsap.min.js"></script>
 <script src="/static/ScrollTrigger.min.js"></script>
 <script>
@@ -177,8 +115,8 @@ _PAGE = """<!DOCTYPE html>
     }});
   }}
   gsap.utils.toArray('.story').forEach(function(el) {{
-    gsap.fromTo(el, {{opacity: 0, y: 24}}, {{
-      opacity: 1, y: 0, duration: .6, ease: 'power2.out',
+    gsap.fromTo(el, {{opacity: 0, y: 10}}, {{
+      opacity: 1, y: 0, duration: .35, ease: 'power3.out',
       scrollTrigger: {{trigger: el, start: 'top 90%'}}
     }});
   }});
@@ -241,9 +179,9 @@ def _hero_html(item, contact_handle):
     return (
         f'<a class="hero" href="/a/{slug}">{media}'
         f'<div class="hero-body">'
-        f'<p class="meta">{article.confidence_emoji} {_esc(article.confidence_label)} &middot; {date}</p>'
-        f'<h2 class="display">{_esc(article.title)}</h2>'
-        f'<p>{_esc(article.hook)}</p>'
+        f'<p class="meta">{status_block(article.confidence_label, date)}</p>'
+        f'<h2>{_esc(article.title)}</h2>'
+        f'<p class="hook">{_esc(article.hook)}</p>'
         f'</div></a>'
     )
 
@@ -267,8 +205,8 @@ def _story_html(item, contact_handle):
     elif tier != "compact" and kind == "img":
         media = f'<img class="story-media" src="{url}" loading="lazy" alt="{_esc(article.title, True)}">'
 
-    meta = f'<p class="meta">{article.confidence_emoji} {_esc(article.confidence_label)} &middot; {date}</p>'
-    heading = f'<h3 class="display">{_esc(article.title)}</h3>'
+    meta = f'<p class="meta">{status_block(article.confidence_label, date)}</p>'
+    heading = f'<h3>{_esc(article.title)}</h3>'
     hook = f'<p class="hook">{_esc(article.hook)}</p>' if tier != "compact" else ""
 
     if tier == "standard":
@@ -306,7 +244,7 @@ def render_feed(items, contact_handle, channel_url=""):
             f'Join the Telegram channel &rarr;</a>'
         )
     if not items:
-        return _PAGE.format(body='<p class="empty">First stories coming soon.</p>', channel_line=channel_line)
+        return _PAGE.format(base_css=BASE_CSS, header=header(), body='<p class="empty">First stories coming soon.</p>', channel_line=channel_line)
 
     hero_idx = _first_titled_index(items, contact_handle)
     hero_html = _hero_html(items[hero_idx], contact_handle)
@@ -320,4 +258,4 @@ def render_feed(items, contact_handle, channel_url=""):
         parts.append('<h2 class="section-label">More reporting</h2>')
         parts.append('<div class="feed">\n' + "\n".join(rest) + "\n</div>")
     body = "\n".join(parts) if parts else '<p class="empty">First stories coming soon.</p>'
-    return _PAGE.format(body=body, channel_line=channel_line)
+    return _PAGE.format(base_css=BASE_CSS, header=header(), body=body, channel_line=channel_line)
