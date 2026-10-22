@@ -254,7 +254,7 @@ SCENE.share = (e) => {
     ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, 22, 0, Math.PI * 2);
     ctx.globalAlpha = 0.9; ctx.fillStyle = on > 0 ? rgbaM(col, 0.25 + 0.75 * on) : rgbaM(DIM, 0.16); ctx.fill(); ctx.restore();
   }
-  wrapLines(d.label, 880, 42).forEach((r, i) => fade(r, 70, 1400 + i * 50, 42, runS(t + 1.6, 0.8), CREAM, { align: 'left' }));
+  wrapLines(d.label, 880, 42).forEach((r, i) => fade(r, 70, 1340 + i * 50, 42, runS(t + 1.6, 0.8), CREAM, { align: 'left' }));
   furniture();
 };
 
