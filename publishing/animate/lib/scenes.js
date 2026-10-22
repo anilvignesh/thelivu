@@ -56,7 +56,7 @@ function fade(s, x, y, size, p, color = CREAM, o = {}) {
 }
 
 
-// burned-in captions: the spoken words in short phrases (VOICE word times), the word being said in gold. Left-aligned under the progress line.
+// burned-in captions: the spoken words in short phrases (VOICE word times), the word being said in gold. Left-aligned above the handle line, inside the phone safe zone.
 let CAPS = null;
 function captions() {
   if (!CAPS) {
@@ -76,7 +76,7 @@ function captions() {
   if (i < 0) return;
   const c = CAPS[i], size = 46, a = clamp((TT - c.t0 + 0.05) / 0.12);
   ctx.save(); ctx.font = `700 ${size}px ${SERIF}`; ctx.textBaseline = 'alphabetic'; ctx.globalAlpha = a;
-  let x = 70; const y = 1612 + (1 - eo(a)) * 8;
+  let x = 70; const y = 1452 + (1 - eo(a)) * 8;
   c.words.forEach((w) => {
     const on = TT >= w.t0 - 0.02 && TT < w.t1 + 0.02, t = w.w + ' ', wd = ctx.measureText(t).width;
     ctx.lineWidth = 6; ctx.strokeStyle = 'rgba(23,20,13,0.9)'; ctx.lineJoin = 'round'; ctx.strokeText(t, x, y);
