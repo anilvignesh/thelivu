@@ -143,6 +143,18 @@ def publish_run(run_id):
     save_publication(run_id, msg_ids, "Confirmed")
     update_run(run_id, status="published")
 
+    # The sweep only calls this after the re-verification gate cleared the run
+    # (docs/prepublish-gate.md), so a run with no passing verdict here was
+    # published by a human tap — bot, dashboard or command center. Record it, or a
+    # reel for this article would later be treated as never re-verified.
+    try:
+        from engine.distribution import reverify
+        if run.get("reverify_verdict") not in reverify.PASSING:
+            from shared.db import set_run_reverify
+            set_run_reverify(run_id, reverify.HUMAN_APPROVED, "Approved by a human tap.")
+    except Exception as e:
+        log.warning("Could not record the human approval for run #%d: %s", run_id, e)
+
     # Reels are the reach default; carousels are OPTIONAL now (owner's call 2026-07-26)
     # — made on demand for the stories where the receipts are the story, not auto on
     # every publish. Set THELIVU_AUTO_CAROUSEL=1 to restore the old behaviour.
@@ -253,9 +265,9 @@ def post_reel_run(reel_id, progress=None):
                     f"{row[1] or 'no permalink recorded'}. Posting this one would put the "
                     f"same story out twice. Kill it, or delete the live post first.")}
     except Exception as e:
-        # Never let the guard's own failure block a legitimate post.
-        log.warning("could not check run #%s for an existing posted reel: %s",
-                    r.get("run_id"), e)
+        # Fail closed: a reel goes out at most once, so if the duplicate check cannot run, nothing is posted.
+        log.error("could not check run #%s for an existing posted reel: %s", r.get("run_id"), e)
+        return {"ok": False, "error": f"duplicate check failed, not posting reel #{reel_id}: {e}"}
     # LEAKED TEMPLATE TEXT, CHECKED AT THE IRREVERSIBLE STEP. The same argument
     # as the duplicate guard above, and it has now cost a live post.
     #
@@ -294,14 +306,25 @@ def post_reel_run(reel_id, progress=None):
                 "error": "Instagram not configured (IG_USER_ID / IG_ACCESS_TOKEN)"}
     video_url = f"{SLIDE_SERVER_BASE_URL.rstrip('/')}/reel/{reel_id}.mp4"
     from publishing.instagram import publish_reel
+    from shared.db import claim_reel_for_post
+    if claim_reel_for_post(reel_id) is None:
+        log.error("refusing to post reel #%s: already posted, being posted, or no longer postable", reel_id)
+        return {"ok": False, "duplicate": True, "error": f"reel #{reel_id} is already posted, being posted, or retired. Not posting it again."}
     try:
         media_id, permalink = publish_reel(video_url, r.get("caption") or "", progress=progress)
     except Exception as e:
         log.error("Instagram reel post failed for #%s: %s", reel_id, e)
+        # Instagram may have accepted the post before the error came back, so the reel stays 'posting' and a
+        # person checks the account. Restoring it to 'ready' here could put it out a second time.
+        update_reel(reel_id, notes=f"post attempt errored: {str(e)[:200]}. Check Instagram before retrying; set status back to ready only if it is not live.")
         return {"ok": False, "error": str(e)}
     from datetime import datetime, timezone
-    update_reel(reel_id, status="posted", ig_media_id=media_id,
-               ig_permalink=permalink, posted_at=datetime.now(timezone.utc))
+    try:
+        update_reel(reel_id, status="posted", ig_media_id=media_id,
+                    ig_permalink=permalink, posted_at=datetime.now(timezone.utc))
+    except Exception:
+        log.critical("reel #%s IS LIVE on Instagram (media %s) but the database update failed; it stays 'posting' so it cannot go out again", reel_id, media_id)
+        raise
     # Cross-post to YouTube Shorts in the same beat as the Instagram post — every
     # NEW reel goes out to both platforms together, whether posted via the
     # dashboard tap or the autopost sweep (both funnel through this function).

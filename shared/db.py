@@ -1253,7 +1253,10 @@ def init_db():
                               # the second desk is news, hence the default — and every
                               # news-desk read filters on it explicitly rather than
                               # relying on that default. See docs/everyone-knows-desk.md §7.
-                              ("desk", "TEXT NOT NULL DEFAULT 'news'")]:
+                              ("desk", "TEXT NOT NULL DEFAULT 'news'"),
+                              # Pre-publish re-verification gate (docs/prepublish-gate.md).
+                              ("reverify_verdict", "TEXT"), ("reverify_report", "TEXT"),
+                              ("reverify_at", "TEXT"), ("reverify_draft_sha", "TEXT")]:
                 try:
                     cur.execute(f"ALTER TABLE pipeline_runs ADD COLUMN {col} {defn}")
                     conn.commit()
@@ -1384,7 +1387,9 @@ def init_db():
         else:
             cur.executescript(_SCHEMA_SQLITE)
             for col, defn in [("legal_flag", "INTEGER DEFAULT 0"), ("legal_reason", "TEXT"), ("slug", "TEXT"),
-                              ("desk", "TEXT NOT NULL DEFAULT 'news'")]:
+                              ("desk", "TEXT NOT NULL DEFAULT 'news'"),
+                              ("reverify_verdict", "TEXT"), ("reverify_report", "TEXT"),
+                              ("reverify_at", "TEXT"), ("reverify_draft_sha", "TEXT")]:
                 try:
                     cur.execute(f"ALTER TABLE pipeline_runs ADD COLUMN {col} {defn}")
                 except Exception:
@@ -2926,6 +2931,13 @@ def get_all_runs_summary(limit=60, desk="news"):
         conn.close()
 
 
+def set_run_reverify(run_id, verdict, report="", draft_sha=None):
+    """Record the pre-publish re-verification verdict for a run (docs/prepublish-gate.md).
+    `verdict` is clear / held / blocked / human_approved; NULL means never re-verified."""
+    update_run(run_id, reverify_verdict=verdict, reverify_report=report,
+               reverify_at=datetime.now(timezone.utc).isoformat(), reverify_draft_sha=draft_sha)
+
+
 def update_run_legal_flag(run_id, legal_flag, legal_reason=""):
     conn = _conn()
     try:
@@ -3215,6 +3227,31 @@ def get_reel_bytes(reel_id):
         if not row or row[0] is None:
             return None
         return bytes(row[0])
+    finally:
+        conn.close()
+
+
+def claim_reel_for_post(reel_id):
+    """Atomically move a reel to 'posting' and return the status it had, or None if it cannot be claimed.
+
+    A reel goes to Instagram at most once. Two callers (the Telegram tap and the autopost sweep) can reach
+    post_reel_run together; the UPDATE ... WHERE is the single door, so only one of them gets the claim.
+    A reel that is already posted, being posted, killed or superseded is never claimable."""
+    ph = "%s" if _is_postgres() else "?"
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(f"SELECT status FROM reels WHERE id = {ph}", (reel_id,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        prev = row[0]
+        cur.execute(
+            f"UPDATE reels SET status = 'posting' WHERE id = {ph} "
+            "AND status NOT IN ('posted', 'posting', 'killed', 'superseded', 'orphaned_killed_run')", (reel_id,))
+        claimed = cur.rowcount == 1
+        conn.commit()
+        return prev if claimed else None
     finally:
         conn.close()
 
@@ -3540,7 +3577,9 @@ def reset_run_for_review(run_id):
         conn.commit()
     finally:
         conn.close()
-    update_run(run_id, status="pending_human")
+    # Back through the gate means back through re-verification too.
+    update_run(run_id, status="pending_human", reverify_verdict=None,
+               reverify_report=None, reverify_draft_sha=None)
     return get_run(run_id)
 
 
