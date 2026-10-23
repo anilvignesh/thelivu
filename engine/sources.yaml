@@ -41,7 +41,9 @@ sources:
     role: verification
     tier: 2
     lean: "mainstream national daily, Bengaluru-based"
-    status: active
+    # DEACTIVATED 2026-10-23: nothing new since 19 Aug (435 silent cycles). The Nitter
+    # bridge feed has gone quiet. Re-activate once a working feed or X path is found.
+    status: inactive
     added: 2026-07-28
     notes: "Broke the Bareilly assault (saffron activist Satyam Pandit) on 27 Jul 2026. 403s our plain fetcher — read articles with web_read."
 
@@ -256,7 +258,9 @@ sources:
     role: lead
     tier: 3
     lean: "left-leaning; use as lead only — not as verification source"
-    status: active
+    # DEACTIVATED 2026-10-23: no items since 7 Aug (476 silent cycles). Re-activate
+    # if the feed carries items again.
+    status: inactive
     added: 2026-06-23
     notes: "Breaks real stories on labour, farmers, minorities. Verify independently before publishing."
 

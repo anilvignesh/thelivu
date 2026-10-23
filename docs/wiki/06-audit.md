@@ -38,11 +38,10 @@ Ranked by risk.
    Nothing to do but wait; then confirm the live commit equals `HEAD`.
 3. **Single copy of the renderer.** `~/animate` (renderer, 3 GB with pieces) is on one VM with no git. Tools are now backed up in `ops/animate-toolchain/`; the VM is
    still the only place the pieces run. Needs: the VM's `~/fwenv` and `/opt/pw` recipes in `provision.sh` so a rebuild is one command.
-4. **Dead source still marked active.** Deccan Herald has produced nothing since 19 Aug (480 items before that); Newsclick since 7 Aug. The "silent for 3 cycles"
+4. **Dead sources (fixed 2026-10-23).** Deccan Herald (silent since 19 Aug) and Newsclick (since 7 Aug) are now `inactive` in `sources.yaml`. Still open: the "silent for 3 cycles"
    alert fires daily for slow sources (The Ken, Alt News, TNM) and drowns the real ones. Fix: per-source expected cadence in `sources.yaml`, alert only on a
-   breach; mark dead feeds inactive.
-5. **Lead backlog.** `lead_queue` has 26,071 rows; about 1,500 have sat `queued` since 15 Oct. Either the desk only reads the newest, or it is starving. Decide the
-   intent, then add expiry. `seen_items` (31k) and `kv_store` (351 `reel_*` keys, 39 old alert keys) grow forever.
+   breach. FYI Creator House (213 silent cycles) needs a human look.
+5. **Lead backlog: not a problem (corrected 2026-10-23).** `expire_old_leads(7)` runs every daily cycle. Of 26,258 rows, the 1,716 `queued` ones are all from the last 7 days; the rest are `dropped` (24,218) or `processed` (324). My earlier reading was wrong.
 6. **23 reels stuck `ready` for over a week** (old "illustrated" pipeline, Sep to Oct) will never post. Mark them `superseded`; decide whether the old reel pipeline
    (`reel.py`, `make_reel.py`, `reel_worker.py`, `reel_illustrated.py`, `reel_kinetic.py`, `belief_reel.py`) is retired now that animate covers it.
 7. **Retired subsystems still in the tree**: at least 3,500 lines in the obvious files, plus their branches inside the orchestrator, bot and database layer: carousels (`engine/desks/ek/carousel.py`, `publishing/slides.py`, tables), the belief/"Everyone Knows"

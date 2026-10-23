@@ -8,8 +8,8 @@ Order is by what protects the channel first, then what grows it. Effort is Claud
 |---|---|---|---|
 | 1 | Deploy the website redesign and today's fixes once Railway is back; confirm live commit equals `HEAD` | 15 min | Railway |
 | 2 | Put the digger VM on git with an hourly auto-update; re-run the weak targets (Tamil Nadu, J&K, Rajasthan) with the 150 MB fix | 1 to 2 h | Anil: OK to touch the VM |
-| 3 | Mark 23 stale reels `superseded`; mark Deccan Herald and Newsclick inactive; per-source silence cadence | 1 h | nothing |
-| 4 | Lead queue and kv expiry (one nightly job) | 1 h | decide retention (suggest 14 days for leads) |
+| 3 | Per-source silence cadence in `sources.yaml` (dead sources already marked inactive 2026-10-23) | 1 h | nothing |
+| 4 | Mark the unreviewed `ready` old-pipeline reels (about 24) `superseded` | 5 min | your yes on retiring the old reel pipeline |
 | 5 | Publish the Haryana "SDRF uninvested four years running" story through the article desk | 1 h | nothing |
 
 ## Next (2 to 4 weeks)
@@ -33,5 +33,5 @@ Order is by what protects the channel first, then what grows it. Effort is Claud
 
 1. Delete retired subsystems (dashboard, carousels, belief desks)? 
 2. Retire the old reel pipeline?
-3. Lead retention: how long should an unprocessed lead live?
+3. (Closed: lead expiry already runs at 7 days; `kv_store` is only 630 rows, no job needed.)
 4. OK to modify the digger VM?
