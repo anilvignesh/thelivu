@@ -143,18 +143,6 @@ def publish_run(run_id):
     save_publication(run_id, msg_ids, "Confirmed")
     update_run(run_id, status="published")
 
-    # The sweep only calls this after the re-verification gate cleared the run
-    # (docs/prepublish-gate.md), so a run with no passing verdict here was
-    # published by a human tap — bot, dashboard or command center. Record it, or a
-    # reel for this article would later be treated as never re-verified.
-    try:
-        from engine.distribution import reverify
-        if run.get("reverify_verdict") not in reverify.PASSING:
-            from shared.db import set_run_reverify
-            set_run_reverify(run_id, reverify.HUMAN_APPROVED, "Approved by a human tap.")
-    except Exception as e:
-        log.warning("Could not record the human approval for run #%d: %s", run_id, e)
-
     # Reels are the reach default; carousels are OPTIONAL now (owner's call 2026-07-26)
     # — made on demand for the stories where the receipts are the story, not auto on
     # every publish. Set THELIVU_AUTO_CAROUSEL=1 to restore the old behaviour.

@@ -1253,10 +1253,7 @@ def init_db():
                               # the second desk is news, hence the default — and every
                               # news-desk read filters on it explicitly rather than
                               # relying on that default. See docs/everyone-knows-desk.md §7.
-                              ("desk", "TEXT NOT NULL DEFAULT 'news'"),
-                              # Pre-publish re-verification gate (docs/prepublish-gate.md).
-                              ("reverify_verdict", "TEXT"), ("reverify_report", "TEXT"),
-                              ("reverify_at", "TEXT"), ("reverify_draft_sha", "TEXT")]:
+                              ("desk", "TEXT NOT NULL DEFAULT 'news'")]:
                 try:
                     cur.execute(f"ALTER TABLE pipeline_runs ADD COLUMN {col} {defn}")
                     conn.commit()
@@ -1387,9 +1384,7 @@ def init_db():
         else:
             cur.executescript(_SCHEMA_SQLITE)
             for col, defn in [("legal_flag", "INTEGER DEFAULT 0"), ("legal_reason", "TEXT"), ("slug", "TEXT"),
-                              ("desk", "TEXT NOT NULL DEFAULT 'news'"),
-                              ("reverify_verdict", "TEXT"), ("reverify_report", "TEXT"),
-                              ("reverify_at", "TEXT"), ("reverify_draft_sha", "TEXT")]:
+                              ("desk", "TEXT NOT NULL DEFAULT 'news'")]:
                 try:
                     cur.execute(f"ALTER TABLE pipeline_runs ADD COLUMN {col} {defn}")
                 except Exception:
@@ -2931,13 +2926,6 @@ def get_all_runs_summary(limit=60, desk="news"):
         conn.close()
 
 
-def set_run_reverify(run_id, verdict, report="", draft_sha=None):
-    """Record the pre-publish re-verification verdict for a run (docs/prepublish-gate.md).
-    `verdict` is clear / held / blocked / human_approved; NULL means never re-verified."""
-    update_run(run_id, reverify_verdict=verdict, reverify_report=report,
-               reverify_at=datetime.now(timezone.utc).isoformat(), reverify_draft_sha=draft_sha)
-
-
 def update_run_legal_flag(run_id, legal_flag, legal_reason=""):
     conn = _conn()
     try:
@@ -3577,9 +3565,7 @@ def reset_run_for_review(run_id):
         conn.commit()
     finally:
         conn.close()
-    # Back through the gate means back through re-verification too.
-    update_run(run_id, status="pending_human", reverify_verdict=None,
-               reverify_report=None, reverify_draft_sha=None)
+    update_run(run_id, status="pending_human")
     return get_run(run_id)
 
 
