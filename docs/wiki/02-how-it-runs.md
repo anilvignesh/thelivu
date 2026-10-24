@@ -34,7 +34,7 @@ A restart mid-run parks the interrupted run as `needs_attention` rather than res
 | animate-worker (articles, auto, worker) | reel VM timer | every 30 min |
 | reel-worker | reel VM loop | continuous; releases the 4.5 GB voice server when idle |
 | auto-update | reel VM timer | hourly |
-| Reel posting | sweep, learned time slots (`engine/distribution/timing.py`) | two daily slots |
+| Reel posting | sweep, learned time slots (`engine/distribution/timing.py`) | five daily slots (08:00, 12:00, 15:30, 18:30, 21:00 IST), alternating audit and article reels |
 
 ## How a change reaches production
 

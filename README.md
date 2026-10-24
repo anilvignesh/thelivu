@@ -22,7 +22,7 @@ Every 6 hours, the engine:
 10. **Reviews** for quality, charter compliance, and legal risk
 11. **Publishes** the article to its own page + a formatted @thelivu teaser, and notifies Telegram
 12. **Cuts a reel** — script (Claude Haiku) → narration in Anil's cloned voice (Chatterbox) → conceptual illustrations (FLUX) → ffmpeg
-13. **Posts** the reel to Instagram and cross-posts to YouTube Shorts, in two daily slots (10:00 and 18:00 IST)
+13. **Posts** the reel to Instagram and cross-posts to YouTube Shorts, in five daily slots (08:00, 12:00, 15:30, 18:30, 21:00 IST)
 
 Steps 12-13 run on a separate always-on VM, not on Railway — reels need a voice server and ffmpeg.
 
@@ -126,8 +126,8 @@ Two providers. **Gemini** for anything that must touch the live web; **Claude** 
 ## Reels — the reach surface
 
 Every published story becomes a <90s vertical reel, narrated in Anil's own cloned
-voice, and posted to Instagram + YouTube Shorts in two daily slots (10:00 and
-18:00 IST, one reel per slot, oldest eligible first).
+voice, and posted to Instagram + YouTube Shorts in five daily slots (08:00, 12:00,
+15:30, 18:30, 21:00 IST; one reel per slot, alternating audit and article reels).
 
 ```
 article ─► video-script (Claude Haiku 5.5) ─► Chatterbox (cloned voice)

@@ -11,7 +11,7 @@ The workflow, end to end:
   3. Voice: the shared Chatterbox server is started for this pass and released after (reel_worker.ensure_voice/release_voice).
   4. Render with the animate skill (voice alignment, build, export), then its review. A cut-off or overlapping text, or a
      cut off the grid, blocks the reel; narration density and dead beats are reported, not blocking.
-  5. GATE 2, the video: a reel that passes every check is stored `ready` and the autopost sweep posts it in the next 10:00/18:00 IST slot (Kill in Telegram stops it); only a legal flag or the kill switch stores it `held` for a Post tap.
+  5. GATE 2, the video: a reel that passes every check is stored `ready` and the autopost sweep posts it in the next posting slot (POST_SLOTS_IST in engine/distribution/sweep.py) (Kill in Telegram stops it); only a legal flag or the kill switch stores it `held` for a Post tap.
 
 A story is one `pipeline_runs` row (source 'animate', status 'animate', slug = story name) so the existing reel machinery
 (posting, double-post guard, YouTube cross-post, command center) works unchanged. The status keeps it out of the article

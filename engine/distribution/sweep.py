@@ -154,7 +154,7 @@ def _autopublish_eligible(run):
 def run_autopublish_sweep():
     """One pass: auto-publish eligible pending_human runs, then auto-post
     whichever of (ready reel, pending carousel) is best inside the fixed
-    10:00/18:00 IST windows — see POST_SLOTS_IST above. At most one post per
+    POST_SLOTS_IST windows (five a day) — see above. At most one post per
     window, reel preferred over carousel, and only if something eligible is
     actually ready — engine.distribution.timing's learned-priors approach is
     no longer used by either format as of 2026-08-30.
@@ -190,7 +190,10 @@ def run_autopublish_sweep():
 # EK/GK belief desk as fallback — "if we don't have anything as news, we
 # will publish the other desk." Belief-desk QUALITY is a separate follow-up
 # Anil flagged for later, not addressed by this scheduling change.
-POST_SLOTS_IST = [(10, 0), (18, 0)]
+# Widened 2026-10-24 (Anil: "if it's relevant we post, no restriction"): two slots a day could not keep up with
+# the three to four reels the lanes make, so a backlog of seven built up. Five slots, at least 2.5 hours apart;
+# a slot with nothing eligible still posts nothing.
+POST_SLOTS_IST = [(8, 0), (12, 0), (15, 30), (18, 30), (21, 0)]
 POST_SLOT_WINDOW_MINUTES = 10  # comfortably >1 tick (ticks are every 2 min)
 LAST_POST_SLOT_KEY = "last_post_slot"
 
@@ -260,7 +263,7 @@ def _last_posted_lane():
 # added 2026-08-17 auditing why reach/followers had stalled (a ready-item
 # backlog posted back to back: 6 reels in 5 minutes on 2026-08-15, 6 more in
 # 26 minutes on 2026-08-16). REMOVED 2026-08-30: moot now that posting only
-# happens inside POST_SLOTS_IST's two windows, which are 8h/16h apart —
+# happens inside POST_SLOTS_IST's windows, which are at least 2.5h apart —
 # always well past any burst-spacing threshold that made sense here. If a
 # THIRD slot is ever added closer than a few hours to another, revisit
 # whether a cooldown is needed again; git history has the old
@@ -352,7 +355,7 @@ def _autopost_ready_slot():
     now = datetime.now(timezone.utc)
     slot = _current_post_slot(now)
     if not slot:
-        return  # outside the 10:00/18:00 IST windows — wait, don't force a post
+        return  # outside the POST_SLOTS_IST windows — wait, don't force a post
     if kv_get(LAST_POST_SLOT_KEY) == slot:
         return  # already handled this window (posted, or confirmed nothing ready)
 
