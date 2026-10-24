@@ -226,6 +226,36 @@ def _eligible_ranked(items, get_run_fn):
     return out
 
 
+def _lane(run):
+    """'audit' for a reel built from a CAG audit report (its run is created by the animate audit lane, source 'animate'),
+    'news' for a reel built from a published article."""
+    return "audit" if (run or {}).get("source") == "animate" else "news"
+
+
+def prefer_other_lane(candidates, last_lane):
+    """Alternate the two lanes: the first candidate from the lane that did NOT post last, else the first candidate.
+
+    Strict oldest-first let the audit lane (about two reels a day) crowd out the article lane (one a day), so
+    for days the feed looked like audits only (Anil, 2026-10-24: "I don't see any other news coming out")."""
+    for pair in candidates:
+        if _lane(pair[0]) != last_lane:
+            return [pair] + [c for c in candidates if c is not pair]
+    return candidates
+
+
+def _last_posted_lane():
+    from shared.db import _conn
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT r.source FROM reels x JOIN pipeline_runs r ON r.id = x.run_id "
+                    "WHERE x.status = 'posted' AND x.kind = 'animate' ORDER BY x.posted_at DESC NULLS LAST LIMIT 1")
+        row = cur.fetchone()
+    finally:
+        conn.close()
+    return None if not row else ("audit" if row[0] == "animate" else "news")
+
+
 # Minimum spacing between two autoposted pieces, across reels AND carousels —
 # added 2026-08-17 auditing why reach/followers had stalled (a ready-item
 # backlog posted back to back: 6 reels in 5 minutes on 2026-08-15, 6 more in
@@ -331,6 +361,10 @@ def _autopost_ready_slot():
     # 40s+ scanning 100 runs over Railway's Postgres link. See db.py's
     # get_ready_reels() docstring.
     reel_candidates = _eligible_ranked(get_ready_reels(), get_run)
+    try:
+        reel_candidates = prefer_other_lane(reel_candidates, _last_posted_lane())
+    except Exception as e:                      # noqa: BLE001  - ordering is a preference, never a reason to skip a slot
+        log.warning("lane alternation skipped: %s", e)
     if reel_candidates:
         run, reel = reel_candidates[0]
         try:
