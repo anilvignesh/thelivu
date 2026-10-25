@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0C0A06; overflow: hidden; }
+  body { display: flex; align-items: center; justify-content: center; }
+  canvas { width: min(100vw, calc(100vh * 16 / 9)); height: auto; aspect-ratio: 16 / 9; display: block; cursor: pointer; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+"use strict";
+// =====================================================================
+//  A Thelivu story piece, generated from a story file by publishing/animate/build_piece.py. 16:9, 24 fps, 120 BPM.
+//  The voice is the clock: every scene starts just before its first spoken line and holds past its last. Every figure,
+//  date and excerpt on screen is declared in the story file and checked against the findings it cites before this is built.
+// =====================================================================
+const STORY = __STORY__;
+const FPS = 24, W = 1920, H = 1080;
+const BPM = 120, BEAT = 60 / BPM, E8 = BEAT / 2, E16 = BEAT / 4;
+const DURATION = Math.round(VOICE.duration * 24) / 24;
+const NFRAMES = Math.round(DURATION * FPS);
+const LOOP_T = NFRAMES / FPS;
+const SAFE = { top: 130, bottom: 140, right: 120 };
+const HAND = 'Cambria, "Cambria Math", "Latin Modern Roman", "CMU Serif", "STIX Two Text", "Times New Roman", Georgia, serif';
+const CX = 960;
+
+// ---- the voice is the clock. VL(id) is a spoken line; WD(id, [words], n, frac) is when its n-th matching word starts
+// (case and punctuation ignored; list the numeral too, the recogniser often writes one); frac is the fallback position in the line.
+const VL = (id) => VOICE.lines.find((l) => l.id === id);
+const norm = (w) => w.toLowerCase().replace(/[^a-z0-9.]/g, '');
+const WD = (id, words, n = 1, frac = 0) => {
+  const L = VL(id), want = words.map(norm); let k = 0;
+  for (const x of L.words) if (want.includes(norm(x.w)) && ++k === n) return x.t0;
+  return L.t0 + frac * (L.t1 - L.t0);
+};
+const snap = (x) => Math.round(x / E8) * E8;
+const BEATS = STORY.beats;
+const beatLines = (b) => b.say.map((s) => VL(s.id));
+const SRC_HOLD = 3.5, SIGN_HOLD = 3.2;
+const lastLine = VL(BEATS[BEATS.length - 1].say.slice(-1)[0].id);
+const starts = BEATS.map((b, i) => (i === 0 ? 0 : snap(VL(b.say[0].id).t0 - 0.1)));
+const ENDS = [...starts.slice(1), snap(lastLine.t1 + 1.8)];
+ENDS.push(ENDS[ENDS.length - 1] + SRC_HOLD, DURATION);
+const ERAS = [...BEATS.map((b, i) => ({ type: b.type, beat: b, i, t0: starts[i], t1: ENDS[i] })),
+  { type: 'source', beat: null, i: BEATS.length, t0: ENDS[BEATS.length - 1], t1: ENDS[BEATS.length] },
+  { type: 'signoff', beat: null, i: BEATS.length + 1, t0: ENDS[BEATS.length], t1: DURATION }];
+const ERA_LIST = ERAS.map((e) => [e.t0, e.t1, () => SCENE[e.type](e)]);
+const turnBeat = BEATS.find((b) => b.turn);
+const HIT = turnBeat ? VL(turnBeat.say[0].id).t1 + 0.5 : -1;   // the payoff hit, in the pause after the line that sets it up
+const SHOTS = ERAS.map((e, i) => [e.type + i, i, e.t0, e.t1, e.beat ? (e.beat.title || e.type) : e.type]);
+const TIMELINE = {
+  width: W, height: H, fps: FPS, bpm: BPM, duration: DURATION, frames: NFRAMES, loop: LOOP_T, safe: SAFE,
+  format: 'chronology-cuts',
+  shots: SHOTS.map(([key, era, t0, t1, title], i) => ({ id: i + 1, key, era, t0, t1, title })),
+  cuts: ERAS.slice(1).map((e) => e.t0),
+  chapters: ERAS.filter((e) => e.type === 'chapter').map((e) => e.t0),
+  morphs: [],
+  cues: { hit: HIT, signoff: ERAS[ERAS.length - 1].t0 },
+  acts: [
+    { name: '1 Setup', role: 'setup', t0: 0, t1: ERAS[Math.min(1, ERAS.length - 1)].t0 },
+    { name: '2 Build', role: 'build', t0: ERAS[Math.min(1, ERAS.length - 1)].t0, t1: turnBeat ? starts[BEATS.indexOf(turnBeat)] : ERAS[ERAS.length - 2].t0 },
+    { name: '3 Turn', role: 'gift', t0: turnBeat ? starts[BEATS.indexOf(turnBeat)] : ERAS[ERAS.length - 2].t0, t1: DURATION },
+  ],
+  board: SHOTS.map(([, , t0, , title]) => ({ t: t0 + 0.5, title, sound: 'voice over a quiet pad', next: '' })),
+  narration: VOICE.lines.map((l) => ({ t0: l.t0, t1: l.t1, text: l.text })),
+};
+window.TIMELINE = TIMELINE;

@@ -200,10 +200,15 @@ STAMP_MAX = 26
 MOTIONS = {"push", "pull", "pan_l", "pan_r", "rise", "sway"}
 
 
-def shape_problems(story):
+# what a whole reel must satisfy; a long video's chapters are checked against their own limits (publishing/animate/longform_story.py)
+REEL_LIMITS = dict(words=(WORDS_MIN, WORDS_MAX), beats=(6, 8), pics=(2, 3), turns=(1, 1), types=4, first_picture=True, meta=True)
+
+
+def shape_problems(story, limits=None):
+    L = limits or REEL_LIMITS
     out = []
     stamp = story.get("stamp", "")
-    if not stamp or len(stamp) > STAMP_MAX or stamp.upper().startswith("THELIVU"):
+    if L["meta"] and (not stamp or len(stamp) > STAMP_MAX or stamp.upper().startswith("THELIVU")):
         out.append(f"stamp must be a short topic label of at most {STAMP_MAX} characters that does not repeat the wordmark ('THELIVU'); got '{stamp}'")
     for b in story["beats"]:
         d = b.get("data", {})
@@ -219,16 +224,16 @@ def shape_problems(story):
             continue
         if b.get("data", {}).get("motion") not in MOTIONS:
             out.append(f"beat '{b.get('title')}' needs data.motion, one of {sorted(MOTIONS)}")
-    if not 6 <= len(story["beats"]) <= 8:
-        out.append(f"{len(story['beats'])} beats, need 6-8")
+    if not L["beats"][0] <= len(story["beats"]) <= L["beats"][1]:
+        out.append(f"{len(story['beats'])} beats, need {L['beats'][0]}-{L['beats'][1]}")
     for b in story["beats"]:
         if b["type"] not in ("illustration", "timeline", "excerpt", "compare", "figure", "share", "list"):
             out.append(f"unknown beat type {b['type']}")
         elif len(b.get("say", [])) > _shown_items(b):
             out.append(f"beat '{b.get('title')}' speaks {len(b['say'])} lines but shows {_shown_items(b)} item(s): the screen would stay still while new facts are spoken")
     words = sum(len(l["text"].split()) for l in spoken(story))
-    if not WORDS_MIN <= words <= WORDS_MAX:
-        out.append(f"{words} spoken words, need {WORDS_MIN}-{WORDS_MAX}")
+    if not L["words"][0] <= words <= L["words"][1]:
+        out.append(f"{words} spoken words, need {L['words'][0]}-{L['words'][1]}")
     for l in spoken(story):
         n = len(l["text"].split())
         if n > LINE_MAX:
@@ -238,22 +243,23 @@ def shape_problems(story):
         bad = [a for a in _ACRONYM.findall(l["text"]) if a not in _SPOKEN_OK]
         if bad:
             out.append(f"line {l['id']} has acronyms {bad}")
-    if sum(1 for b in story["beats"] if b.get("turn")) != 1:
-        out.append("need exactly one turn beat")
+    turns = sum(1 for b in story["beats"] if b.get("turn"))
+    if not L["turns"][0] <= turns <= L["turns"][1]:
+        out.append("need exactly one turn beat" if L["turns"] == (1, 1) else f"{turns} turn beats, need {L['turns'][0]}-{L['turns'][1]}")
     types = {b["type"] for b in story["beats"]}
-    if len(types) < 4:
-        out.append("use at least 4 scene types")
+    if len(types) < L["types"]:
+        out.append(f"use at least {L['types']} scene types")
     kinds = [b["type"] == "illustration" for b in story["beats"]]
-    if not kinds[0]:
+    if L["first_picture"] and not kinds[0]:
         out.append("the first beat must be an illustration")
-    if not 2 <= sum(kinds) <= 3:
-        out.append(f"{sum(kinds)} picture beats, need 2 or 3: the first beat plus the turn beat and/or the beat before the close")
+    if not L["pics"][0] <= sum(kinds) <= L["pics"][1]:
+        out.append(f"{sum(kinds)} picture beats, need {L['pics'][0]} to {L['pics'][1]}: one at the start, and one on the turn or just before the close")
     if any(a and b for a, b in zip(kinds, kinds[1:])):
         out.append("two picture beats in a row: put a data beat between them")
     for k, b in enumerate(story["beats"]):
         if b["type"] == "illustration" and not (b.get("data", {}).get("prompt") or "").strip():
             out.append(f"picture beat {k} has no data.prompt")
-    if not (story.get("caption") or "").strip():
+    if L["meta"] and not (story.get("caption") or "").strip():
         out.append("no caption")
     return out
 

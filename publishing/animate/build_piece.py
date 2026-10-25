@@ -48,7 +48,7 @@ def check_and_fill(story, check=True):
     ids |= {b["data"]["excerpt_of"] for b in story["beats"] if "excerpt_of" in b.get("data", {})}
     if check and story.get("run_id"):                       # an article story: the evidence is the article's own passages
         from publishing.animate import articles
-        rows, headline = articles.rows_for(story["run_id"])
+        rows, headline = articles.rows_for(story["run_id"], story.get("passage_limit"))
         rows = {i: {"claim": _squash(r["claim"]), "excerpt": _squash(r["excerpt"])} for i, r in rows.items()}
     else:
         headline = None
@@ -95,11 +95,14 @@ def build(story_path, out, check=True):
     story_path, out = Path(story_path), Path(out)
     story = check_and_fill(json.loads(story_path.read_text(encoding="utf-8")), check)
     (out / "src").mkdir(parents=True, exist_ok=True); (out / "voice").mkdir(exist_ok=True); (out / "assets").mkdir(exist_ok=True)
-    head = (HERE / "lib" / "head.html").read_text(encoding="utf-8")
+    wide = story.get("format") == "wide"                 # long-form: 1920x1080, chapters
+    suf = "_wide" if wide else ""
+    head = (HERE / "lib" / f"head{suf}.html").read_text(encoding="utf-8")
     head = head.replace("__TITLE__", story["title"]).replace("__STORY__", json.dumps(story, ensure_ascii=False))
     (out / "src" / "head.html").write_text(head, encoding="utf-8")
-    for f in ("scenes.js", "bridges.js", "score.js"):
-        shutil.copy(HERE / "lib" / f, out / "src" / f)
+    for f in ("scenes", "bridges"):
+        shutil.copy(HERE / "lib" / f"{f}{suf}.js", out / "src" / f"{f}.js")
+    shutil.copy(HERE / "lib" / "score.js", out / "src" / "score.js")
     shutil.copy(LOGO, out / "assets" / "logo.png")
     for b in story["beats"]:
         for key in ("image", "bg", "bg2"):
@@ -109,17 +112,19 @@ def build(story_path, out, check=True):
                                 str(out / "assets" / (Path(img).stem + ".jpg"))], check=True)
                 b["data"][key] = Path(img).stem + ".jpg"
     # the image names changed to .jpg: rewrite the head's copy of the story
-    head = (HERE / "lib" / "head.html").read_text(encoding="utf-8")
+    wide = story.get("format") == "wide"                 # long-form: 1920x1080, chapters
+    suf = "_wide" if wide else ""
+    head = (HERE / "lib" / f"head{suf}.html").read_text(encoding="utf-8")
     head = head.replace("__TITLE__", story["title"]).replace("__STORY__", json.dumps(story, ensure_ascii=False))
     (out / "src" / "head.html").write_text(head, encoding="utf-8")
     lines = [{"id": s["id"], "text": s["text"], "after": min(float(s.get("after", 0.5)), MAX_PAUSE)} for b in story["beats"] for s in b["say"]]
     (out / "voice" / "script.json").write_text(json.dumps({"lead": 0.6, "tail": TAIL, "lines": lines}, indent=1), encoding="utf-8")
     (out / "piece.json").write_text(json.dumps({
         "name": story["name"], "title": story["title"],
-        "format": {"width": 1080, "height": 1920, "fps": 24, "bpm": 120, "duration": 60.0, "frames": 1440},
+        "format": {"width": 1920 if wide else 1080, "height": 1080 if wide else 1920, "fps": 24, "bpm": 120, "duration": 60.0, "frames": 1440},
         "storyFormat": "chronology, hard cuts on the 8th grid", "style": "math",
         "voice": {"file": "voice/voice.wav", "music": -12},
-        "review": {"safe": {"top": 240, "bottom": 420, "right": 140}, "refs": {}}}, indent=1), encoding="utf-8")
+        "review": {"safe": ({"top": 130, "bottom": 140, "right": 120} if wide else {"top": 240, "bottom": 420, "right": 140}), "refs": {}}}, indent=1), encoding="utf-8")
     print(f"built piece {out} ({len(story['beats'])} beats, {len(lines)} spoken lines)")
 
 

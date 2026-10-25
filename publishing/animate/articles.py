@@ -35,7 +35,7 @@ def _plain(s):
     return re.sub(r"\s+", " ", s).strip()
 
 
-def split_article(draft):
+def split_article(draft, limit=None):
     """(headline, passages) from the article markdown. Disclosure line, DRAFT banner and section headings are dropped."""
     headline, paras = "", []
     for block in re.split(r"\n\s*\n", draft or ""):
@@ -67,22 +67,22 @@ def split_article(draft):
             else:
                 out.append(cur)
     out = [p for p in out if len(p) <= PASSAGE_MAX] or out
-    return headline, out[:MAX_PASSAGES]
+    return headline, out[:limit or MAX_PASSAGES]
 
 
-def load(run_id):
+def load(run_id, limit=None):
     conn = _db(); cur = conn.cursor()
     cur.execute("select draft_text, verification_report, slug from pipeline_runs where id = %s", (run_id,))
     row = cur.fetchone(); conn.close()
     if not row:
         raise ValueError(f"no run {run_id}")
-    headline, passages = split_article(row[0])
+    headline, passages = split_article(row[0], limit)
     return dict(headline=headline, passages=passages, report=row[1] or "", slug=row[2])
 
 
-def rows_for(run_id):
+def rows_for(run_id, limit=None):
     """Evidence rows keyed by passage id, the shape build_piece.check_and_fill and auto.verify_claims read."""
-    a = load(run_id)
+    a = load(run_id, limit)
     return {f"a{k}": {"claim": p, "excerpt": p} for k, p in enumerate(a["passages"], 1)}, a["headline"]
 
 
