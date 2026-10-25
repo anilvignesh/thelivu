@@ -139,7 +139,7 @@ Rules, all enforced by code after you write:
   show scale), pan_l or pan_r (a place, a journey, a line of things), rise (growth, a climb, a tower), sway (something unsettled or waiting). Vary it.
 - head: 1-2 short on-screen headline lines per beat. stamp: "CAG AUDIT · <PLACE IN CAPS>" (at most 26 characters).
 - caption: 3-5 plain sentences for the post, written with digits ("258", "2018-19", "₹40 lakh"), not number words, ending "Source: <report>. Sources in bio." Any derived figure is labelled as derived.
-- MOOD (picks the background music, so it must fit the story): put "mood" at the top level of the file, one of "grave" (deaths, losses, shutdowns, money gone), "tense" (a deadline, a pending decision, a conflict), "neutral" (process, records, an explainer), "hopeful" (a fix, a recovery, a win). Choose from the facts, not from how dramatic the story sounds.
+- MOOD (picks the background music, so it must fit the story): put "mood" at the top level of the file, one of "grave" (deaths, losses, shutdowns, money gone), "tense" (a deadline, a pending decision, a conflict), "urgent" (a fast-moving event, a clock running), "investigative" (a trail of records, something dug out, who knew what), "cold" (process, procurement, clerical records, distance), "reflective" (a long failure, years of neglect), "neutral" (a plain explainer), "hopeful" (a fix, a recovery, a win). Choose from the facts, not from how dramatic the story sounds.
 - Output ONLY the JSON object, same shape as the example. Ids in "say" are short unique slugs. "after" is the pause after the line in seconds (0.5-2.4).
 """
 
