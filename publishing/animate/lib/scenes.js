@@ -219,7 +219,7 @@ SCENE.excerpt = (e) => {
       x += it.width + sp;
     });
   });
-  fade(d.where, 70, top - 50 + hgt + 56, 28, runS(e.t0 + 1.8, 0.8), DIM);
+  if (d.where) fade(d.where, 70, top - 50 + hgt + 56, 28, runS(e.t0 + 1.8, 0.8), DIM);
   furniture();
 };
 
