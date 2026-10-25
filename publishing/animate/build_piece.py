@@ -17,6 +17,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 LOGO = HERE.parent.parent / "branding" / "assets" / "logo-hires.png"
+MAX_PAUSE = 1.0          # a longer pause between lines only adds dead air; the writer asks for up to 2 s and the video ran 75 s
 TAIL = 1.8 + 3.5 + 3.2   # the hold after the last line, the silent source card, the sign-off card
 
 
@@ -35,7 +36,7 @@ def _fetch(ids):
 
 
 def _year(s):
-    y, m = s.split("-")
+    y, m = s.split("-")[:2]                       # a day-level date (2026-07-19) places the event in its month
     return round(int(y) + (int(m) - 1) / 12, 3)
 
 
@@ -111,7 +112,7 @@ def build(story_path, out, check=True):
     head = (HERE / "lib" / "head.html").read_text(encoding="utf-8")
     head = head.replace("__TITLE__", story["title"]).replace("__STORY__", json.dumps(story, ensure_ascii=False))
     (out / "src" / "head.html").write_text(head, encoding="utf-8")
-    lines = [{"id": s["id"], "text": s["text"], "after": s.get("after", 0.5)} for b in story["beats"] for s in b["say"]]
+    lines = [{"id": s["id"], "text": s["text"], "after": min(float(s.get("after", 0.5)), MAX_PAUSE)} for b in story["beats"] for s in b["say"]]
     (out / "voice" / "script.json").write_text(json.dumps({"lead": 0.6, "tail": TAIL, "lines": lines}, indent=1), encoding="utf-8")
     (out / "piece.json").write_text(json.dumps({
         "name": story["name"], "title": story["title"],

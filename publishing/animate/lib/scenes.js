@@ -131,12 +131,12 @@ function backdrop(e) {
   const img2 = d.bg2 && ASSETS[d.bg2], x = img2 ? clamp((u - 0.42) / 0.16) : 0;
   pic(img, a * (1 - x * 0.0), u, d.motion);
   if (img2) pic(img2, a * x, u, d.motion2 || d.motion);
-  ctx.globalAlpha = 1; ctx.fillStyle = 'rgba(23,20,13,0.2)'; ctx.fillRect(0, 0, W, H);
-  const hv = ctx.createLinearGradient(0, 0, 0, 600); hv.addColorStop(0, 'rgba(23,20,13,1)'); hv.addColorStop(0.8, 'rgba(23,20,13,1)'); hv.addColorStop(1, 'rgba(23,20,13,0)');
-  ctx.fillStyle = hv; ctx.fillRect(0, 0, W, 600);
-  const band = ctx.createLinearGradient(0, 380, 0, 1300);
-  band.addColorStop(0, 'rgba(23,20,13,0)'); band.addColorStop(0.35, 'rgba(23,20,13,0.5)'); band.addColorStop(0.7, 'rgba(23,20,13,0.5)'); band.addColorStop(1, 'rgba(23,20,13,0)');
-  ctx.fillStyle = band; ctx.fillRect(0, 380, W, 920);
+  ctx.globalAlpha = 1; ctx.fillStyle = 'rgba(23,20,13,0.05)'; ctx.fillRect(0, 0, W, H);
+  const hv = ctx.createLinearGradient(0, 0, 0, 200); hv.addColorStop(0, 'rgba(23,20,13,0.85)'); hv.addColorStop(1, 'rgba(23,20,13,0)');
+  ctx.fillStyle = hv; ctx.fillRect(0, 0, W, 200);
+  const band = ctx.createLinearGradient(0, 330, 0, 1330);
+  band.addColorStop(0, 'rgba(23,20,13,0)'); band.addColorStop(0.2, 'rgba(23,20,13,0.5)'); band.addColorStop(0.8, 'rgba(23,20,13,0.5)'); band.addColorStop(1, 'rgba(23,20,13,0)');
+  ctx.fillStyle = band; ctx.fillRect(0, 330, W, 1000);
   const g = ctx.createLinearGradient(0, 1250, 0, 1920); g.addColorStop(0, 'rgba(23,20,13,0)'); g.addColorStop(1, 'rgba(23,20,13,0.85)');
   ctx.fillStyle = g; ctx.fillRect(0, 1250, W, 670); ctx.restore();
 }

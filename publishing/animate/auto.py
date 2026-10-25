@@ -36,9 +36,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [animate_auto] %(mes
 OUT = Path(os.environ.get("ANIMATE_STORIES", os.path.expanduser("~/animate-stories")))
 EXAMPLE = Path(__file__).parent / "stories" / "gujarat-bocw" / "story.json"
 LINE_MAX = 26
+PICTURE_FALLBACK = "an empty public office desk under one lamp at night, files stacked beside it, warm light"
 MIN_FINDINGS, MIN_AMOUNTS, AMOUNT_CAP_CR = 4, 2, 10_000
 MAX_FINDINGS_SHOWN = 14
-WORDS_MIN, WORDS_MAX = 95, 170      # spoken words in the whole piece; words/second per line
+WORDS_MIN, WORDS_MAX = 85, 135      # spoken words in the whole piece; words/second per line
 _JUNK = re.compile(r"manual|guide|style|dictionary|recruit|holiday|vacanc|state financ|finance accounts|appropriation", re.I)
 _ACRONYM = re.compile(r"\b[A-Z]{2,}\b")
 _SPOKEN_OK = {"I", "II", "III", "IV", "V"}
@@ -106,7 +107,7 @@ _RULES = """You write a 55-65 second explainer video as a STORY FILE (JSON), for
 Use ONLY the findings given. Each has an id, a claim and a verbatim excerpt from the audit report. Nothing else is known.
 
 Rules, all enforced by code after you write:
-- 6 to 8 beats, then nothing else (a source card and a sign-off are added automatically). Beat types: illustration (the first beat only),
+- 6 to 8 beats, then nothing else (a source card and a sign-off are added automatically). Beat types: illustration (the first beat, and up to two more: see PICTURE BEATS),
   timeline, excerpt, compare, figure, share, list. Use at least 4 different types. Exactly one beat has "turn": true (the biggest fact).
 - THE SCREEN MUST CHANGE WITH EVERY FACT. The viewer sees each fact as it is spoken. So: a beat has ONE spoken line, except compare (two lines,
   one per bar), timeline (one line per event, events >= lines) and list (items >= lines, each item cued on its own words). Every number, date, name
@@ -118,18 +119,18 @@ Rules, all enforced by code after you write:
 - "say" lines are spoken aloud by a text-to-speech voice. Write numbers in words ("one lakh fifty-seven thousand", "twenty twenty-two"),
   never digits. Never write an acronym or abbreviation in speech: spell out the body ("the audit", "the state government").
   Plain, flat, factual sentences, in the form "the audit found ...". No adjectives of judgement, no motive, no "scandal".
-  Total spoken words 95 to 150 across the whole piece. At most 26 words per line.
+  Total spoken words 85 to 125 across the whole piece. At most 26 words per line.
 - Every figure, date, name and claim must come from the excerpts of the findings you cite in "refs" for that beat. Do not round up,
   infer, combine across years, or add context you were not given. If you compute a number (a difference or percentage), set it in
   data as derived and say "derived" on screen via the derived note; the two inputs must be in the cited excerpts.
-- LENGTH: 100 to 165 spoken words in total over 6-8 beats, so about 15-20 words per line and NEVER more than 26. Count them.
+- LENGTH: 85 to 130 spoken words in total over 6-8 beats, so about 12-18 words per line and NEVER more than 26. Count them, and AIM FOR ABOUT 105 words so a few extra still fit. The finished video must run 60 to 70 seconds, so be sparing: one fact per beat, cut every aside.
+- PICTURE BEATS (the reel must engage, not only inform): the first beat, the turn beat and the last beat before the closing figure or source are PICTURE BEATS when the story allows (two or three in all, never two in a row). A picture beat is one full-screen picture with ONE spoken line that states one fact from the cited passages; head is that fact as a sharp 1-2 line headline; data.image is "open.png" for the first beat and "b<k>.png" for the beat at position k (0-based) otherwise, and data.prompt is the picture: for the OPENING one write a dramatic cinematic close-up of ONE concrete object tied to the story (an old brass padlock on an iron gate at night, a stack of files under a single lamp), lit by one warm or coloured light source, deep shadows, saturated colour, shallow depth of field; avoid words like cracked, broken, harsh, blood, weapon, which the image filter refuses. Write a picture beat's line by taking ONE sentence from a cited passage and shortening it only by deleting words; never add a description of what the story or the page is about. Never write NEET, UG or any acronym in speech: say "the medical entrance exam" only if a passage says so, otherwise leave it out. The spoken line of a picture beat must stay close to the cited passage's own words: do not summarise, characterise or add context (no "about a student march" unless a passage says so). Anything drawn or said in a picture beat must still come from the cited passages. The data beats between them carry the proof.
 - "numbers" holds digit strings only, exactly as printed in the excerpt ("3,16,000", "June 2024", "69.33"), never number words. Words belong only in "say".
 - Do not total, add or restate: say a figure only as the excerpt states it. A stated percentage is shown as a share; a count as a figure.
 - "numbers": every figure/date string, written exactly as it appears in the cited excerpts, that the beat shows or says.
 - excerpt beats: data.excerpt_of is a finding id, data.mark is a list of exact substrings of that excerpt to highlight (1-2, short).
 - timeline events: at "YYYY-MM", label short. compare: two values with the same unit, data.fmt "inr" for plain counts. list: 2-4 items, each short.
-- illustration beat: data.image is "open.png" and data.prompt is ONE sentence describing a conceptual, non-photoreal, symbolic image with no
-  people's faces, no text, no lettering, no numbers, no logos, no real people.
+- illustration beat: data.prompt is ONE sentence describing a bright, richly coloured, well lit, cinematic image of CONCRETE things you could point at (an almirah of files in a government office in morning light, a dry canal bed, a locked gate), one clear subject, no people's faces, no text, no lettering, no numbers, no logos, no real people. Concrete nouns, not abstractions.
 - EVERY beat except the first also has data.bg_prompt: one sentence describing the picture that fills the screen behind that beat, so it must be
   bright, richly coloured, well lit and cinematic, with one clear subject that shows what the beat is about (a place, objects, machinery, documents,
   weather, a landscape; no faces, no text, no numbers, no logos). Each beat's picture is different and fits THIS story, not a generic symbol.
@@ -140,7 +141,7 @@ Rules, all enforced by code after you write:
 - head: 1-2 short on-screen headline lines per beat. stamp: "CAG AUDIT · <PLACE IN CAPS>" (at most 26 characters).
 - caption: 3-5 plain sentences for the post, written with digits ("258", "2018-19", "₹40 lakh"), not number words, ending "Source: <report>. Sources in bio." Any derived figure is labelled as derived.
 - MOOD (picks the background music, so it must fit the story): put "mood" at the top level of the file, one of "grave" (deaths, losses, shutdowns, money gone), "tense" (a deadline, a pending decision, a conflict), "urgent" (a fast-moving event, a clock running), "investigative" (a trail of records, something dug out, who knew what), "cold" (process, procurement, clerical records, distance), "reflective" (a long failure, years of neglect), "neutral" (a plain explainer), "hopeful" (a fix, a recovery, a win). Choose from the facts, not from how dramatic the story sounds.
-- Output ONLY the JSON object, same shape as the example. Ids in "say" are short unique slugs. "after" is the pause after the line in seconds (0.5-2.4).
+- Output ONLY the JSON object, same shape as the example. Ids in "say" are short unique slugs. "after" is the pause after the line in seconds (0.4-1.4).
 """
 
 
@@ -214,6 +215,8 @@ def shape_problems(story):
             if lo <= 0 or hi / lo > 50:
                 out.append(f"compare beat '{b.get('title')}' sets {d['a']['value']} against {d['b']['value']}: two bars that far apart are not the same kind of quantity; use a figure beat for each instead")
     for b in story["beats"][1:]:
+        if b["type"] == "illustration":
+            continue
         if b.get("data", {}).get("motion") not in MOTIONS:
             out.append(f"beat '{b.get('title')}' needs data.motion, one of {sorted(MOTIONS)}")
     if not 6 <= len(story["beats"]) <= 8:
@@ -240,8 +243,16 @@ def shape_problems(story):
     types = {b["type"] for b in story["beats"]}
     if len(types) < 4:
         out.append("use at least 4 scene types")
-    if story["beats"][0]["type"] != "illustration" or any(b["type"] == "illustration" for b in story["beats"][1:]):
-        out.append("illustration must be the first beat and only there")
+    kinds = [b["type"] == "illustration" for b in story["beats"]]
+    if not kinds[0]:
+        out.append("the first beat must be an illustration")
+    if not 2 <= sum(kinds) <= 3:
+        out.append(f"{sum(kinds)} picture beats, need 2 or 3: the first beat plus the turn beat and/or the beat before the close")
+    if any(a and b for a, b in zip(kinds, kinds[1:])):
+        out.append("two picture beats in a row: put a data beat between them")
+    for k, b in enumerate(story["beats"]):
+        if b["type"] == "illustration" and not (b.get("data", {}).get("prompt") or "").strip():
+            out.append(f"picture beat {k} has no data.prompt")
     if not (story.get("caption") or "").strip():
         out.append("no caption")
     return out
@@ -276,8 +287,8 @@ def make_image(story, folder):
     jobs = []                                           # (beat, key, prompt, file)
     for k, b in enumerate(story["beats"]):
         d = b["data"]
-        if k == 0:
-            jobs.append((b, "image", d.pop("prompt", None) or "an empty public office desk under one lamp at night", "open.png"))
+        if b["type"] == "illustration":
+            jobs.append((b, "image", d.pop("prompt", None) or "an empty public office desk under one lamp at night", "open.png" if k == 0 else f"b{k}.png"))
         else:
             has_bg = bool(d.get("bg_prompt"))
             if has_bg:
@@ -287,10 +298,12 @@ def make_image(story, folder):
     for b in story["beats"][1:]:
         b["data"].pop("bg_prompt", None); b["data"].pop("bg_prompt2", None)
     paths = generate_beat_images([j[2] for j in jobs], folder / "assets", seed=11)
-    for (b, key, _, name), p in zip(jobs, paths):
+    for k, ((b, key, _, name), p) in enumerate(zip(jobs, paths)):
+        if not p and key == "image":                    # a picture the image filter refused: one more try on a plain, safe subject
+            p = generate_beat_images([PICTURE_FALLBACK], folder / "assets", seed=11 + k)[0]
         if not p:
             if key == "image":
-                raise RuntimeError("opening illustration failed")
+                raise RuntimeError("picture beat illustration failed")
             continue                                    # a missing backdrop only costs that beat its atmosphere
         target = folder / "assets" / name
         if Path(p) != target:
