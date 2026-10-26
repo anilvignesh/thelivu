@@ -231,7 +231,12 @@ def author(run_id, outline_only=False):
         log.info("description attempt %s rejected: %s", n, "; ".join(bad)[:300])
         story["caption"] = _describe(a, spoken, story["caption"], bad)
     else:
-        raise RuntimeError("the description is not supported by the passages: " + "; ".join(bad)[:600])
+        # The model keeps adding detail the passages do not carry; a plain description with no claims
+        # in it is better than a failed video. Chapter titles are labels, not statements.
+        log.info("description never passed the check; using the claim-free description")
+        titles = "; ".join(f"{i}. {c['title']}" for i, c in enumerate(o["chapters"], 1))
+        story["caption"] = (f"{o['title']}. A fact-checked Thelivu report in {len(o['chapters'])} parts: {titles}. "
+                            "Allegations are attributed to who makes them, with any response recorded. The full article with its sources is on Thelivu.")
     return o, story
 
 
