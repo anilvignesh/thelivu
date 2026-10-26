@@ -741,18 +741,27 @@ def _revision_loop(brief, dossier, verification, pattern, draft, run_id, topic_l
             f"REVISION REQUEST FROM EDITORIAL REVIEWER:\n\n{wri_tasks}\n\n"
             f"ORIGINAL DRAFT:\n\n{draft}"
         )
+        prior_draft = draft
         draft = run_skill("article-writer",
             _with_brief(brief,
                 f"{revision_prompt}\n\nDOSSIER:\n\n{dossier}\n\n"
                 f"VERIFICATION REPORT:\n\n{verification}\n\nPATTERN:\n\n{pattern}"),
-            run_id=run_id, topic=topic_label)
+            run_id=run_id, topic=topic_label,
+            max_tokens=_WRITER_MAX_TOKENS)
     elif inv_tasks:
         # Investigator produced new material — re-run writer too
         draft = run_skill("article-writer",
             _with_brief(brief,
                 f"UPDATED DOSSIER (revised by investigator):\n\n{dossier}\n\n"
                 f"VERIFICATION REPORT:\n\n{verification}\n\nPATTERN:\n\n{pattern}"),
-            run_id=run_id, topic=topic_label)
+            run_id=run_id, topic=topic_label,
+            max_tokens=_WRITER_MAX_TOKENS)
+
+    if not (draft or "").strip() and wri_tasks:
+        # The revision came back with no text (reasoning ate the token budget).
+        # An empty draft must never replace a real one and go to the owner.
+        log.warning("Writer revision returned no text — keeping the previous draft.")
+        draft = prior_draft
 
     return _revision_loop(brief, dossier, verification, pattern, draft,
                           run_id, topic_label, revision_num + 1)
@@ -856,6 +865,11 @@ def _provider_from_err(err):
     if any(k in m for k in ("anthropic", "claude", "overloaded", "x-api-key")):
         return "Claude"
     return "Unknown provider"
+
+
+# The writer thinks before it writes; 4096 was eaten by reasoning on dense briefs
+# (run 379, 2026-10-26: revision cycle 2 returned no text, empty draft to owner).
+_WRITER_MAX_TOKENS = 12000
 
 
 def _pause_cause(err):
@@ -1041,7 +1055,8 @@ def _run_spine(brief, investigate_input, run_id, topic_label, display_label,
                 f"VERIFIED DOSSIER:\n\n{dossier}\n\n"
                 f"VERIFICATION REPORT:\n\n{verification}\n\n"
                 f"PATTERN ANALYSIS:\n\n{pattern}"),
-            run_id=run_id, topic=topic_label)
+            run_id=run_id, topic=topic_label,
+            max_tokens=_WRITER_MAX_TOKENS)
         draft, review = _revision_loop(brief, dossier, verification, pattern, draft,
                                        run_id, topic_label)
         return (draft, review, verification, gate)
