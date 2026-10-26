@@ -155,6 +155,8 @@ function heads(e, y0 = 215, size = 64) {
 const SCENE = {};
 
 // ILLUSTRATION: a generated picture of objects and space, full bleed, slow push; drawn type over it, never lettering in it
+const num = (v) => typeof v === "number" ? v : parseFloat(String(v).replace(/,/g, "")) || 0;
+
 SCENE.illustration = (e) => {
   const d = e.beat.data, img = ASSETS[d.image], u = clamp((TT - e.t0) / (e.t1 - e.t0));
   fillAll(INK);
@@ -231,16 +233,16 @@ SCENE.excerpt = (e) => {
 SCENE.compare = (e) => {
   const d = e.beat.data, x0 = 120, bw = 1250, ay = 460, by = 680, hh = 120;
   fillAll(INK); heads(e);
-  const mx = Math.max(d.a.value, d.b.value);
+  const mx = Math.max(num(d.a.value), num(d.b.value));
   [[d.a, ay, GOLD, 0], [d.b, by, LATE, 1]].forEach(([it, y, col, k]) => {
-    const t = itemT(e, it.cue, k, 2), p = runS(t, 1.4), v = it.value * p;
+    const t = itemT(e, it.cue, k, 2), p = runS(t, 1.4), v = num(it.value) * p;
     fade(it.label, x0, y - hh / 2 - 22, 38, runS(t - 0.2, 0.5), DIM);
     ctx.save(); ctx.fillStyle = rgbaM(col, 0.34); ctx.strokeStyle = col; ctx.lineWidth = 4;
     const w = Math.max(2, bw * v / mx); ctx.fillRect(x0, y - hh / 2, w, hh); ctx.strokeRect(x0, y - hh / 2, w, hh); ctx.restore();
     if (p > 0.01) mText((d.fmt === 'inr' ? inr(v) : Math.round(v)) + (d.unit || ''), Math.min(x0 + Math.max(2, bw * v / mx) + 20, 1800 - 330), y + 22, 66, { color: col, align: 'left', bold: true, font: SERIF, alpha: runS(t, 0.3) });
   });
   if (d.derived) {                           // the change between the bars, drawn only when the story labels it as derived
-    const dp = runS(HIT, 0.6), pc = Math.round(Math.abs(1 - d.b.value / d.a.value) * 100), down = d.b.value < d.a.value;
+    const dp = runS(HIT, 0.6), pc = Math.round(Math.abs(1 - num(d.b.value) / num(d.a.value)) * 100), down = num(d.b.value) < num(d.a.value);
     onBlock((down ? '−' : '+') + pc + '%', CX, 880, 110, 'late', dp, true);
     fade(d.derived, 120, 935, 30, runS(HIT + 0.4, 0.8), DIM);
   }
@@ -251,7 +253,7 @@ SCENE.compare = (e) => {
 SCENE.share = (e) => {
   const d = e.beat.data, t = itemT(e, d.cue, 0, 1), sp = 56, x0 = 120 + 22, y0 = 560, col = d.color === 'gold' ? GOLD : LATE;
   fillAll(INK); heads(e);
-  const v = keysM([[t, 0], [t + 1.8, d.value]]);
+  const v = keysM([[t, 0], [t + 1.8, num(d.value)]]);
   onBlock(v.toFixed(d.decimals ?? 0) + '%', CX, 470, 110, d.color === 'gold' ? 'real' : 'late', runS(t - 0.1, 0.4), true);
   for (let i = 0; i < 100; i++) {
     const on = clamp(v - i), cx = x0 + (i % 20) * sp, cy = y0 + Math.floor(i / 20) * sp;
@@ -266,7 +268,7 @@ SCENE.share = (e) => {
 SCENE.figure = (e) => {
   const d = e.beat.data, t = itemT(e, d.cue, 0, 1);
   fillAll(INK); heads(e);
-  const v = keysM([[t, 0], [t + 1.8, d.value]]), s = (d.prefix || '') + v.toFixed(d.decimals ?? 0).replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (d.suffix || '');
+  const v = keysM([[t, 0], [t + 1.8, num(d.value)]]), s = (d.prefix || '') + v.toFixed(d.decimals ?? 0).replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (d.suffix || '');
   onBlock(s, CX, 560, 190, d.color === 'gold' ? 'real' : 'late', runS(t - 0.1, 0.4), true);
   wrapLines(d.label, 1400, 50).forEach((r, i) => fade(r, 120, 700 + i * 64, 50, runS(t + 1.6, 0.8), CREAM, { align: 'left' }));
   furniture();
