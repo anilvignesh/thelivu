@@ -768,7 +768,7 @@ def attended_mode():
 
 # ── Main entry point ──────────────────────────────────────────────────────────
 
-def run_skill(skill_name, input_text, extra_tools=None, max_tokens=4096,
+def run_skill(skill_name, input_text, extra_tools=None, max_tokens=12000,
               run_id=None, topic=None):
     """
     Route a skill to its provider. There is NO cross-engine fallback on failure.
