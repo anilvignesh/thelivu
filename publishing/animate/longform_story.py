@@ -14,6 +14,7 @@ cites passages, every declared figure must occur in them, and the claim-verifier
 The story lands in ANIMATE_STORIES, `approved` false: a long video goes through the longform gates (script review, then the unlisted upload), never straight out.
 """
 import argparse
+from pathlib import Path
 import json
 import re
 import sys
@@ -240,6 +241,61 @@ def author(run_id, outline_only=False):
     return o, story
 
 
+def readable(o, story):
+    """The script as the gate-1 reader sees it (publishing/longform.parse_script format): title, description, then each chapter's narration."""
+    out = [f"TITLE: {story['title']}", f"DESCRIPTION: {story['caption']}"]
+    for k, ch in enumerate(o["chapters"], 1):
+        out.append(f"CHAPTER {k} TITLE: {ch['title']}")
+        lines = [x["text"] for b in story["beats"] for x in b["say"] if x["id"].startswith(f"c{k}_") and not x["id"].endswith("_card")]
+        out.append(f"CHAPTER {k}: " + " ".join(lines))
+    return "\n".join(out) + "\n"
+
+
+def youtube_description(story, slug):
+    """The upload description: the summary, the article that carries every source, and the document labels the video itself shows."""
+    wheres = []
+    for b in story["beats"]:
+        w = (b.get("data") or {}).get("where")
+        if w and w not in wheres:
+            wheres.append(w)
+    parts = [story["caption"].strip(), f"Full article with every source: https://thelivu.up.railway.app/a/{slug}"]
+    if wheres:
+        parts.append("Documents shown in the video:\n" + "\n".join(f"- {w}" for w in wheres))
+    return "\n\n".join(parts)
+
+
+def chapter_marks(piece_dir, story):
+    """[(seconds, title)] for YouTube chapters, from the aligned narration: each chapter starts where its spoken title card starts."""
+    vj = json.loads((Path(piece_dir) / "voice.json").read_text())
+    start = {l["id"]: l["t0"] for l in vj["lines"]}
+    marks = []
+    for b in story["beats"]:
+        if b["type"] == "chapter":
+            marks.append([int(start.get(b["say"][0]["id"], 0)), b["data"]["title"]])
+    if marks:
+        marks[0][0] = 0                                    # YouTube wants the first chapter at 0:00
+    return marks
+
+
+def materialise(story):
+    """Pictures and the story file on disk, ready for worker.render. Returns the story.json path."""
+    folder = auto.OUT / story["name"]
+    (folder / "assets").mkdir(parents=True, exist_ok=True)
+    auto.make_image(story, folder)
+    import subprocess
+    for b in story["beats"]:                                 # a picture the image service never made (daily cap, filter) must not break the build
+        d = b.get("data") or {}
+        for key in ("image", "bg", "bg2"):
+            if d.get(key) and not (folder / "assets" / d[key]).exists():
+                if key == "image":                           # the scene needs a file: a plain ink card
+                    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=0x17140D:s=1920x1080", "-frames:v", "1",
+                                    str(folder / "assets" / d[key])], check=True)
+                else:
+                    d.pop(key)
+    (folder / "story.json").write_text(json.dumps(story, indent=2, ensure_ascii=False) + "\n")
+    return folder / "story.json"
+
+
 def run(run_id, dry=False, outline_only=False):
     o, story = author(run_id, outline_only)
     if outline_only:
@@ -248,11 +304,7 @@ def run(run_id, dry=False, outline_only=False):
     log.info("long-form story %s: %s beats, %s spoken words (about %.1f minutes)", story["name"], len(story["beats"]), words, words / 2.2 / 60)
     if dry:
         print(json.dumps(story, indent=2, ensure_ascii=False)); return 0
-    folder = auto.OUT / story["name"]
-    (folder / "assets").mkdir(parents=True, exist_ok=True)
-    auto.make_image(story, folder)
-    (folder / "story.json").write_text(json.dumps(story, indent=2, ensure_ascii=False) + "\n")
-    log.info("wrote %s", folder / "story.json")
+    log.info("wrote %s", materialise(story))
     return 0
 
 

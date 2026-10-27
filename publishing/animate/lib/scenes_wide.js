@@ -282,7 +282,8 @@ SCENE.list = (e) => {
   d.items.forEach((it, k) => {
     const t = itemT(e, it.cue, k, d.items.length), p = runS(t, 0.8), rows = wrapLines(it.text, maxW, size);
     const cy = y - size * 0.35;
-    segLine(x0 - 88, cy - 18, x0 - 52, cy + 18, LATE, 6, runS(t, 0.4)); segLine(x0 - 52, cy - 18, x0 - 88, cy + 18, LATE, 6, runS(t + 0.15, 0.4));
+    if (d.mark === 'x') { segLine(x0 - 88, cy - 18, x0 - 52, cy + 18, LATE, 6, runS(t, 0.4)); segLine(x0 - 52, cy - 18, x0 - 88, cy + 18, LATE, 6, runS(t + 0.15, 0.4)); }
+    else segLine(x0 - 86, cy, x0 - 50, cy, GOLD, 8, runS(t, 0.4));   // a list is not always things that went wrong; the red cross is opt-in
     rows.forEach((s, i) => fade(s, x0, y + i * (size * 1.3), size, p, CREAM));
     y += rows.length * size * 1.3 + 50;
   });

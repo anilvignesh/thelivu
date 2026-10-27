@@ -132,6 +132,28 @@ def _read_render_marks(video_path):
         return {}
 
 
+def _render_animate(qid, blob, parsed, out):
+    """Render a story written by publishing/animate/longform_story.py: pictures, voice, widescreen frames, mixed score. Returns (path, parsed)."""
+    import shutil
+    import subprocess
+    from publishing.animate import longform_story, worker
+    from shared.db import set_longform_artifact
+
+    story = blob["story"]
+    log.info("#%s rendering the animate story %s", qid, story["name"])
+    mp4, _review = worker.render(str(longform_story.materialise(story)))
+    shutil.copy(mp4, out)
+    seconds = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(out)],
+                                   capture_output=True, text=True, check=True).stdout)
+    res = {"ok": True, "seconds": seconds, "shots": len(story["beats"]),
+           "chapters": longform_story.chapter_marks(worker.PIECES / story["name"], story)}
+    set_longform_artifact(qid, video_path=str(out))
+    _write_render_marks(out, res)
+    parsed["_render"] = res
+    log.info("#%s rendered: %.1f min, %d beats, %dKB", qid, seconds / 60, len(story["beats"]), _kb(out))
+    return str(out), parsed
+
+
 def _render_one(row, voice=None, illustrate=True):
     """Render (or re-use) the MP4 for one approved script. Returns (path, parsed)."""
     from publishing import longform
@@ -163,6 +185,10 @@ def _render_one(row, voice=None, illustrate=True):
 
     LONGFORM_DIR.mkdir(parents=True, exist_ok=True)
     out = LONGFORM_DIR / f"longform_{qid}.mp4"
+    from shared.db import kv_get
+    blob = kv_get(f"longform_story_{qid}")
+    if blob:                                       # written by the animate engine: its own renderer
+        return _render_animate(qid, json.loads(blob), parsed, out)
     # Unique per render, not per item. Two renders of the same script used to
     # claim the same directory and overwrite each other's audio file by file —
     # which is exactly what happened on 2026-09-13: a stale long-running service
@@ -213,6 +239,9 @@ def _upload_unlisted(qid, video_path, parsed, existing_id=None):
         data = f.read()
     log.info("#%s uploading %.1fMB unlisted…", qid, len(data) / 1e6)
     from publishing.longform import build_description
+    from shared.db import kv_get
+    blob = kv_get(f"longform_story_{qid}")          # the animate engine keeps its own, source-bearing description
+    full_description = json.loads(blob)["description"] if blob else build_description(parsed)
     video_id, permalink = youtube.publish_video(
         data,
         title=parsed.get("title") or f"Thelivu long-form #{qid}",
@@ -220,7 +249,7 @@ def _upload_unlisted(qid, video_path, parsed, existing_id=None):
         # the video puts on screen, derived from the FIGURE/TABLE/RECORD lines
         # rather than trusted to the writer's own list, which drifts the moment
         # a chapter is edited.
-        description=build_description(parsed),
+        description=full_description,
         tags=parsed.get("hashtags") or None,
         privacy="unlisted",
         chapters=chapters or None,

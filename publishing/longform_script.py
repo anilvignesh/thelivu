@@ -487,6 +487,40 @@ def _long_holds(parsed):
     return out
 
 
+def _write_animate(queue_id, meta, dry_run=False):
+    """The animate engine's script: chapters written and fact-checked passage by passage (publishing/animate/longform_story.py).
+
+    The gate-1 reader gets the narration in the same text format as ever. The structured story that the
+    renderer needs is kept beside it (kv longform_story_<id>), because script_text has no room for scenes.
+    There is no word floor here: a five-minute chaptered video is the product, not a failed 750-word script.
+    """
+    import json
+    from publishing.animate import longform_story as ls
+    from publishing.longform_build import attach_script
+    from shared.db import kv_set
+
+    log.info("#%s writing an animate long-form story from run #%s", queue_id, meta["run_id"])
+    try:
+        o, story = ls.author(meta["run_id"])
+    except Exception as e:
+        _note_attempt(queue_id)
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    text = ls.readable(o, story)
+    DRAFTS_DIR.mkdir(parents=True, exist_ok=True)
+    path = DRAFTS_DIR / f"longform-{queue_id}-{meta['slug']}.txt"
+    if dry_run:
+        path = path.with_suffix(".dryrun.txt")
+        path.write_text(text)
+        return {"ok": True, "path": str(path), "dry_run": True, "chapters": len(o["chapters"]), "blockers": []}
+    path.write_text(text)
+    kv_set(f"longform_story_{queue_id}", json.dumps({"story": story, "description": ls.youtube_description(story, meta["slug"])}, ensure_ascii=False))
+    res = attach_script(queue_id, str(path), blockers=[])
+    if not res.get("ok"):
+        return {"ok": False, "error": res.get("error"), "path": str(path)}
+    kv_set(f"longform_script_fails_{queue_id}", "")
+    return {"ok": True, "path": str(path), "words": res.get("words"), "chapters": res.get("chapters"), "blockers": []}
+
+
 def write_script(queue_id, model=None, dry_run=False):
     """Write, check and attach the long-form script for one queued story.
 
@@ -514,6 +548,9 @@ def write_script(queue_id, model=None, dry_run=False):
         return {"ok": False, "error": (
             f"#{queue_id} is {meta['status']}, not {longform.QUEUED} — a script "
             "already exists, or a person has already acted on it")}
+
+    if os.environ.get("LONGFORM_ENGINE") == "animate":
+        return _write_animate(queue_id, meta, dry_run)
 
     from engine.agents.skill_runner import run_skill
     log.info("#%s writing a long-form script from run #%s", queue_id, meta["run_id"])
