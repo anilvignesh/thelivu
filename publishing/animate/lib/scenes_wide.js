@@ -215,9 +215,10 @@ SCENE.excerpt = (e) => {
   ctx.save(); ctx.globalAlpha = eo(cp); ctx.translate(0, 20 * (1 - eo(cp))); ctx.shadowColor = 'transparent'; ctx.fillStyle = 'rgba(30,26,18,0.75)'; ctx.fillRect(120, top - 50, 1280, hgt);
   ctx.shadowColor = 'transparent'; ctx.strokeStyle = 'rgba(210,170,109,0.5)'; ctx.lineWidth = 2; ctx.strokeRect(121, top - 49, 1278, hgt - 2);
   ctx.fillStyle = GOLD; ctx.fillRect(120, top - 50, 8, hgt); ctx.restore();
-  const hot = itemT(e, d.cue, 0, 1), hp = runS(hot, 0.9);
+  const hot = itemT(e, d.cue, 0, 1);
   rows.forEach((row, r) => {
-    let x = x0; const rp = runS(e.t0 + 1.2 + r * 0.22, 0.7);
+    let x = x0; const rt = e.t0 + 1.2 + r * 0.22, rp = runS(rt, 0.7);
+    const hp = runS(Math.max(hot, rt + 1.0), 0.9);       // the highlighter sweeps over words that are already readable, never ahead of them
     row.forEach((it, ii) => {
       const hh = it.hot ? hp : 0, joinNext = it.hot && row[ii + 1] && row[ii + 1].hot;
       if (hh > 0.001) { ctx.save(); ctx.fillStyle = GOLD; ctx.fillRect(x - 4, top + r * lh - size * 0.95, (it.width + 8 + (joinNext ? sp : 0)) * hh, size * 1.25); ctx.restore(); }
