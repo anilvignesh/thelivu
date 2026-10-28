@@ -78,54 +78,77 @@
     TEX[mood]();
     if (hit > 0) pad(hit, srcT + 0.4, P.held, 0.04, { type: 'triangle', cut: 1100, att: 0.5, rel: 0.6, send: 0.5 });   // the signature: the same payoff hit and held chord in every mood
   } else {
-    // LONG FORM: the same mood, arranged. Each chapter is a section with its own level, the pulse layer enters in chapter two and builds to
-    // the chapter that holds the payoff; the payoff is the same silence, hit and held chord as a reel, then the music comes back thinner and resolves.
-    const chs = allEras.filter((er) => er.type === 'chapter').map((er) => er.t0), n = chs.length;
-    const C = hit > 0 ? Math.max(0, chs.filter((t) => t <= hit).length - 1) : Math.max(0, n - 2);       // the chapter holding the payoff
-    const lev = (k) => k < C ? 0.5 + 0.35 * (C ? k / C : 1) : k === C ? 1 : k === n - 1 ? 0.4 : 0.55 + 0.25 * ((k - C - 1) / Math.max(1, n - C - 2));   // build to the payoff, ebb, a second smaller crest, then resolve
-    const raw = { pluck, noiseHit, bass, chime, pad, drone };
-    let w0 = 0, w1 = 0, L = 1;
-    const gate = (t) => t >= w0 && t < w1;
-    pluck = (t, f, v, ...r) => { if (gate(t)) raw.pluck(t, f, v * L, ...r); };
-    bass = (t, f, v) => { if (gate(t)) raw.bass(t, f, v * L); };
-    chime = (t, fr, v, ...r) => { if (gate(t)) raw.chime(t, fr, v * L, ...r); };
-    noiseHit = (t, d, ty, fq, q, v, ...r) => { if (gate(t)) raw.noiseHit(t, d, ty, fq, q, v * L, ...r); };
-    pad = (t0, t1, nt, pk, o) => { const a = Math.max(t0, w0), b = Math.min(t1, w1); if (b - a > 0.5) raw.pad(a, b, nt, pk * L, o); };
-    drone = (t0, t1, f, pk, o) => { const a = Math.max(t0, w0), b = Math.min(t1, w1); if (b - a > 0.5) raw.drone(a, b, f, pk * L, o); };
-    const section = (a, b, l, fn) => { w0 = a; w1 = b; L = l; fn(); };
-    const end = hit > 0 ? srcT : srcT + 0.4;
-    quietEnd = end;                                                            // each section is gated to its own window; the loops just need an upper bound
-    // sections: one per chapter, the payoff chapter cut off 0.9 s before the hit, a thinner return after it
-    chs.forEach((c0, k) => {
-      const c1 = k + 1 < n ? chs[k + 1] : end, stop = (k === C && hit > 0) ? hit - 0.9 : c1;
-      const mid = (c0 + stop) / 2;                                              // every chapter swells: quieter first half, fuller second half
-      section(Math.max(0, c0 - 0.6), mid, lev(k) * 0.78, TEX[mood]);
-      section(mid - 0.4, stop, lev(k), TEX[mood]);
-      // the pulse: from chapter two, a low pluck on the chord root every beat and a soft offbeat on the chord, rising to the payoff
-      if (k >= 1 && k < n - 1) section(k === C ? c0 + 1 : mid, stop, lev(k), () => {
-        const beat = (k === C ? 0.46 : 0.6) * pace;
-        for (let t = c0 + 1, i = 0; t < stop; t += beat, i++) {
-          const c = chordAt(t); bass(t, nz(c[0]) / 2, 0.075); if (i % 2) pluck(t + beat / 2, nz(c[(i >> 1) % c.length]), 0.045, ((i % 5) - 2) * 0.18, 0.3, P.bright, 0.25);
-        }
+    // LONG FORM: a documentary underscore with a beat, not a drone. One tempo per mood, a fixed grid, a chord every two bars, and layers that
+    // enter and leave with the story's level:
+    //   pads      soft chords under everything (cross-faded every two bars)
+    //   bass      a rhythmic root pattern on the grid
+    //   arp       an eighth-note arpeggio of the chord, accented on the beat
+    //   hats      eighth-note hats, sixteenths at the peak
+    //   kick/snare  a kick on 1 and 3 (a syncopated ghost at the peak), a soft snare on 2 and 4 once the story is driving
+    //   melody    a four-bar hook that plays every other phrase (call and response), the thing a listener hums
+    //   fills     a snare roll into every eighth bar, a cymbal wash on its downbeat
+    // The level follows the story: build to the chapter holding the payoff, ebb, a second crest, resolve. A snare roll climbs into the payoff,
+    // then 0.9 s of silence, one low hit and the held chord; the groove returns half a beat later at about half weight, without the kick.
+    const chs = allEras.filter((er) => er.type === 'chapter').map((er) => er.t0), n = chs.length, end = hit > 0 ? srcT : srcT + 0.4;
+    const C = hit > 0 ? Math.max(0, chs.filter((t) => t <= hit).length - 1) : Math.max(0, n - 2);
+    const rk = allEras.filter((er) => er.type === 'chapter').findIndex((er) => er.beat && er.beat.data && er.beat.data.recap), m = rk >= 0 ? n - 1 : n;   // the recap chapter, when there is one, closes at a high level; the chapter before it resolves
+    const lev0 = (k) => k === rk ? 0.85 : k < C ? 0.5 + 0.35 * (C ? k / C : 1) : k === C ? 1 : k === m - 1 ? 0.4 : 0.55 + 0.25 * ((k - C - 1) / Math.max(1, m - C - 2));
+    const centres = chs.map((c0, k) => [(c0 + (k + 1 < n ? chs[k + 1] : end)) / 2, lev0(k)]);
+    const lev = (t) => {                                                   // smooth between chapter centres
+      if (!centres.length) return 0.7;
+      if (t <= centres[0][0]) return centres[0][1];
+      for (let i = 1; i < centres.length; i++) if (t <= centres[i][0]) { const [ta, la] = centres[i - 1], [tb, lb] = centres[i]; return la + (lb - la) * (t - ta) / (tb - ta); }
+      return centres[centres.length - 1][1];
+    };
+    const GAP = hit > 0 ? [hit - 0.9, hit + 2.4] : [1e9, 1e9];             // the payoff's silence
+    const inGap = (t) => t > GAP[0] - 0.12 && t < GAP[1];
+    const fadeOut = (t) => t > end - 5 ? Math.max(0, (end + 0.4 - t) / 5.4) : 1;   // the last seconds ease away under the source card
+    const post = (t) => t >= GAP[1] ? 0.6 : 1;                             // after the payoff everything is quieter
+    const BPM = { grave: 72, tense: 100, neutral: 96, hopeful: 104, urgent: 116, reflective: 78, investigative: 94, cold: 88 }[mood];
+    const beat = 60 / BPM, e8 = beat / 2, bar = beat * 4, seq = [0, 1, 2, 1];
+    const chordB = (t) => P.chords[(seq[Math.floor(t / (2 * bar)) % 4] + start) % P.chords.length];
+    const cut = (sp) => { const r = []; sp.forEach(([a, b2]) => { if (b2 <= GAP[0] || a >= GAP[1]) r.push([a, b2]); else { if (a < GAP[0] - 0.4) r.push([a, GAP[0] - 0.4]); if (b2 > GAP[1]) r.push([GAP[1], b2]); } }); return r; };
+    // 1. pads: one chord per two bars, overlapped so they never break
+    for (let t0 = 0; t0 < end; t0 += 2 * bar) {
+      const c = chordB(t0 + 0.01), L = lev(t0 + bar);
+      cut([[t0 - 0.6, Math.min(end, t0 + 2 * bar + 0.6)]]).forEach(([a, b2]) => {
+        a = Math.max(0, a); if (b2 - a < 1.2) return;
+        const g = fadeOut(t0 + bar) * post(a), ar = Math.min(1.2, (b2 - a) / 3);
+        pad(a, b2, c, 0.016 * (0.5 + 0.5 * L) * g, { type: 'sawtooth', cut: 600 + 1600 * L, att: ar, rel: ar, send: 0.55 });
+        pad(a, b2, [c[1], c[2] || c[0]], 0.01 * g, { type: 'triangle', cut: 1600, att: ar, rel: ar, send: 0.6, pan: 0.1 });
       });
-      // the payoff chapter, last 20 s before the hit: the arpeggio doubles up
-      if (k === C && hit > 0) section(Math.max(c0 + 6, hit - 20), hit - 0.9, 1, () => {
-        for (let t = Math.max(c0 + 6, hit - 20), i = 0; t < hit - 0.9; t += 0.23 * pace, i++) pluck(t, chordNote(t, [0, 1, 2, 3, 2, 1][i % 6]) * 2, 0.04 + 0.03 * (t - (hit - 20)) / 20, ((i % 5) - 2) * 0.15, 0.2, P.bright, 0.2);
-      });
-      // each chapter card: a riser into it, a chime on it
-      if (k > 0) { section(0, 1e9, 1, () => { to = 's'; riser(c0 - 1.4, c0, 0.05); to = 'm'; chime(c0 + 0.05, [nz(pick(k)), nz(pick(k + 2))], 0.05); }); }
-    });
-    if (hit > 0) {
-      // after the payoff: the held chord, then the texture again at half weight
-      section(hit, srcT + 0.4, 1, () => pad(hit, hit + 7, P.held, 0.04, { type: 'triangle', cut: 1100, att: 0.5, rel: 0.9, send: 0.5 }));
-      section(hit + 2.5, end, lev(C + 1 < n ? C + 1 : C) * 0.8, TEX[mood]);
     }
-    // the close: the held chord returns under the last chapter
-    section(Math.max(0, end - 9), srcT + 0.4, 1, () => pad(end - 9, srcT + 0.4, P.held, 0.02, { type: 'triangle', cut: 1000, att: 2.0, rel: 1.0, send: 0.5 }));
-    pluck = raw.pluck; noiseHit = raw.noiseHit; bass = raw.bass; chime = raw.chime; pad = raw.pad; drone = raw.drone; w0 = 0; w1 = 1e9; L = 1;
+    // 2. the grid, one step per eighth note
+    const bassPat = [1, 0, 1, 0, 1, 1, 0, 1], arpPat = [0, 1, 2, 3, 2, 1, 2, 1];
+    const motif = { 0: 4, 3: 3, 5: 2, 8: 3, 11: 1, 12: 0 };                // step in a 16-step phrase -> scale degree
+    for (let i = 0; ; i++) {
+      const t = i * e8; if (t >= end - 2) break;
+      if (inGap(t)) continue;
+      const L = lev(t), g = fadeOut(t) * post(t), bt = i % 8, barN = Math.floor(i / 8), c = chordB(t), post1 = t >= GAP[1];
+      const root = nz(c[0]) / 2, odd = bt % 2, pan = ((i % 4) - 1.5) * 0.2;
+      if (barN >= 1 && bassPat[bt]) bass(t, bt === 7 ? nz(c[1]) / 2 : bt === 5 ? root * 2 : root, 0.05 * (0.6 + 0.4 * L) * g);
+      if (!post1 && barN >= 3 && L > 0.55 && (bt === 0 || bt === 4)) sub(t, 0.07 * L * g);
+      if (!post1 && barN >= 3 && L > 0.85 && bt === 3) sub(t, 0.035 * g);
+      if (barN >= 4 && L > 0.7 && (bt === 2 || bt === 6)) noiseHit(t, 0.16, 'bandpass', 1900, 0.9, 0.026 * L * g, 0.05, 0.12);
+      if (barN >= 2 && L > 0.5) {
+        noiseHit(t + (odd ? 0.015 : 0), 0.04, 'highpass', 7500, 1, (odd ? 0.011 : 0.016) * L * g, pan);
+        if (L > 0.9) noiseHit(t + e8 / 2, 0.03, 'highpass', 8000, 1, 0.007 * g, -pan);
+      }
+      const an = nz(c[arpPat[bt] % c.length]) * (L > 0.9 && barN % 4 >= 2 ? 2 : 1);
+      pluck(t, an, (0.02 + 0.028 * L) * (bt % 4 === 0 ? 1.3 : 1) * g, pan, beat * 1.5, P.bright * (0.5 + 0.5 * L), 0.4);
+      if (L > 0.55 && Math.floor(barN / 4) % 2 === 1 && motif[i % 16] !== undefined) pluck(t, nz(pick(motif[i % 16])), 0.06 * L * g, 0.2, beat * 3, P.bright, 0.6);
+      if (barN % 8 === 7 && bt >= 4 && L > 0.5) noiseHit(t, 0.1, 'bandpass', 2200, 0.8, (0.012 + 0.008 * (bt - 4)) * g, -0.1, 0.1);
+      if (barN % 8 === 0 && barN > 0 && bt === 0 && L > 0.6) noiseHit(t, 0.9, 'highpass', 5000, 0.7, 0.022 * L * g, 0, 0.4);
+    }
+    // 3. the run-up: a snare roll that quickens into the payoff's silence
+    if (hit > 0) for (let t = GAP[0] - 4, d = beat / 2; t < GAP[0] - 0.2; t += d, d = Math.max(0.07, d * 0.9)) noiseHit(t, 0.08, 'bandpass', 2000, 0.9, 0.012 + 0.03 * (t - (GAP[0] - 4)) / 3.8, 0, 0.1);
+    // 4. each chapter card: a low whoosh into it
+    chs.forEach((c0, k) => { if (k > 0) { to = 's'; sweep(c0 - 1.8, c0, 0.03, 160, 1600); sub(c0, 0.045); to = 'm'; } });   // a low whoosh and a soft thud, no saw riser (it squeaks)
+    // 5. the payoff: the held chord rings out over the return
+    if (hit > 0) pad(hit, hit + 9, P.held, 0.035, { type: 'triangle', cut: 1100, att: 0.5, rel: 3, send: 0.5 });
   }
-  // scene cues
-  eras.forEach((er, i) => {
+  // scene cues (reels only: in a long video single tones on every scene are what makes it sound quirky)
+  if (!WIDE) eras.forEach((er, i) => {
     const b = er.beat, lines = b.say.map((s) => VL(s.id)), t0 = er.t0;
     if (er.type === 'illustration') {
       if (t0 > 0.5) { riser(Math.max(0, t0 - 1.1), t0, 0.05); chime(t0 + 0.02, [nz(pick(i)), nz(pick(i + 2))], 0.05); }
@@ -144,6 +167,6 @@
     }
   });
   to = 's';
-  ERAS.forEach((er) => { if (er.type === 'compare' || er.type === 'figure' || er.type === 'share') for (let i = 0; i < 6; i++) blip(er.t0 + 2 + i * 0.22, 1400 + i * 70, 1200, 0.02, 0.02); });
+  if (!WIDE) ERAS.forEach((er) => { if (er.type === 'compare' || er.type === 'figure' || er.type === 'share') for (let i = 0; i < 6; i++) blip(er.t0 + 2 + i * 0.22, 1400 + i * 70, 1200, 0.02, 0.02); });
   if (hit > 0) { sub(hit, 0.9); noiseHit(hit, 0.5, 'lowpass', 400, 0.7, 0.35); chime(hit + 0.05, [nz(P.held[1]), nz(P.held[2])], 0.06); }
   chime(signoff + 0.4, [nz('D5'), nz('Fs5'), nz('A5')], 0.04);

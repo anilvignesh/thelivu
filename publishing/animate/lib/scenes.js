@@ -262,7 +262,8 @@ SCENE.share = (e) => {
 SCENE.figure = (e) => {
   const d = e.beat.data, t = itemT(e, d.cue, 0, 1);
   fillAll(INK); heads(e);
-  const v = keysM([[t, 0], [t + 1.8, d.value]]), s = (d.prefix || '') + v.toFixed(d.decimals ?? 0).replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (d.suffix || '');
+  const yr = !d.prefix && !d.suffix && !d.decimals && Number.isInteger(d.value) && d.value >= 1900 && d.value <= 2100;   // a year is a label, not a quantity: no comma, no count-up
+  const v = yr ? d.value : keysM([[t, 0], [t + 1.8, d.value]]), s = (d.prefix || '') + (yr ? String(d.value) : v.toFixed(d.decimals ?? 0).replace(/\B(?=(\d{3})+(?!\d))/g, ',')) + (d.suffix || '');
   onBlock(s, CX, 1000, 130, d.color === 'gold' ? 'real' : 'late', runS(t - 0.1, 0.4), true);
   wrapLines(d.label, 820, 46).forEach((r, i) => fade(r, 70, 1100 + i * 60, 46, runS(t + 1.6, 0.8), CREAM, { align: 'left' }));
   furniture();

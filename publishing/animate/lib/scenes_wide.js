@@ -269,7 +269,8 @@ SCENE.share = (e) => {
 SCENE.figure = (e) => {
   const d = e.beat.data, t = itemT(e, d.cue, 0, 1);
   fillAll(INK); heads(e);
-  const v = keysM([[t, 0], [t + 1.8, num(d.value)]]), s = (d.prefix || '') + v.toFixed(d.decimals ?? 0).replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (d.suffix || '');
+  const yr = !d.prefix && !d.suffix && !d.decimals && Number.isInteger(num(d.value)) && num(d.value) >= 1900 && num(d.value) <= 2100;   // a year is a label, not a quantity: no comma, no count-up
+  const v = yr ? num(d.value) : keysM([[t, 0], [t + 1.8, num(d.value)]]), s = (d.prefix || '') + (yr ? String(num(d.value)) : v.toFixed(d.decimals ?? 0).replace(/\B(?=(\d{3})+(?!\d))/g, ',')) + (d.suffix || '');
   onBlock(s, CX, 560, 190, d.color === 'gold' ? 'real' : 'late', runS(t - 0.1, 0.4), true);
   wrapLines(d.label, 1400, 50).forEach((r, i) => fade(r, 120, 700 + i * 64, 50, runS(t + 1.6, 0.8), CREAM, { align: 'left' }));
   furniture();
@@ -321,7 +322,7 @@ SCENE.chapter = (e) => {
   const d = e.beat.data, u = clamp((TT - e.t0) / (e.t1 - e.t0));
   fillAll(INK); backdrop(e);
   ctx.save(); ctx.fillStyle = 'rgba(23,20,13,0.55)'; ctx.fillRect(0, 0, W, H); ctx.restore();
-  mono('PART ' + d.n + ' OF ' + d.of, 120, 400, 34, GOLD, 'left', runS(e.t0 + 0.2, 0.6), 10);
+  mono(d.label || ('PART ' + d.n + ' OF ' + d.of), 120, 400, 34, GOLD, 'left', runS(e.t0 + 0.2, 0.6), 10);
   segLine(120, 430, 380, 430, GOLD, 3, runS(e.t0 + 0.3, 0.8));
   wrapLines(d.title, 1400, 92, true).forEach((r, i) => line(r, 120, 560 + i * 110, 92, runS(e.t0 + 0.5 + i * 0.3, 0.9), CREAM, { bold: true, align: 'left' }));
   if (d.sub) fade(d.sub, 120, 560 + wrapLines(d.title, 1400, 92, true).length * 110 + 20, 40, runS(e.t0 + 1.2, 0.8), DIM);

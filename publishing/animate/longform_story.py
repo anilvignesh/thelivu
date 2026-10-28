@@ -8,7 +8,7 @@ cites passages, every declared figure must occur in them, and the claim-verifier
   1. An OUTLINE call splits the passages into 3 to 5 chapters (title, one-line subtitle, the passages each draws on, which chapter holds the payoff).
   2. Each chapter is written as a small story of its own and must pass the reel's checks with chapter-sized limits (auto.shape_problems(limits=...),
      check_and_fill, verify_claims). A chapter that fails is rewritten with the reasons; a chapter that cannot be fixed fails the whole video.
-  3. The chapters are joined behind a spoken title card ("Part one. ...") into one story with format "wide", rendered by build_piece with the
+  3. The chapters are joined behind a spoken title card (the chapter title only) into one story with format "wide", rendered by build_piece with the
      landscape scenes (lib/scenes_wide.js). Say ids are prefixed per chapter so they stay unique; one turn beat is kept (the climax chapter's).
 
 The story lands in ANIMATE_STORIES, `approved` false: a long video goes through the longform gates (script review, then the unlisted upload), never straight out.
@@ -51,6 +51,27 @@ CHAPTER MODE (these override any conflicting rule above). You write ONLY chapter
 - One or two picture beats (never next to each other); the first beat may be any scene type. At least 3 scene types.
 - {turn_rule}
 - Continue the story: these things were ALREADY SAID in earlier chapters, do not repeat them: {said}"""
+
+
+RECAP_LIMITS = dict(words=(70, 150), beats=(4, 7), pics=(0, 1), turns=(0, 0), types=3, first_picture=False, meta=False)
+RECAP_TITLE, RECAP_SUB = "The short version", "The facts that matter most, in one place"
+RECAP_PICTURE = "A single lit desk lamp over a stack of folded papers with one red thread across them, dark ink background, no people, no text, no numbers"
+_RECAP_MODE = """
+
+RECAP MODE (these override any conflicting rule above). You write the closing chapter, "{title}", of a {total}-chapter video. The viewer should leave remembering the few facts that matter most.
+- 4 to 7 beats, 70 to 140 spoken words in all, at most 22 words per line, numbers written in words.
+- Pick the FOUR or FIVE most important facts of the whole video, the ones at the heart of the story, most important first. Each is one short plain line that carries its attribution (who alleges it, or what the record shows). Use ONLY facts already said below; add nothing new.
+- Show them: one LIST beat whose items are those facts, one spoken line per item (the screen shows each item as it is spoken). The other beats may be a short opening line and a closing line.
+- The last beat is what is still unresolved, never a verdict, never a motive. No "in conclusion", no "to sum up".
+- The chapter's title card is added automatically: do not write one. Do not write a source card, a sign-off, a stamp or a caption.
+- No beat has "turn": true.
+- EVERYTHING THE VIDEO ALREADY SAID: {said}"""
+
+
+def recap_chapter(chapters, o):
+    """The closing chapter drawn from what the others cite: its passages are every passage the earlier chapters' beats cite."""
+    refs = sorted({i for c in chapters for b in c["beats"] for i in b.get("refs", [])}, key=lambda x: int(x[1:]))
+    return {"title": RECAP_TITLE, "sub": RECAP_SUB, "passages": refs, "picture": o.get("closing_picture") or RECAP_PICTURE, "recap": True}
 
 
 def _passages(a):
@@ -110,8 +131,11 @@ def write_chapter(run_id, a, o, k, said, header, prev=None, feedback=None):
     example = json.loads(auto.EXAMPLE.read_text()); example.pop("approved", None)
     turn_rule = ('Exactly ONE beat has "turn": true: the biggest fact of the whole story is in this chapter.' if k == o["climax"]
                  else 'No beat in this chapter has "turn": true.')
-    system = articles._RULES + _CHAPTER_MODE.format(n=k, total=len(o["chapters"]), title=ch["title"], turn_rule=turn_rule,
-                                                    said="; ".join(said) if said else "(nothing yet: this is the opening chapter)")
+    if ch.get("recap"):
+        system = articles._RULES + _RECAP_MODE.format(total=len(o["chapters"]), title=ch["title"], said=" | ".join(said))
+    else:
+        system = articles._RULES + _CHAPTER_MODE.format(n=k, total=len(o["chapters"]), title=ch["title"], turn_rule=turn_rule,
+                                                        said="; ".join(said) if said else "(nothing yet: this is the opening chapter)")
     user = (f"EXAMPLE story file (shape and style only; its facts are about a different story):\n{json.dumps(example, ensure_ascii=False)}\n\n"
             f"HEADLINE: {a['headline']}\nCHAPTER {k}: {ch['title']} ({ch.get('sub', '')})\n\nPASSAGES:\n" + "\n".join(f"[{i}] {ps[i]}" for i in ch["passages"]) +
             f"\n\nVERIFICATION REPORT:\n{a['report'][:3500]}")
@@ -139,7 +163,7 @@ def attempt_chapter(run_id, a, o, k, said, header, rows):
             feedback = f"your output was not valid JSON ({e}); escape quotes inside strings and write one object"; continue
         problems = []
         try:
-            problems += auto.shape_problems(dict(chap, stamp="X", caption="X"), CHAPTER_LIMITS)
+            problems += auto.shape_problems(dict(chap, stamp="X", caption="X"), RECAP_LIMITS if ch.get("recap") else CHAPTER_LIMITS)
         except Exception as e:                                   # noqa: BLE001
             problems.append(f"shape check could not run: {type(e).__name__}: {e}")
         outside = sorted({i for b in chap.get("beats", []) for i in b.get("refs", []) if i not in set(ch["passages"])})
@@ -162,29 +186,34 @@ def attempt_chapter(run_id, a, o, k, said, header, rows):
     raise RuntimeError(f"chapter {k} ({ch['title']}): {feedback}")
 
 
+def add_chapter(beats, k, total, chap, ch, climax):
+    """Append chapter k to the beat list: a spoken title card, then its beats with say ids prefixed c{k}_ and one turn beat kept."""
+    card = {"type": "chapter", "title": f"chapter {k}", "head": [], "refs": [],
+            "say": [{"id": f"c{k}_card", "text": f"{ch['title']}.", "after": 0.8}],
+            "data": {"n": k, "of": total, "title": ch["title"], "sub": ch.get("sub", ""), "bg_prompt": ch["picture"], "motion": "push",
+                     **({"label": "SUMMARY", "recap": True} if ch.get("recap") else {})}}
+    beats.append(card)
+    ids = {s["id"] for b in chap["beats"] for s in b["say"]}
+    def fix(x):
+        if isinstance(x, dict):
+            return {kk: (f"c{k}_{v}" if kk == "line" and v in ids else fix(v)) for kk, v in x.items()}
+        if isinstance(x, list):
+            return [fix(v) for v in x]
+        return x
+    for b in chap["beats"]:
+        for s in b["say"]:
+            s["id"] = f"c{k}_{s['id']}"
+        b["data"] = fix(b.get("data", {}))
+        if k != climax:
+            b.pop("turn", None)
+        beats.append(b)
+
+
 def assemble(run_id, a, o, chapters):
     """One story file: for each chapter a spoken title card, then its beats. Say ids are prefixed per chapter, one turn beat is kept."""
     beats, total = [], len(chapters)
     for k, chap in enumerate(chapters, 1):
-        ch = o["chapters"][k - 1]
-        card = {"type": "chapter", "title": f"chapter {k}", "head": [], "refs": [],
-                "say": [{"id": f"c{k}_card", "text": f"Part {ORD[k - 1]}. {ch['title']}.", "after": 0.8}],
-                "data": {"n": k, "of": total, "title": ch["title"], "sub": ch.get("sub", ""), "bg_prompt": ch["picture"], "motion": "push"}}
-        beats.append(card)
-        ids = {s["id"] for b in chap["beats"] for s in b["say"]}
-        for b in chap["beats"]:
-            for s in b["say"]:
-                s["id"] = f"c{k}_{s['id']}"
-            def fix(x):
-                if isinstance(x, dict):
-                    return {kk: (f"c{k}_{v}" if kk == "line" and v in ids else fix(v)) for kk, v in x.items()}
-                if isinstance(x, list):
-                    return [fix(v) for v in x]
-                return x
-            b["data"] = fix(b.get("data", {}))
-            if k != o["climax"]:
-                b.pop("turn", None)
-            beats.append(b)
+        add_chapter(beats, k, total, chap, o["chapters"][k - 1], o["climax"])
     name = f"long-{run_id}-{re.sub(r'[^a-z0-9]+', '-', a['headline'].lower())[:28].strip('-')}"
     return {"name": name, "title": o["title"], "format": "wide", "run_id": run_id, "passage_limit": PASSAGE_LIMIT, "stamp": o["stamp"],
             "mood": o["mood"], "caption": o["summary"], "approved": False,
@@ -222,6 +251,16 @@ def author(run_id, outline_only=False):
         chapters.append(chap)
         said.append(f"chapter {k} ({o['chapters'][k - 1]['title']}): " + " ".join(s["text"] for b in chap["beats"] for s in b["say"])[:500])
         log.info("chapter %s ok: %s beats", k, len(chap["beats"]))
+    o["chapters"].append(recap_chapter(chapters, o))
+    recap_said = [" ".join(s["text"] for b in c["beats"] for s in b["say"]) for c in chapters]
+    try:
+        chapters.append(attempt_chapter(run_id, a, o, len(o["chapters"]), recap_said, header, rows))
+    except RuntimeError as e:                                  # one fresh round, then the video goes without a recap rather than not at all
+        log.info("recap failed (%s), one more round", str(e)[:160])
+        try:
+            chapters.append(attempt_chapter(run_id, a, o, len(o["chapters"]), recap_said, header, rows))
+        except RuntimeError as e2:
+            log.info("recap failed twice (%s): the video has no recap", str(e2)[:160]); o["chapters"].pop()
     story = assemble(run_id, a, o, chapters)
     used = sorted({i for b in story["beats"] for i in b.get("refs", [])})
     spoken = " ".join(x["text"] for b in story["beats"] for x in b["say"])
