@@ -3159,6 +3159,18 @@ def get_ready_reels():
     return list(latest_by_run.values())
 
 
+# The homepage plays the reels of this many newest published stories inline, so their bytes are kept.
+# ~7MB each, so about 85MB: the 1GB problem was keeping every reel forever, not keeping the front page.
+FEED_VIDEO_KEEP = 12
+
+_FEED_REELS_SQL = """SELECT x FROM (
+        SELECT (SELECT rl.id FROM reels rl WHERE rl.run_id = r.id AND rl.status IN ('ready', 'posted')
+                ORDER BY rl.id DESC LIMIT 1) AS x
+        FROM pipeline_runs r JOIN publications p ON p.run_id = r.id
+        WHERE r.status = 'published' AND r.draft_text IS NOT NULL
+        ORDER BY r.updated_at DESC LIMIT %d) t WHERE x IS NOT NULL""" % FEED_VIDEO_KEEP
+
+
 def release_posted_reel_bytes(older_than_days=2):
     """Drop the MP4 of reels that no longer need serving. Returns rows freed.
 
@@ -3185,6 +3197,7 @@ def release_posted_reel_bytes(older_than_days=2):
             cur.execute(
                 """UPDATE reels SET mp4 = NULL
                     WHERE mp4 IS NOT NULL
+                      AND id NOT IN (""" + _FEED_REELS_SQL + """)
                       AND (status IN ('killed', 'superseded', 'orphaned_killed_run')
                            OR (status = 'posted'
                                AND posted_at < NOW() - (%s || ' days')::interval))""",
@@ -3193,6 +3206,7 @@ def release_posted_reel_bytes(older_than_days=2):
             cur.execute(
                 """UPDATE reels SET mp4 = NULL
                     WHERE mp4 IS NOT NULL
+                      AND id NOT IN (""" + _FEED_REELS_SQL + """)
                       AND (status IN ('killed', 'superseded', 'orphaned_killed_run')
                            OR (status = 'posted'
                                AND posted_at < datetime('now', ?)))""",
@@ -3434,6 +3448,7 @@ def get_feed_items(limit=30):
                     ORDER BY cr.id DESC LIMIT 1) AS carousel_id,
                    (SELECT rl.id FROM reels rl
                     WHERE rl.run_id = r.id AND rl.status IN ('ready', 'posted')
+                      AND rl.mp4 IS NOT NULL
                     ORDER BY rl.id DESC LIMIT 1) AS reel_id
             FROM pipeline_runs r
             JOIN publications p ON p.run_id = r.id
