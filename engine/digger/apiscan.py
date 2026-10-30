@@ -33,9 +33,15 @@ Both tiers obey robots.txt. An API is a different door into the same building,
 not a way around a refusal.
 """
 
+import contextlib
 import json
 import logging
+import os
 import re
+import shutil
+import socket
+import subprocess
+import time
 import urllib.error
 import urllib.request
 from urllib.parse import urljoin, urlparse
@@ -242,38 +248,95 @@ def discover(index_url, max_probes=MAX_PROBES, deep=True):
     return out
 
 
+def _obscura_bin():
+    """Path to the Obscura binary, or None. OBSCURA_BIN wins, else `obscura` on PATH."""
+    return os.environ.get("OBSCURA_BIN") or shutil.which("obscura")
+
+
+@contextlib.contextmanager
+def _obscura_server(binary, boot_s=10):
+    """Run `obscura serve` on a free loopback port for the length of the block; yield its CDP http URL.
+
+    Obscura is a ~30MB headless engine (V8, no Chromium) that speaks CDP, so Playwright drives it the
+    same way it drives Chrome and sees fetch/XHR as Network events. That is what makes this tier fit
+    the digger box's 256MB cap, where Chromium (~300MB) does not. No --stealth: this crawler identifies
+    itself and honours robots.txt (checked by the caller before we get here).
+    """
+    with socket.socket() as sk:
+        sk.bind(("127.0.0.1", 0))
+        port = sk.getsockname()[1]
+    proc = subprocess.Popen([binary, "serve", "--port", str(port), "--user-agent", fetch.USER_AGENT],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        url = f"http://127.0.0.1:{port}"
+        deadline = time.time() + boot_s
+        while time.time() < deadline:
+            if proc.poll() is not None:
+                raise ApiscanUnavailable(f"obscura exited at startup (code {proc.returncode})")
+            try:
+                urllib.request.urlopen(url + "/json/version", timeout=1).read()
+                break
+            except (urllib.error.URLError, OSError):
+                time.sleep(0.2)
+        else:
+            raise ApiscanUnavailable("obscura did not start listening in time")
+        yield url
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
 def browser_watch(index_url, wait_ms=6000):
-    """Load the page in a real browser and report the endpoints it calls.
+    """Load the page in a headless browser and report the endpoints it calls.
 
     This is the tier that would have found `rsdoc.nic.in/Question/
     Search_Questions` from `sansad.in` without anyone watching by hand.
 
-    Raises ApiscanUnavailable when Playwright is not installed — which is the
-    normal state on the digger box and a deliberate one. Install it where a
-    scout sweep actually runs:  pip install playwright && playwright install
-    chromium
+    Engine: Obscura when OBSCURA_BIN is set or `obscura` is on PATH (light enough for the digger
+    box), otherwise Playwright's Chromium. Either way needs the `playwright` Python package
+    (pip install playwright); only the Chromium path also needs `playwright install chromium`.
+
+    Raises ApiscanUnavailable when no engine is available, which is the normal state on a box
+    without either, and a deliberate one.
     """
     try:
         from playwright.sync_api import sync_playwright
     except ImportError as e:
         raise ApiscanUnavailable(
-            "playwright is not installed; static mining only. "
-            "pip install playwright && playwright install chromium") from e
+            "playwright is not installed; static mining only. pip install playwright "
+            "(and either put obscura on PATH / set OBSCURA_BIN, or playwright install chromium)") from e
 
     if robots.allowed(index_url) is False:
         raise ApiscanUnavailable("robots.txt disallows this crawler")
 
-    calls = []
+    def _watch(browser, own_context):
+        calls = []
+        ctx = browser.contexts[0] if (browser.contexts and not own_context) else browser.new_context(user_agent=fetch.USER_AGENT)
+        page = ctx.new_page()
+        page.on("response", lambda r: calls.append(
+            (r.url, (r.headers or {}).get("content-type", ""))))
+        page.goto(index_url, wait_until="networkidle", timeout=wait_ms * 5)
+        page.wait_for_timeout(wait_ms)
+        return calls
+
+    binary = _obscura_bin()
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=True)
-        try:
-            page = browser.new_page(user_agent=fetch.USER_AGENT)
-            page.on("response", lambda r: calls.append(
-                (r.url, (r.headers or {}).get("content-type", ""))))
-            page.goto(index_url, wait_until="networkidle", timeout=wait_ms * 5)
-            page.wait_for_timeout(wait_ms)
-        finally:
-            browser.close()
+        if binary:
+            with _obscura_server(binary) as cdp_url:
+                browser = pw.chromium.connect_over_cdp(cdp_url)
+                try:
+                    calls = _watch(browser, own_context=False)
+                finally:
+                    browser.close()
+        else:
+            browser = pw.chromium.launch(headless=True)
+            try:
+                calls = _watch(browser, own_context=True)
+            finally:
+                browser.close()
 
     out = []
     for url, ctype in calls:

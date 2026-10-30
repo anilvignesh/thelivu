@@ -46,4 +46,9 @@ uvicorn>=0.30
 #
 #   pip install playwright && playwright install chromium
 #
+# Light option for the digger box: Obscura (github.com/h4ckf0r0day/obscura, Apache-2.0), a ~30MB headless
+# engine that speaks CDP. `pip install playwright` only (no Chromium download), put the `obscura` binary on
+# PATH or set OBSCURA_BIN, and apiscan.browser_watch() uses it instead. Verified 2026-10-30 against a page
+# making hidden fetch + XHR calls (both found, ~3s). Build: docker build from its repo, binary at /obscura.
+#
 # playwright>=1.55
