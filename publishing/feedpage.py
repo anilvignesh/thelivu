@@ -178,7 +178,7 @@ _PAGE = """<!DOCTYPE html>
     var pager = nextLink.closest('.pager'), busy = false;
     var sentinel = document.createElement('div'); sentinel.className = 'sentinel'; sentinel.setAttribute('aria-hidden', 'true');
     pager.parentNode.insertBefore(sentinel, pager);
-    pager.hidden = true;
+    nextLink.hidden = true;  // hide only the Older link; Newer stays so a deep link can always get back
     var more = new IntersectionObserver(function(es) {{ if (es[0].isIntersecting) loadMore(); }}, {{rootMargin: '0px 0px 900px 0px'}});
     function done() {{
       more.disconnect(); sentinel.className = 'end'; sentinel.removeAttribute('aria-hidden'); sentinel.textContent = 'You are up to date';
@@ -197,7 +197,7 @@ _PAGE = """<!DOCTYPE html>
         recount();
         nextLink = d.querySelector('.pager a[rel=next]');
         if (!nextLink) done();
-      }}).catch(function() {{ pager.hidden = false; more.disconnect(); }})
+      }}).catch(function() {{ nextLink.hidden = false; more.disconnect(); }})
         .then(function() {{
           busy = false;
           if (nextLink) {{ sentinel.className = 'sentinel'; more.unobserve(sentinel); more.observe(sentinel); }}  // re-arm: fires again if still in range
@@ -386,7 +386,7 @@ def render_feed(items, contact_handle, channel_url="", page=1, has_more=False):
 
     if page > 1:  # later pages are just the grid, no lead or rail
         grid = [g for g in (_story_html(i, contact_handle) for i in items) if g]
-        body = (f'<h2 class="section-label">Page {page}</h2><div class="feed">\n' + "\n".join(grid) + "\n</div>" + pager) if grid else empty
+        body = (f'<a class="backlink" href="/">&larr; Latest stories</a><h2 class="section-label">Older &middot; page {page}</h2><div class="feed">\n' + "\n".join(grid) + "\n</div>" + pager) if grid else empty
         return _PAGE.format(base_css=BASE_CSS, masthead=mast, body=body)
 
     hero_idx = _first_titled_index(items, contact_handle)
