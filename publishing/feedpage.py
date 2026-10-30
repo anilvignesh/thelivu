@@ -67,7 +67,7 @@ _PAGE = """<!DOCTYPE html>
   @keyframes settle {{ from {{ transform: scale(1.05); opacity: .6; }} to {{ transform: none; opacity: 1; }} }}
   .hero h2 {{ font-size: clamp(2rem, 4.2vw, 3.6rem); line-height: 1.05; margin-bottom: .9rem; }}
   .hero p.hook {{ font-size: clamp(1.1rem, 1.6vw, 1.35rem); line-height: 1.5; color: var(--dim); max-width: 46rem; }}
-  .hero.textonly {{ border-top: 6px solid var(--accent); padding-top: 1.25rem; }}
+
 
   .rail {{ border-left: 1px solid var(--line); padding-left: clamp(1.25rem, 2.5vw, 2.5rem); }}
   .rail .section-label {{ margin-bottom: .25rem; }}
@@ -133,6 +133,36 @@ _PAGE = """<!DOCTYPE html>
     text-decoration: none; transition: background 160ms ease, color 160ms ease, transform 160ms var(--ease-out); }}
   .pager a:active {{ transform: scale(.97); }}
   @media (hover: hover) and (pointer: fine) {{ .pager a:hover {{ background: var(--accent); color: var(--on-accent); }} }}
+  .cover {{ background: linear-gradient(160deg, var(--panel), var(--line)); border-top: 4px solid var(--accent); overflow: hidden; }}
+  .cover svg {{ display: block; width: 100%; height: 100%; transition: transform 500ms var(--ease-out); }}
+  .cover .ln {{ fill: var(--fg); opacity: .22; }}
+  .cover .rd {{ fill: var(--fg); opacity: .82; }}
+  .cover .hl {{ fill: var(--accent); opacity: .9; }}
+  .cover .st {{ fill: none; stroke: var(--accent); stroke-width: 1.4; opacity: .95; }}
+  .cover .st.thin {{ stroke-width: .5; }}
+  .cover .stt {{ fill: var(--accent); font: 800 3.1px var(--sans); letter-spacing: .08em; }}
+  .cover .ghost {{ font: 800 30px 'Noto Sans Malayalam', 'Manjari', 'Malayalam MN', 'Kartika', 'Nirmala UI', var(--sans);
+    fill: var(--accent); opacity: .13; }}
+  .cover-contested {{ border-top-color: var(--alert); }}
+  .cover-contested .st {{ stroke: var(--alert); }}
+  .cover-contested .hl, .cover-contested .stt {{ fill: var(--alert); }}
+  .story-media-wrap.cover {{ aspect-ratio: 16 / 10; }}
+  .story.feature .story-media-wrap.cover {{ aspect-ratio: 16 / 8; }}
+  @media (hover: hover) and (pointer: fine) {{ .story:hover .cover svg, .hero:hover .cover svg {{ transform: scale(1.04); }} }}
+
+  /* The lead sits on an ink panel: the one dark block on the page, so the eye lands there first */
+  .hero {{ --ink: #1B1710; background: var(--ink); color: #EFE5CB; padding: clamp(1rem, 2vw, 1.75rem); }}
+  @media (prefers-color-scheme: dark) {{ .hero {{ --ink: #241F14; }} }}
+  .hero .hook {{ color: rgba(239,229,203,.78); }}
+  .hero .when {{ color: rgba(239,229,203,.7); }}
+  .hero .status.developing {{ color: #D2AA6D; border-color: #D2AA6D; }}
+  .hero .status.confirmed {{ background: #D2AA6D; border-color: #D2AA6D; color: #1B1710; }}
+  .hero .cover {{ background: linear-gradient(160deg, #2A2418, #1B1710); border-top-color: #D2AA6D; }}
+  .hero .cover .ln {{ fill: #EFE5CB; opacity: .22; }}
+  .hero .cover .rd {{ fill: #EFE5CB; opacity: .8; }}
+  .hero .cover .hl, .hero .cover .ghost, .hero .cover .stt {{ fill: #D2AA6D; }}
+  .hero .cover .st {{ stroke: #D2AA6D; }}
+  @media (hover: hover) and (pointer: fine) {{ a.hero:hover h2 {{ color: #D2AA6D; }} }}
 .sentinel {{ height: 3rem; margin-top: 1.5rem; }}
   .sentinel.loading {{ background: linear-gradient(90deg, transparent, var(--line), transparent) 0 50% / 40% 2px no-repeat;
     animation: sweep 1s linear infinite; }}
@@ -259,6 +289,29 @@ def _media_url(item):
     return None, None
 
 
+def _cover(label, cls, seed=0):
+    """Generated 'dossier' art for a story with no reel or carousel: ruled document lines, some blacked out, one
+    highlighted claim, a status stamp, the Malayalam wordmark ghosted behind. Seeded by the story id so each story gets its
+    own stable composition. Theme colours come from CSS variables; decorative only (the headline carries the meaning)."""
+    import random
+    r = random.Random(seed * 7919 + 13)
+    rows, hl = [], r.randrange(2, 7)
+    for i in range(9):
+        y = 11 + i * 9.2
+        w = r.randint(48, 128)
+        kind = "hl" if i == hl else ("rd" if r.random() < .28 else "ln")
+        rows.append(f'<rect class="{kind}" x="10" y="{y:.1f}" width="{w}" height="4.2" rx="1"/>')
+        if kind == "ln" and r.random() < .5:
+            rows.append(f'<rect class="ln" x="{10 + w + 4}" y="{y:.1f}" width="{r.randint(8, 22)}" height="4.2" rx="1"/>')
+    cx, cy, rot = r.randint(112, 140), r.randint(58, 82), r.randint(-22, 14)
+    stamp = (f'<g transform="rotate({rot} {cx} {cy})"><circle class="st" cx="{cx}" cy="{cy}" r="19"/>'
+             f'<circle class="st thin" cx="{cx}" cy="{cy}" r="15.5"/>'
+             f'<text class="stt" x="{cx}" y="{cy + 2.2}" text-anchor="middle">{_esc(label.upper())}</text></g>')
+    svg = (f'<svg viewBox="0 0 160 100" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg" focusable="false">'
+           f'<text class="ghost" x="6" y="88" lang="ml">തെളിവ്</text>{"".join(rows)}{stamp}</svg>')
+    return f'<div class="{cls} cover cover-{_esc(label.lower(), True)}" aria-hidden="true">{svg}</div>'
+
+
 def _hero_html(item, contact_handle):
     parsed = _parsed(item, contact_handle)
     if not parsed:
@@ -276,8 +329,10 @@ def _hero_html(item, contact_handle):
             f'<div class="hero-media-wrap"><img class="hero-media" src="{url}" '
             f'alt="{_esc(article.title, True)}"></div>'
         )
+    if not media:
+        media = _cover(article.confidence_label, "hero-media-wrap", item.get("id") or 0)
     return (
-        f'<a class="hero{"" if media else " textonly"}" href="/a/{slug}">{media}'
+        f'<a class="hero" href="/a/{slug}">{media}'
         f'<div class="hero-body">'
         f'<p class="meta">{status_block(article.confidence_label, date)}</p>'
         f'<h2>{_esc(article.title)}</h2>'
@@ -305,6 +360,8 @@ def _story_html(item, contact_handle):
     elif tier != "compact" and kind == "img":
         media = f'<div class="story-media-wrap"><img class="story-media" src="{url}" loading="lazy" alt="{_esc(article.title, True)}"></div>'
 
+    if not media and tier != "compact":
+        media = _cover(article.confidence_label, "story-media-wrap", item.get("id") or 0)
     meta = f'<p class="meta">{status_block(article.confidence_label, date)}</p>'
     heading = f'<h3>{_esc(article.title)}</h3>'
     hook = f'<p class="hook">{_esc(article.hook)}</p>' if tier != "compact" else ""
@@ -323,6 +380,17 @@ def _rail_html(item, contact_handle):
         f'<a class="rail-item" href="/a/{slug}"><p class="meta">{status_block(article.confidence_label, date)}</p>'
         f'<h3>{_esc(article.title)}</h3></a>'
     )
+
+
+def _lead_index(items, contact_handle, window=6):
+    """The lead: the newest titled story that has media among the first `window`, so the top of the page is never a
+    blank panel when a nearby story has a video or image. Falls back to the newest titled story."""
+    first = _first_titled_index(items, contact_handle)
+    for i, it in enumerate(items[:window]):
+        kind, _ = _media_url(it)
+        if kind and (i == first or (_parsed(it, contact_handle) or [None])[0] and _parsed(it, contact_handle)[0].title):
+            return i
+    return first
 
 
 def _first_titled_index(items, contact_handle):
@@ -395,7 +463,7 @@ def render_feed(items, contact_handle, channel_url="", page=1, has_more=False, s
         body = (f'<a class="backlink" href="/">&larr; Latest stories</a><h2 class="section-label">Older &middot; page {page}</h2><div class="feed">\n' + "\n".join(grid) + "\n</div>" + pager) if grid else empty
         return _PAGE.format(base_css=BASE_CSS, footer_social=_footer_social(socials), masthead=mast, body=body)
 
-    hero_idx = _first_titled_index(items, contact_handle)
+    hero_idx = _lead_index(items, contact_handle)
     hero_html = _hero_html(items[hero_idx], contact_handle)
     rest_items = items[:hero_idx] + items[hero_idx + 1:]
     rail = [r for r in (_rail_html(i, contact_handle) for i in rest_items[:4]) if r]
