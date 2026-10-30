@@ -207,7 +207,7 @@ def _hero_html(item, contact_handle):
     if kind == "video":
         media = (
             f'<div class="hero-media-wrap"><video class="hero-media" muted loop playsinline autoplay '
-            f'preload="metadata" controls><source src="{url}" type="video/mp4"></video></div>'
+            f'preload="metadata" controls><source src="{url}#t=0.1" type="video/mp4"></video></div>'
         )
     elif kind == "img":
         media = (
@@ -238,7 +238,7 @@ def _story_html(item, contact_handle):
     if tier != "compact" and kind == "video":
         media = (
             f'<div class="story-media-wrap"><video class="story-media" muted loop playsinline autoplay preload="metadata">'
-            f'<source src="{url}" type="video/mp4"></video></div>'
+            f'<source src="{url}#t=0.1" type="video/mp4"></video></div>'
         )
     elif tier != "compact" and kind == "img":
         media = f'<div class="story-media-wrap"><img class="story-media" src="{url}" loading="lazy" alt="{_esc(article.title, True)}"></div>'
