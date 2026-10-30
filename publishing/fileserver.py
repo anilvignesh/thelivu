@@ -33,7 +33,14 @@ def _make_handler(slides_dir):
                     from publishing.feedpage import render_feed
                     from shared.config import CHANNEL_PUBLIC_URL, CONTACT_HANDLE
                     from shared.db import get_feed_items
-                    page = render_feed(get_feed_items(), CONTACT_HANDLE, CHANNEL_PUBLIC_URL).encode("utf-8")
+                    from urllib.parse import parse_qs, urlsplit
+                    try:
+                        pg = max(1, min(int(parse_qs(urlsplit(self.path).query).get("page", ["1"])[0]), 500))
+                    except ValueError:
+                        pg = 1
+                    size = 30
+                    rows = get_feed_items(size + 1, (pg - 1) * size)  # one extra row says whether an older page exists
+                    page = render_feed(rows[:size], CONTACT_HANDLE, CHANNEL_PUBLIC_URL, pg, len(rows) > size).encode("utf-8")
                 except Exception as e:
                     log.error("Feed page render failed: %s", e)
                     self.send_response(500)

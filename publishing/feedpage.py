@@ -123,6 +123,16 @@ _PAGE = """<!DOCTYPE html>
     .story.feature {{ grid-column: auto; }}
   }}
 
+  .pager {{ display: flex; justify-content: center; gap: 1rem; margin-top: 2.5rem; font-family: var(--sans); }}
+  .pager a {{ font-weight: 700; font-size: .9rem; padding: .7rem 1.4rem; border: 1.5px solid var(--accent); color: var(--accent);
+    text-decoration: none; transition: background 160ms ease, color 160ms ease, transform 160ms var(--ease-out); }}
+  .pager a:active {{ transform: scale(.97); }}
+  @media (hover: hover) and (pointer: fine) {{ .pager a:hover {{ background: var(--accent); color: var(--on-accent); }} }}
+.sentinel {{ height: 3rem; margin-top: 1.5rem; }}
+  .sentinel.loading {{ background: linear-gradient(90deg, transparent, var(--line), transparent) 0 50% / 40% 2px no-repeat;
+    animation: sweep 1s linear infinite; }}
+  @keyframes sweep {{ from {{ background-position: -40% 50%; }} to {{ background-position: 140% 50%; }} }}
+  .end {{ text-align: center; margin-top: 2.5rem; font: 600 .78rem var(--sans); letter-spacing: .2em; text-transform: uppercase; color: var(--dim); }}
   .empty {{ font-style: italic; color: var(--dim); padding: 3rem 0; }}
   footer {{ margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--line); font-family: var(--sans); font-size: .78rem; color: var(--dim); }}
   footer a {{ color: var(--accent); }}
@@ -141,22 +151,68 @@ _PAGE = """<!DOCTYPE html>
   if (bar && mast && 'IntersectionObserver' in window) {{
     new IntersectionObserver(function(e) {{ bar.classList.toggle('show', !e[0].isIntersecting); }}).observe(mast);
   }}
-  var rev = document.querySelectorAll('.reveal');
+  var ro, rev = document.querySelectorAll('.reveal');
   if ('IntersectionObserver' in window) {{
-    var ro = new IntersectionObserver(function(es) {{
+    ro = new IntersectionObserver(function(es) {{
       es.forEach(function(e) {{ if (e.isIntersecting) {{ e.target.classList.add('in'); ro.unobserve(e.target); }} }});
     }}, {{rootMargin: '0px 0px -8% 0px'}});
     rev.forEach(function(r, i) {{ r.style.transitionDelay = (i % 4) * 60 + 'ms'; ro.observe(r); }});
   }} else {{ rev.forEach(function(r) {{ r.classList.add('in'); }}); }}
   setTimeout(function() {{ rev.forEach(function(r) {{ r.classList.add('in'); }}); }}, 2500);
+  var feed = document.querySelector('.feed'), nextLink = document.querySelector('.pager a[rel=next]');
   var fl = document.querySelector('.filters');
+  function applyFilter(st) {{
+    var on = fl && fl.querySelector('.chip[aria-pressed=true]');
+    st.hidden = !!on && on.dataset.f !== 'all' && st.dataset.status !== on.dataset.f;
+  }}
+  function recount() {{
+    if (!fl) return;
+    var all = document.querySelectorAll('.feed .story');
+    fl.querySelectorAll('.chip').forEach(function(c) {{
+      var n = c.dataset.f === 'all' ? all.length : document.querySelectorAll('.feed .story[data-status="' + c.dataset.f + '"]').length;
+      c.querySelector('.n').textContent = n;
+    }});
+  }}
+  /* infinite scroll: each page is still a real /?page=N URL (crawlers, no-JS), this just fetches the next one early */
+  if (feed && nextLink && 'IntersectionObserver' in window && window.fetch) {{
+    var pager = nextLink.closest('.pager'), busy = false;
+    var sentinel = document.createElement('div'); sentinel.className = 'sentinel'; sentinel.setAttribute('aria-hidden', 'true');
+    pager.parentNode.insertBefore(sentinel, pager);
+    pager.hidden = true;
+    var more = new IntersectionObserver(function(es) {{ if (es[0].isIntersecting) loadMore(); }}, {{rootMargin: '0px 0px 900px 0px'}});
+    function done() {{
+      more.disconnect(); sentinel.className = 'end'; sentinel.removeAttribute('aria-hidden'); sentinel.textContent = 'You are up to date';
+    }}
+    function loadMore() {{
+      if (busy || !nextLink) return;
+      busy = true; sentinel.className = 'sentinel loading';
+      fetch(nextLink.getAttribute('href'), {{credentials: 'same-origin'}}).then(function(r) {{
+        if (!r.ok) throw 0; return r.text();
+      }}).then(function(t) {{
+        var d = new DOMParser().parseFromString(t, 'text/html');
+        d.querySelectorAll('.feed .story').forEach(function(n) {{
+          n = document.importNode(n, true); applyFilter(n); feed.appendChild(n);
+          if (ro) ro.observe(n); else n.classList.add('in');
+        }});
+        recount();
+        nextLink = d.querySelector('.pager a[rel=next]');
+        if (!nextLink) done();
+      }}).catch(function() {{ pager.hidden = false; more.disconnect(); }})
+        .then(function() {{
+          busy = false;
+          if (nextLink) {{ sentinel.className = 'sentinel'; more.unobserve(sentinel); more.observe(sentinel); }}  // re-arm: fires again if still in range
+        }});
+    }}
+    more.observe(sentinel);
+  }}
+
   if (fl) {{
     fl.hidden = false;
     fl.addEventListener('click', function(ev) {{
       var b = ev.target.closest('.chip'); if (!b) return;
       fl.querySelectorAll('.chip').forEach(function(c) {{ c.setAttribute('aria-pressed', c === b ? 'true' : 'false'); }});
       document.querySelectorAll('.feed .story').forEach(function(st) {{
-        st.hidden = b.dataset.f !== 'all' && st.dataset.status !== b.dataset.f;
+        applyFilter(st);
       }});
     }});
   }}
@@ -184,7 +240,8 @@ def _parsed(item, contact_handle):
     except Exception:
         return None
     slug = item.get("slug") or make_slug(item["id"], article.title)
-    date = str(item["updated_at"])[:10] if item.get("updated_at") else ""
+    stamp = item.get("published_at") or item.get("updated_at")
+    date = str(stamp)[:10] if stamp else ""
     return article, slug, date or "recently"
 
 
@@ -278,6 +335,15 @@ def _first_titled_index(items, contact_handle):
     return 0
 
 
+def _pager(page, has_more):
+    links = []
+    if page > 1:
+        links.append(f'<a href="{"/" if page == 2 else f"/?page={page - 1}"}">&larr; Newer</a>')
+    if has_more:
+        links.append(f'<a rel="next" href="/?page={page + 1}">Older stories &rarr;</a>')
+    return f'<nav class="pager">{" ".join(links)}</nav>' if links else ""
+
+
 def _masthead(channel_url):
     import datetime
     today = datetime.date.today().strftime("%A, %d %B %Y")
@@ -309,13 +375,19 @@ def _filters(items, contact_handle):
     return '<div class="filters" role="group" aria-label="Filter by status" hidden>' + "".join(chips) + '</div>'
 
 
-def render_feed(items, contact_handle, channel_url=""):
+def render_feed(items, contact_handle, channel_url="", page=1, has_more=False):
     """items: rows from shared.db.get_feed_items(), newest first. The first item with a usable title is the lead; the next
     four fill the Latest rail beside it; everything after is a card grid tiered by confidence."""
     mast = _masthead(channel_url)
+    pager = _pager(page, has_more)
     empty = '<p class="empty">First stories coming soon.</p>'
     if not items:
         return _PAGE.format(base_css=BASE_CSS, masthead=mast, body=empty)
+
+    if page > 1:  # later pages are just the grid, no lead or rail
+        grid = [g for g in (_story_html(i, contact_handle) for i in items) if g]
+        body = (f'<h2 class="section-label">Page {page}</h2><div class="feed">\n' + "\n".join(grid) + "\n</div>" + pager) if grid else empty
+        return _PAGE.format(base_css=BASE_CSS, masthead=mast, body=body)
 
     hero_idx = _first_titled_index(items, contact_handle)
     hero_html = _hero_html(items[hero_idx], contact_handle)
@@ -331,4 +403,4 @@ def render_feed(items, contact_handle, channel_url=""):
         parts.append('<h2 class="section-label">More reporting</h2>')
         parts.append(_filters(rest_items[4:], contact_handle))
         parts.append('<div class="feed">\n' + "\n".join(grid) + "\n</div>")
-    return _PAGE.format(base_css=BASE_CSS, masthead=mast, body="\n".join(parts) or empty)
+    return _PAGE.format(base_css=BASE_CSS, masthead=mast, body="\n".join(parts) + pager if parts else empty)

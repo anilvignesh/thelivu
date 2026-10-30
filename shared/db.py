@@ -3166,9 +3166,11 @@ FEED_VIDEO_KEEP = 12
 _FEED_REELS_SQL = """SELECT x FROM (
         SELECT (SELECT rl.id FROM reels rl WHERE rl.run_id = r.id AND rl.status IN ('ready', 'posted')
                 ORDER BY rl.id DESC LIMIT 1) AS x
-        FROM pipeline_runs r JOIN publications p ON p.run_id = r.id
+        FROM pipeline_runs r
+        JOIN (SELECT run_id, MAX(published_at) AS published_at
+              FROM publications GROUP BY run_id) p ON p.run_id = r.id
         WHERE r.status = 'published' AND r.draft_text IS NOT NULL
-        ORDER BY r.updated_at DESC LIMIT %d) t WHERE x IS NOT NULL""" % FEED_VIDEO_KEEP
+        ORDER BY p.published_at DESC, r.id DESC LIMIT %d) t WHERE x IS NOT NULL""" % FEED_VIDEO_KEEP
 
 
 def release_posted_reel_bytes(older_than_days=2):
@@ -3428,7 +3430,7 @@ def get_run_by_slug(slug):
         conn.close()
 
 
-def get_feed_items(limit=30):
+def get_feed_items(limit=30, offset=0):
     """Published stories for the public homepage feed (see publishing/feedpage.py):
     id, slug, draft_text (parsed client-side via publishing.parser for title/hook/
     confidence), updated_at, plus each story's most recent posted carousel (for a
@@ -3442,7 +3444,7 @@ def get_feed_items(limit=30):
         cur = conn.cursor()
         ph = "%s" if _is_postgres() else "?"
         cur.execute(f"""
-            SELECT r.id, r.slug, r.draft_text, r.updated_at,
+            SELECT r.id, r.slug, r.draft_text, r.updated_at, p.published_at,
                    (SELECT cr.id FROM carousel_runs cr
                     WHERE cr.run_id = r.id AND cr.status IN ('posted', 'approved_manual')
                     ORDER BY cr.id DESC LIMIT 1) AS carousel_id,
@@ -3451,11 +3453,12 @@ def get_feed_items(limit=30):
                       AND rl.mp4 IS NOT NULL
                     ORDER BY rl.id DESC LIMIT 1) AS reel_id
             FROM pipeline_runs r
-            JOIN publications p ON p.run_id = r.id
+            JOIN (SELECT run_id, MAX(published_at) AS published_at
+                  FROM publications GROUP BY run_id) p ON p.run_id = r.id
             WHERE r.status = 'published' AND r.draft_text IS NOT NULL
-            ORDER BY r.updated_at DESC
-            LIMIT {ph}
-        """, (limit,))
+            ORDER BY p.published_at DESC, r.id DESC
+            LIMIT {ph} OFFSET {ph}
+        """, (limit, offset))
         return _fetchall(cur)
     finally:
         conn.close()
