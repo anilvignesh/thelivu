@@ -44,9 +44,14 @@ _PAGE = """<!DOCTYPE html>
   .mast-top {{ display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;
     font-family: var(--sans); font-size: .78rem; color: var(--dim); padding-bottom: .9rem; }}
   .mast-top .dateline {{ letter-spacing: .08em; text-transform: uppercase; font-weight: 600; }}
-  .mast h1 {{ font-size: clamp(2.6rem, 9vw, 6rem); font-weight: 800; letter-spacing: .18em; text-transform: uppercase;
-    line-height: 1; text-align: center; color: var(--accent); }}
-  .mast h1 a {{ color: inherit; text-decoration: none; }}
+  .mast h1 {{ text-align: center; color: var(--accent); line-height: 1; font-weight: 800; }}
+  .mast h1 a {{ color: inherit; text-decoration: none; display: flex; flex-direction: column; align-items: center; gap: .5rem; }}
+  .mast .ml {{ font-family: 'Noto Sans Malayalam', 'Manjari', 'Malayalam MN', 'Kartika', 'Nirmala UI', var(--sans); font-weight: 800;
+    font-size: clamp(3.4rem, 11vw, 7.5rem); line-height: 1.25; letter-spacing: 0; }}
+  .mast .en {{ font-family: var(--sans); font-weight: 600; font-size: clamp(.95rem, 2.2vw, 1.4rem); letter-spacing: .5em;
+    text-transform: uppercase; padding-left: .5em; color: var(--fg); }}
+  .nav {{ display: flex; gap: 1.25rem; flex-wrap: wrap; justify-content: center; }}
+  .navlink {{ color: var(--accent); font-weight: 700; text-decoration: none; letter-spacing: .04em; }}
   .mast-sub {{ display: flex; justify-content: center; margin-top: .8rem; font-family: var(--sans); font-size: .9rem;
     color: var(--dim); text-align: center; }}
   .channel {{ font-family: var(--sans); font-size: .82rem; font-weight: 700; letter-spacing: .04em; color: var(--on-accent);
@@ -143,7 +148,7 @@ _PAGE = """<!DOCTYPE html>
 <div id="top"></div>
 {masthead}
 {body}
-<footer>Every story fact-checked before it reaches you &middot; <a href="/bio">link in bio</a></footer>
+<footer>Every story fact-checked before it reaches you &middot; <a href="/sources">our sources</a>{footer_social} &middot; <a href="/bio">link in bio</a></footer>
 <script>
 (function() {{
   document.documentElement.classList.add('js');
@@ -344,16 +349,17 @@ def _pager(page, has_more):
     return f'<nav class="pager">{" ".join(links)}</nav>' if links else ""
 
 
-def _masthead(channel_url):
+def _footer_social(socials):
+    return "".join(f' &middot; <a href="{_esc(u, True)}" rel="noopener">{_esc(n)}</a>' for n, u in socials)
+
+
+def _masthead(channel_url, socials=()):
     import datetime
     today = datetime.date.today().strftime("%A, %d %B %Y")
-    action = (
-        f'<a class="channel" href="{_esc(channel_url, True)}">Join the Telegram channel &rarr;</a>'
-        if channel_url else ""
-    )
+    social_links = "".join(f'<a class="navlink" href="{_esc(u, True)}" rel="noopener">{_esc(n)}</a>' for n, u in socials)
     return (
-        f'<header class="mast"><div class="mast-top"><span class="dateline">{today}</span>{action}</div>'
-        f'<h1><a href="/">Thelivu</a></h1>'
+        f'<header class="mast"><div class="mast-top"><span class="dateline">{today}</span><span class="nav"><a class="navlink" href="/sources">Our sources</a>{social_links}</span></div>'
+        f'<h1><a href="/"><span class="ml" lang="ml">തെളിവ്</span><span class="en">Thelivu</span></a></h1>'
         f'<p class="mast-sub">Fact-checked &middot; sourced &middot; reviewed. Every claim verified before it reaches you.</p></header>'
     )
 
@@ -375,19 +381,19 @@ def _filters(items, contact_handle):
     return '<div class="filters" role="group" aria-label="Filter by status" hidden>' + "".join(chips) + '</div>'
 
 
-def render_feed(items, contact_handle, channel_url="", page=1, has_more=False):
+def render_feed(items, contact_handle, channel_url="", page=1, has_more=False, socials=()):
     """items: rows from shared.db.get_feed_items(), newest first. The first item with a usable title is the lead; the next
     four fill the Latest rail beside it; everything after is a card grid tiered by confidence."""
-    mast = _masthead(channel_url)
+    mast = _masthead(channel_url, socials)
     pager = _pager(page, has_more)
     empty = '<p class="empty">First stories coming soon.</p>'
     if not items:
-        return _PAGE.format(base_css=BASE_CSS, masthead=mast, body=empty)
+        return _PAGE.format(base_css=BASE_CSS, footer_social=_footer_social(socials), masthead=mast, body=empty)
 
     if page > 1:  # later pages are just the grid, no lead or rail
         grid = [g for g in (_story_html(i, contact_handle) for i in items) if g]
         body = (f'<a class="backlink" href="/">&larr; Latest stories</a><h2 class="section-label">Older &middot; page {page}</h2><div class="feed">\n' + "\n".join(grid) + "\n</div>" + pager) if grid else empty
-        return _PAGE.format(base_css=BASE_CSS, masthead=mast, body=body)
+        return _PAGE.format(base_css=BASE_CSS, footer_social=_footer_social(socials), masthead=mast, body=body)
 
     hero_idx = _first_titled_index(items, contact_handle)
     hero_html = _hero_html(items[hero_idx], contact_handle)
@@ -403,4 +409,4 @@ def render_feed(items, contact_handle, channel_url="", page=1, has_more=False):
         parts.append('<h2 class="section-label">More reporting</h2>')
         parts.append(_filters(rest_items[4:], contact_handle))
         parts.append('<div class="feed">\n' + "\n".join(grid) + "\n</div>")
-    return _PAGE.format(base_css=BASE_CSS, masthead=mast, body="\n".join(parts) + pager if parts else empty)
+    return _PAGE.format(base_css=BASE_CSS, footer_social=_footer_social(socials), masthead=mast, body="\n".join(parts) + pager if parts else empty)

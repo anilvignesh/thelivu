@@ -140,6 +140,9 @@ _PAGE = """<!DOCTYPE html>
   hr {{ border: none; border-top: 1px solid var(--line); margin: 2rem 0; }}
   article a {{ color: var(--accent); text-underline-offset: 3px; text-decoration-thickness: 1px; }}
   #reading-progress {{ position: fixed; top: 0; left: 0; height: 3px; width: 0%; background: var(--accent); z-index: 10; }}
+  figure.reel-figure {{ margin: 0 auto 2rem; max-width: 22rem; }}
+  figure.reel-figure video {{ display: block; width: 100%; max-height: 78vh; aspect-ratio: 9 / 16; background: var(--line); object-fit: cover; }}
+  figure.reel-figure figcaption {{ font-family: var(--sans); font-size: .78rem; color: var(--dim); margin-top: .5rem; text-align: center; }}
   figure.slide-figure {{ margin: 2rem 0; }}
   figure.slide-figure img {{ display: block; width: 100%; }}
   figure.slide-figure figcaption {{ font-family: var(--sans); font-size: .78rem; color: var(--dim); margin-top: .5rem; }}
@@ -207,7 +210,18 @@ _NOT_FOUND = """<!DOCTYPE html>
 """
 
 
-def render_article(article, published_at=None, slides=None):
+def _reel_figure(reel_id, title):
+    """The story's own reel, playable in place. Only given when the MP4 still exists; no JS needed, tap to play."""
+    if not reel_id:
+        return ""
+    return (
+        f'<figure class="reel-figure"><video controls playsinline preload="metadata" '
+        f'aria-label="{html.escape(title, quote=True)} (video)"><source src="/reel/{int(reel_id)}.mp4#t=0.1" type="video/mp4"></video>'
+        f'<figcaption>The 90-second version</figcaption></figure>'
+    )
+
+
+def render_article(article, published_at=None, slides=None, reel_id=None):
     """article: a publishing.parser.Article from the prepared draft.
     slides: rows from shared.db.get_carousel_slides_for_run(), or None/[] —
     woven into the body as scroll-reveal figures, see _blocks_to_html."""
@@ -222,7 +236,7 @@ def render_article(article, published_at=None, slides=None):
         base_css=BASE_CSS,
         header=header("Article"),
         status=status_block(article.confidence_label, "Published " + (date or "recently")),
-        body=_blocks_to_html(article.blocks, slides),
+        body=_reel_figure(reel_id, article.title) + _blocks_to_html(article.blocks, slides),
     )
 
 

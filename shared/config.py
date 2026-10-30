@@ -81,6 +81,9 @@ CONTACT_HANDLE = os.environ.get("CONTACT_HANDLE", "@Blazedddddd")
 # button at the top of the bio page. Blank until the channel has a public
 # @username — the numeric TELEGRAM_CHANNEL_ID is not a linkable URL.
 CHANNEL_PUBLIC_URL = os.environ.get("CHANNEL_PUBLIC_URL", "")
+# Public profile links shown in the homepage masthead and footer; a link appears only when its variable is set.
+INSTAGRAM_URL = os.environ.get("INSTAGRAM_URL", "")
+YOUTUBE_URL = os.environ.get("YOUTUBE_URL", "")
 
 # --- Optional web search ---
 # Leave blank to use DuckDuckGo (free, no key). Set to use Brave Search.

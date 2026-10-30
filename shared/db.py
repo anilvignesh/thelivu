@@ -2674,6 +2674,35 @@ def get_approved_sources():
         conn.close()
 
 
+def get_playable_reel_id(run_id):
+    """Latest ready/posted reel of a run whose MP4 bytes still exist (see release_posted_reel_bytes), else None."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute("SELECT id FROM reels WHERE run_id = " + ph + " AND status IN ('ready', 'posted') "
+                    "AND mp4 IS NOT NULL ORDER BY id DESC LIMIT 1", (run_id,))
+        row = cur.fetchone()
+        return row[0] if row else None
+    finally:
+        conn.close()
+
+
+def get_public_sources():
+    """What the /sources page shows: name + public link only. `lean`, `notes`, `role` and handles are internal
+    editorial metadata and deliberately never leave this function."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT name, index_url FROM digger_targets WHERE status = 'active' ORDER BY name")
+        records = [{"name": r[0], "url": r[1]} for r in cur.fetchall()]
+        cur.execute("SELECT name, platform FROM approved_sources WHERE status = 'active' ORDER BY tier, name")
+        feeds = [{"name": r[0], "platform": r[1] or ""} for r in cur.fetchall()]
+        return {"records": records, "feeds": feeds}
+    finally:
+        conn.close()
+
+
 def get_pending_runs(desk="news"):
     """Runs awaiting the human gate. Per-desk: each desk has its own queue, and
     mixing them would put an Everyone Knows piece in the news editor's list."""

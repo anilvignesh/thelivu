@@ -31,7 +31,7 @@ def _make_handler(slides_dir):
             if name == "":
                 try:
                     from publishing.feedpage import render_feed
-                    from shared.config import CHANNEL_PUBLIC_URL, CONTACT_HANDLE
+                    from shared.config import CHANNEL_PUBLIC_URL, CONTACT_HANDLE, INSTAGRAM_URL, YOUTUBE_URL
                     from shared.db import get_feed_items
                     from urllib.parse import parse_qs, urlsplit
                     try:
@@ -40,7 +40,8 @@ def _make_handler(slides_dir):
                         pg = 1
                     size = 30
                     rows = get_feed_items(size + 1, (pg - 1) * size)  # one extra row says whether an older page exists
-                    page = render_feed(rows[:size], CONTACT_HANDLE, CHANNEL_PUBLIC_URL, pg, len(rows) > size).encode("utf-8")
+                    page = render_feed(rows[:size], CONTACT_HANDLE, CHANNEL_PUBLIC_URL, pg, len(rows) > size,
+                                       socials=[(n, u) for n, u in (('Instagram', INSTAGRAM_URL), ('YouTube', YOUTUBE_URL)) if u]).encode("utf-8")
                 except Exception as e:
                     log.error("Feed page render failed: %s", e)
                     self.send_response(500)
@@ -70,6 +71,24 @@ def _make_handler(slides_dir):
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(page)))
                 self.send_header("Cache-Control", "public, max-age=86400")
+                self.end_headers()
+                self.wfile.write(page)
+                return
+            # Public sources list: names and links only (see shared.db.get_public_sources).
+            if name == "sources":
+                try:
+                    from publishing.sourcespage import render as render_sources
+                    from shared.db import get_public_sources
+                    page = render_sources(get_public_sources()).encode("utf-8")
+                except Exception as e:
+                    log.error("Sources page render failed: %s", e)
+                    self.send_response(500)
+                    self.end_headers()
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(page)))
+                self.send_header("Cache-Control", "public, max-age=900")
                 self.end_headers()
                 self.wfile.write(page)
                 return
@@ -147,12 +166,16 @@ def _make_handler(slides_dir):
                     from publishing.articlepage import render_article, render_not_found
                     from publishing.parser import parse_article, prepare_for_publish
                     from shared.config import CONTACT_HANDLE
-                    from shared.db import get_run_by_slug, get_carousel_slides_for_run
+                    from shared.db import get_run_by_slug, get_carousel_slides_for_run, get_playable_reel_id
                     run = get_run_by_slug(name[2:])
                     if run and run.get("status") == "published" and run.get("draft_text"):
                         article = parse_article(prepare_for_publish(run["draft_text"], CONTACT_HANDLE))
                         slides = get_carousel_slides_for_run(run["id"])
-                        page, code = render_article(article, run.get("updated_at"), slides).encode("utf-8"), 200
+                        try:
+                            reel_id = get_playable_reel_id(run["id"])
+                        except Exception:
+                            reel_id = None  # a missing video must never take the article down
+                        page, code = render_article(article, run.get("updated_at"), slides, reel_id).encode("utf-8"), 200
                     else:
                         page, code = render_not_found().encode("utf-8"), 404
                 except Exception as e:
