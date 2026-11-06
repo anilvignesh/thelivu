@@ -420,6 +420,12 @@ def run_once():
                          freed)
         except Exception as e:                              # noqa: BLE001
             log.info("could not release reel blobs: %s", e)
+        # Old stories lost their video; borrow Instagram's thumbnail so they keep an image.
+        try:
+            from publishing.poster_backfill import run as _poster_backfill
+            _poster_backfill()
+        except Exception as e:                              # noqa: BLE001
+            log.info("poster backfill skipped: %s", e)
 
 
 # The voice server holds 4.7GB — 39% of this box — and is idle almost all of the
