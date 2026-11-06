@@ -217,6 +217,19 @@ def _make_handler(slides_dir):
                     self.send_response(404); self.end_headers(); return
                 self._serve_bytes(data, "video/mp4")
                 return
+            m = re.match(r"^reel/(\d+)\.jpg$", name)
+            if m:
+                from shared.db import get_reel_poster
+                data = get_reel_poster(int(m.group(1)))
+                if data is None:
+                    self.send_response(404); self.end_headers(); return
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Cache-Control", "public, max-age=86400")
+                self.end_headers()
+                self.wfile.write(data)
+                return
 
             # Bare filename only, inside slides_dir — no path traversal, no
             # directory listing, nothing else on disk is reachable. Serve PNG

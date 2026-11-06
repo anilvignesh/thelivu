@@ -284,6 +284,8 @@ def _media_url(item):
     """(tag, url) — 'video'/'img'/None. None means no media exists for this story."""
     if item.get("reel_id"):
         return "video", f'/reel/{item["reel_id"]}.mp4'
+    if item.get("poster_id"):
+        return "img", f'/reel/{item["poster_id"]}.jpg'
     if item.get("carousel_id"):
         return "img", f'/carousel_{item["carousel_id"]}_1.jpg'
     return None, None

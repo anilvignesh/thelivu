@@ -1341,7 +1341,10 @@ def init_db():
                               # (the only renderer that exists today) so every
                               # already-posted reel backfills as a valid,
                               # comparable data point rather than NULL.
-                              ("presentation_style", "TEXT DEFAULT 'static'")]:
+                              ("presentation_style", "TEXT DEFAULT 'static'"),
+                              # Permanent ~40KB still frame; outlives the MP4 blob so
+                              # old stories keep a real image on the homepage.
+                              ("poster", "BYTEA")]:
                 try:
                     cur.execute(f"ALTER TABLE reels ADD COLUMN {col} {defn}")
                     conn.commit()
@@ -1399,7 +1402,8 @@ def init_db():
             for col, defn in [("notes", "TEXT"),
                               ("youtube_video_id", "TEXT"), ("youtube_permalink", "TEXT"),
                               ("youtube_posted_at", "TEXT"),
-                              ("presentation_style", "TEXT DEFAULT 'static'")]:
+                              ("presentation_style", "TEXT DEFAULT 'static'"),
+                              ("poster", "BLOB")]:
                 try:
                     cur.execute(f"ALTER TABLE reels ADD COLUMN {col} {defn}")
                 except Exception:
@@ -3039,6 +3043,76 @@ def get_carousel_run(carousel_id):
         conn.close()
 
 
+def make_reel_poster(mp4_bytes, at_sec=1.5, width=540):
+    """One JPEG still from an MP4, or None. Best-effort: needs ffmpeg on PATH (the render worker has it)
+    and must never stop a reel from being saved."""
+    import os, shutil, subprocess, tempfile
+    if not mp4_bytes or not shutil.which("ffmpeg"):
+        return None
+    d = tempfile.mkdtemp(prefix="poster_")
+    try:
+        src, out = os.path.join(d, "in.mp4"), os.path.join(d, "out.jpg")
+        with open(src, "wb") as f:
+            f.write(mp4_bytes)
+        for t in (at_sec, 0):
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", str(t), "-i", src, "-frames:v", "1",
+                            "-vf", f"scale={width}:-2", "-q:v", "6", out],
+                           capture_output=True, timeout=60)
+            if os.path.exists(out) and os.path.getsize(out) > 1000:
+                with open(out, "rb") as f:
+                    return f.read()
+        return None
+    except Exception:
+        return None
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def _store_poster(cur, reel_id, jpeg):
+    ph = "%s" if _is_postgres() else "?"
+    if _is_postgres():
+        import psycopg2 as _pg
+        blob = _pg.Binary(jpeg)
+    else:
+        import sqlite3 as _sq
+        blob = _sq.Binary(jpeg)
+    cur.execute(f"UPDATE reels SET poster = {ph} WHERE id = {ph}", (blob, reel_id))
+
+
+def backfill_reel_posters(limit=40):
+    """Make a poster for every reel that still has its MP4 but no poster. Run before the MP4s are released.
+    Returns how many were made."""
+    conn = _conn()
+    made = 0
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM reels WHERE mp4 IS NOT NULL AND poster IS NULL ORDER BY id DESC LIMIT %d" % int(limit))
+        ids = [r[0] for r in cur.fetchall()]
+        for rid in ids:
+            data = get_reel_bytes(rid)
+            jpeg = make_reel_poster(data) if data else None
+            if jpeg:
+                _store_poster(cur, rid, jpeg)
+                conn.commit()
+                made += 1
+        return made
+    finally:
+        conn.close()
+
+
+def get_reel_poster(reel_id):
+    """The still frame for a reel as JPEG bytes. None if absent."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        ph = "%s" if _is_postgres() else "?"
+        cur.execute("SELECT poster FROM reels WHERE id = " + ph, (reel_id,))
+        row = cur.fetchone()
+        return bytes(row[0]) if row and row[0] is not None else None
+    finally:
+        conn.close()
+
+
 def save_reel(run_id, mp4_bytes, caption, kind="narrated", notes=None, presentation_style=None):
     """Store a locally-generated reel MP4 in the DB so the Railway fileserver can
     serve it at a public URL for Instagram to fetch (Piper/ffmpeg run on Anil's
@@ -3073,6 +3147,13 @@ def save_reel(run_id, mp4_bytes, caption, kind="narrated", notes=None, presentat
         else:
             rid = cur.lastrowid
         conn.commit()
+        jpeg = make_reel_poster(mp4_bytes)
+        if jpeg:
+            try:
+                _store_poster(cur, rid, jpeg)
+                conn.commit()
+            except Exception:
+                conn.rollback()
         return rid
     finally:
         conn.close()
@@ -3221,6 +3302,10 @@ def release_posted_reel_bytes(older_than_days=2):
     is still awaiting posting is touched, and the grace period exists so a reel
     posted minutes ago is still servable if the platform re-fetches it.
     """
+    try:
+        backfill_reel_posters()   # keep a still before the video goes
+    except Exception:
+        pass
     conn = _conn()
     try:
         cur = conn.cursor()
@@ -3480,7 +3565,11 @@ def get_feed_items(limit=30, offset=0):
                    (SELECT rl.id FROM reels rl
                     WHERE rl.run_id = r.id AND rl.status IN ('ready', 'posted')
                       AND rl.mp4 IS NOT NULL
-                    ORDER BY rl.id DESC LIMIT 1) AS reel_id
+                    ORDER BY rl.id DESC LIMIT 1) AS reel_id,
+                   (SELECT rl.id FROM reels rl
+                    WHERE rl.run_id = r.id AND rl.status IN ('ready', 'posted')
+                      AND rl.poster IS NOT NULL
+                    ORDER BY rl.id DESC LIMIT 1) AS poster_id
             FROM pipeline_runs r
             JOIN (SELECT run_id, MAX(published_at) AS published_at
                   FROM publications GROUP BY run_id) p ON p.run_id = r.id
