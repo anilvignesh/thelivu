@@ -2700,7 +2700,7 @@ def get_public_sources():
         cur = conn.cursor()
         cur.execute("SELECT name, index_url FROM digger_targets WHERE status = 'active' ORDER BY name")
         records = [{"name": r[0], "url": r[1]} for r in cur.fetchall()]
-        cur.execute("SELECT name, platform FROM approved_sources WHERE status = 'active' ORDER BY tier, name")
+        cur.execute("SELECT name, platform FROM approved_sources WHERE status = 'active' AND LOWER(COALESCE(platform, '')) NOT IN ('x', 'twitter') ORDER BY tier, name")
         feeds = [{"name": r[0], "platform": r[1] or ""} for r in cur.fetchall()]
         return {"records": records, "feeds": feeds}
     finally:

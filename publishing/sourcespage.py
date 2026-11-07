@@ -52,7 +52,7 @@ def render(sources):
         f'<li><a href="{esc(r["url"], True)}" rel="noopener">{esc(r["name"])}</a><small>{esc(_host(r["url"]))}</small></li>'
         for r in sources["records"] if str(r["url"]).startswith(("http://", "https://")))
     feeds = "".join(
-        f'<li><span class="n">{esc(f["name"])}</span>' + (f'<small>{esc(f["platform"])}</small>' if f["platform"] else "") + "</li>"
+        f'<li><span class="n">{esc(f["name"])}</span>' + (f'<small>{esc(f["platform"])}</small>' if f["platform"] and f["platform"].lower() != "web" else "") + "</li>"
         for f in sources["feeds"])
     return _PAGE.format(base_css=BASE_CSS, header=header(), records=records or "<li>None listed yet.</li>",
                         feeds=feeds or "<li>None listed yet.</li>",
