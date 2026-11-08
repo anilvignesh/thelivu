@@ -13,15 +13,35 @@ log = logging.getLogger("poster_backfill")
 
 
 def _candidates(limit):
+    """(reel_id, [media ids to try]) for posted reels with no poster and no MP4. The id stored on the reel can be a
+    stale container id, so the ids Instagram itself listed for that run (ig_media, synced from the account) come first."""
     from shared.db import _conn
     conn = _conn()
     try:
         cur = conn.cursor()
-        cur.execute("SELECT id, ig_media_id FROM reels WHERE poster IS NULL AND mp4 IS NULL "
-                    "AND ig_media_id IS NOT NULL AND status = 'posted' ORDER BY id DESC LIMIT %d" % int(limit))
-        return [(r[0], r[1]) for r in cur.fetchall()]
+        cur.execute("SELECT id, run_id, ig_media_id FROM reels WHERE poster IS NULL AND mp4 IS NULL "
+                    "AND status = 'posted' ORDER BY id DESC LIMIT %d" % int(limit))
+        reels = cur.fetchall()
+        out = []
+        for rid, run_id, own in reels:
+            ids = []
+            if run_id is not None:
+                ph = "%s" if _is_pg() else "?"
+                cur.execute("SELECT media_id FROM ig_media WHERE run_id = " + ph +
+                            " AND (product_type = 'REELS' OR media_type = 'VIDEO') ORDER BY seen_at DESC", (run_id,))
+                ids += [r[0] for r in cur.fetchall()]
+            if own and own not in ids:
+                ids.append(own)
+            if ids:
+                out.append((rid, ids))
+        return out
     finally:
         conn.close()
+
+
+def _is_pg():
+    from shared.db import _is_postgres
+    return _is_postgres()
 
 
 def _thumbnail(media_id):
@@ -40,9 +60,13 @@ def run(limit=30):
     from shared.db import _conn, _store_poster
     stored = 0
     todo = _candidates(limit)
-    for reel_id, media_id in todo:
+    for reel_id, media_ids in todo:
         try:
-            jpeg = _thumbnail(media_id)
+            jpeg = None
+            for media_id in media_ids:
+                jpeg = _thumbnail(media_id)
+                if jpeg:
+                    break
             if jpeg:
                 conn = _conn()
                 try:
@@ -52,7 +76,7 @@ def run(limit=30):
                     conn.close()
                 stored += 1
         except Exception as e:  # noqa: BLE001
-            log.info("no thumbnail for reel %s (%s): %s", reel_id, media_id, e)
+            log.info("no thumbnail for reel %s (%s): %s", reel_id, media_ids, e)
     log.info("poster backfill: %d stored of %d tried", stored, len(todo))
     return stored, len(todo)
 
